@@ -19,9 +19,9 @@ describe("batchDownloads", () => {
 
   it("queues existing items as a raw backend batch job", async () => {
     const result = await queueBatchDownloads(
-      "Scene",
-      [{ id: 4, title: "Existing Scene", urls: ["https://example.com/watch/4"], files: [] }],
-      { scrapeScenes: true, allowDuplicateDownloads: true, generate: { thumbnails: true } },
+      "Video",
+      [{ id: 4, title: "Existing Video", urls: ["https://example.com/watch/4"], files: [] }],
+      { scrapeVideos: true, allowDuplicateDownloads: true, generate: { thumbnails: true } },
     );
 
     expect(result).toEqual({ jobId: "job-1", queuedCount: 1, issues: [] });
@@ -30,13 +30,13 @@ describe("batchDownloads", () => {
         {
           url: "https://example.com/watch/4",
           sourceUrl: undefined,
-          entity: "Scene",
+          entity: "Video",
           entityId: 4,
-          label: "Existing Scene",
+          label: "Existing Video",
         },
       ],
       followUp: expect.objectContaining({
-        scrapeScenes: true,
+        scrapeVideos: true,
         allowDuplicateDownloads: true,
         generate: expect.objectContaining({ thumbnails: true }),
       }),
@@ -73,9 +73,9 @@ describe("batchDownloads", () => {
 
   it("queues imported urls for server-side placeholder creation", async () => {
     const result = await queueImportedUrlDownloads(
-      "Scene",
+      "Video",
       ["https://example.com/path/free-nature-images.jpg"],
-      { scrapeScenes: true },
+      { scrapeVideos: true },
     );
 
     expect(result).toEqual({ jobId: "job-1", queuedCount: 1, issues: [] });
@@ -83,14 +83,14 @@ describe("batchDownloads", () => {
       items: [
         {
           url: "https://example.com/path/free-nature-images.jpg",
-          entity: "Scene",
+          entity: "Video",
           label: "free nature images jpg",
           title: "free nature images jpg",
           createEntityIfMissing: true,
         },
       ],
       followUp: expect.objectContaining({
-        scrapeScenes: true,
+        scrapeVideos: true,
         allowDuplicateDownloads: false,
         generate: expect.any(Object),
       }),
@@ -100,9 +100,9 @@ describe("batchDownloads", () => {
 
   it("keeps duplicate imported URL lines for server-side skip logging", async () => {
     await queueImportedUrlDownloads(
-      "Scene",
+      "Video",
       ["https://example.com/watch/duplicate", "https://example.com/watch/duplicate"],
-      { scrapeScenes: true },
+      { scrapeVideos: true },
     );
 
     expect(mocks.systemStartBatchDownload).toHaveBeenCalledWith(expect.objectContaining({
@@ -121,15 +121,15 @@ describe("batchDownloads", () => {
         {
           kind: "skipped",
           label: "existing",
-          reason: "This URL is already downloaded for Existing Scene.",
+          reason: "This URL is already downloaded for Existing Video.",
         },
       ],
     });
 
     const result = await queueImportedUrlDownloads(
-      "Scene",
+      "Video",
       ["https://example.com/watch/existing", "https://example.com/watch/new"],
-      { scrapeScenes: true },
+      { scrapeVideos: true },
     );
 
     expect(result).toEqual({
@@ -139,22 +139,22 @@ describe("batchDownloads", () => {
         {
           kind: "skipped",
           label: "existing",
-          reason: "This URL is already downloaded for Existing Scene.",
+          reason: "This URL is already downloaded for Existing Video.",
         },
       ],
     });
   });
 
   it("formats all-skipped imported URL results without claiming downloads were queued", () => {
-    expect(formatBatchDownloadSummary("scene", {
+    expect(formatBatchDownloadSummary("video", {
       queuedCount: 0,
       issues: [
         {
           kind: "skipped",
           label: "existing",
-          reason: "This URL is already downloaded for Existing Scene.",
+          reason: "This URL is already downloaded for Existing Video.",
         },
       ],
-    })).toContain("No scene downloads queued.");
+    })).toContain("No video downloads queued.");
   });
 });

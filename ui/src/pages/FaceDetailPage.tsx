@@ -46,7 +46,7 @@ const APPEARANCE_SORT_OPTIONS = [
 const SIMILAR_SORT_OPTIONS = [
   { value: "distance", label: "Closest Match" },
   { value: "appearance_count", label: "Most Appearances" },
-  { value: "scene_count", label: "Most Scenes" },
+  { value: "video_count", label: "Most Videos" },
   { value: "image_count", label: "Most Images" },
   { value: "updated_at", label: "Recently Updated" },
   { value: "label", label: "Name" },
@@ -474,7 +474,7 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
       <div className="flex items-center justify-between gap-3">
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted">Appears In</h2>
-          <p className="mt-1 text-sm text-secondary">Scenes and images where this face appears.</p>
+          <p className="mt-1 text-sm text-secondary">Videos and images where this face appears.</p>
         </div>
         <div className="text-xs text-muted">{faceAppearancesPage.totalCount} appearance{faceAppearancesPage.totalCount === 1 ? "" : "s"}</div>
       </div>
@@ -636,7 +636,7 @@ export function FaceDetailPage({ id, onNavigate }: Props) {
         title={titleWithProvenance}
         counts={[
           { key: "appearances", label: "Appearances", value: face.appearanceCount || faceAppearancesPage.totalCount, icon: <Eye className="h-4 w-4" /> },
-          { key: "scenes", label: "Scenes", value: face.sceneCount, icon: <Film className="h-4 w-4" /> },
+          { key: "videos", label: "Videos", value: face.videoCount, icon: <Film className="h-4 w-4" /> },
           { key: "images", label: "Images", value: face.imageCount, icon: <Images className="h-4 w-4" /> },
         ]}
         metaRow={(
@@ -819,7 +819,7 @@ function PerformerCandidateRow({ performer, onSelect, disabled }: { performer: P
     >
       <div>
         <div className="text-sm font-medium text-foreground">{performer.name}</div>
-        <div className="mt-1 text-xs text-secondary">{performer.sceneCount ?? 0} scenes</div>
+        <div className="mt-1 text-xs text-secondary">{performer.videoCount ?? 0} videos</div>
       </div>
       <span className="text-xs text-accent">Link</span>
     </button>
@@ -974,3 +974,4 @@ function SimilarFaceTile({ face, onNavigate, canReadPerformers }: { face: FaceSi
     </FaceTile>
   );
 }
+

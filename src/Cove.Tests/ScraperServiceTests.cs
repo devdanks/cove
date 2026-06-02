@@ -60,10 +60,10 @@ public class ScraperServiceTests
     {
         var service = CreateService(scraperProvider: new FakeDynamicScraperProvider());
 
-        var matches = service.FindScrapersForUrl("https://www.dynamic.example.com/watch/123", "scene");
+        var matches = service.FindScrapersForUrl("https://www.dynamic.example.com/watch/123", "video");
 
         var match = Assert.Single(matches);
-        Assert.Equal("fake.dynamic/scene", match.Id);
+        Assert.Equal("fake.dynamic/video", match.Id);
         Assert.Equal(["dynamic.example.com"], match.PreferenceSites);
     }
 
@@ -137,20 +137,20 @@ public class ScraperServiceTests
             var service = CreateService(
                 new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
                 {
-                    ["https://example.com/watch/123"] = "<html><head><title>Pack Scene</title></head></html>",
+                    ["https://example.com/watch/123"] = "<html><head><title>Pack Video</title></head></html>",
                 },
                 extensionManager: extensionManager);
 
-            var scraper = Assert.Single(service.GetScrapers(), scraper => scraper.Id == $"{YamlScraperPackId}/Example:scene");
+            var scraper = Assert.Single(service.GetScrapers(), scraper => scraper.Id == $"{YamlScraperPackId}/Example:video");
             Assert.Equal("Example YAML", scraper.Name);
-            Assert.Equal("scene", scraper.EntityType);
+            Assert.Equal("video", scraper.EntityType);
             Assert.Contains("URL", scraper.SupportedScrapes);
             Assert.Equal(["example.com/watch/"], scraper.Urls);
 
-            var result = await service.ScrapeUrlAsync($"{YamlScraperPackId}/Example:scene", "scene", "https://example.com/watch/123");
+            var result = await service.ScrapeUrlAsync($"{YamlScraperPackId}/Example:video", "video", "https://example.com/watch/123");
 
             Assert.NotNull(result);
-            Assert.Equal("Pack Scene", Assert.IsType<string>(result?["Title"]));
+            Assert.Equal("Pack Video", Assert.IsType<string>(result?["Title"]));
         }
         finally
         {
@@ -199,14 +199,14 @@ public class ScraperServiceTests
         }));
         await File.WriteAllTextAsync(Path.Combine(scraperDir, "Example.yml"), """
             name: Example YAML
-            sceneByURL:
+            videoByURL:
               - action: scrapeXPath
                 url:
                   - example.com/watch/
-                scraper: sceneScraper
+                scraper: videoScraper
             xPathScrapers:
-              sceneScraper:
-                scene:
+              videoScraper:
+                video:
                   Title: //title
             """);
 
@@ -306,9 +306,9 @@ public class ScraperServiceTests
     private sealed class FakeDynamicScraperProvider : IScraperProvider
     {
         private static readonly ScraperDescriptor Descriptor = new(
-            "fake.dynamic/scene",
-            "Fake Dynamic Scene",
-            ScraperEntity.Scene,
+            "fake.dynamic/video",
+            "Fake Dynamic Video",
+            ScraperEntity.Video,
             ScraperCapabilities.ByUrl,
             [],
             ScraperRiskLevel.NetworkOnly,

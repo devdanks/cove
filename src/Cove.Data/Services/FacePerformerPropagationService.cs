@@ -41,7 +41,7 @@ public sealed class FacePerformerPropagationService(CoveContext db, IFieldProven
             .AsNoTracking()
             .Where(appearance => appearance.FaceId == faceId)
             .Select(appearance => new FaceHostRef(
-                appearance.HostType == FaceAppearanceHostType.Scene ? FaceHostKind.Scene : FaceHostKind.Image,
+                appearance.HostType == FaceAppearanceHostType.Video ? FaceHostKind.Video : FaceHostKind.Image,
                 appearance.HostId,
                 appearance.FirstSeenAtSec,
                 appearance.LastSeenAtSec,
@@ -62,7 +62,7 @@ public sealed class FacePerformerPropagationService(CoveContext db, IFieldProven
                 && detection.RefKind != null
                 && detection.RefKind.ToLower() == "face")
             .Select(detection => new FaceHostRef(
-                detection.HostType == DetectionHostType.Scene ? FaceHostKind.Scene : FaceHostKind.Image,
+                detection.HostType == DetectionHostType.Video ? FaceHostKind.Video : FaceHostKind.Image,
                 detection.HostId,
                 detection.ObservedAtSec,
                 detection.ObservedAtSec,
@@ -87,7 +87,7 @@ public sealed class FacePerformerPropagationService(CoveContext db, IFieldProven
         {
             var added = host.Kind switch
             {
-                FaceHostKind.Scene => await AddScenePerformerAsync(host.HostId, performerId, cancellationToken),
+                FaceHostKind.Video => await AddVideoPerformerAsync(host.HostId, performerId, cancellationToken),
                 FaceHostKind.Image => await AddImagePerformerAsync(host.HostId, performerId, cancellationToken),
                 _ => false,
             };
@@ -188,16 +188,16 @@ public sealed class FacePerformerPropagationService(CoveContext db, IFieldProven
             cancellationToken: cancellationToken);
     }
 
-    private async Task<bool> AddScenePerformerAsync(int sceneId, int performerId, CancellationToken cancellationToken)
+    private async Task<bool> AddVideoPerformerAsync(int videoId, int performerId, CancellationToken cancellationToken)
     {
-        var exists = await _db.Set<ScenePerformer>()
-            .AnyAsync(item => item.SceneId == sceneId && item.PerformerId == performerId, cancellationToken);
+        var exists = await _db.Set<VideoPerformer>()
+            .AnyAsync(item => item.VideoId == videoId && item.PerformerId == performerId, cancellationToken);
         if (exists)
         {
             return false;
         }
 
-        _db.Set<ScenePerformer>().Add(new ScenePerformer { SceneId = sceneId, PerformerId = performerId });
+        _db.Set<VideoPerformer>().Add(new VideoPerformer { VideoId = videoId, PerformerId = performerId });
         return true;
     }
 
@@ -216,13 +216,13 @@ public sealed class FacePerformerPropagationService(CoveContext db, IFieldProven
 
     private async Task RemoveHostPerformerAsync(FaceHostKind kind, int hostId, int performerId, CancellationToken cancellationToken)
     {
-        if (kind == FaceHostKind.Scene)
+        if (kind == FaceHostKind.Video)
         {
-            var link = await _db.Set<ScenePerformer>()
-                .FirstOrDefaultAsync(item => item.SceneId == hostId && item.PerformerId == performerId, cancellationToken);
+            var link = await _db.Set<VideoPerformer>()
+                .FirstOrDefaultAsync(item => item.VideoId == hostId && item.PerformerId == performerId, cancellationToken);
             if (link is not null)
             {
-                _db.Set<ScenePerformer>().Remove(link);
+                _db.Set<VideoPerformer>().Remove(link);
             }
             return;
         }
@@ -298,7 +298,7 @@ public sealed class FacePerformerPropagationService(CoveContext db, IFieldProven
         return new FaceAssignment(faceId, performerId, kind, hostId);
     }
 
-    private static string FormatHostKind(FaceHostKind kind) => kind == FaceHostKind.Scene ? "scene" : "image";
+    private static string FormatHostKind(FaceHostKind kind) => kind == FaceHostKind.Video ? "video" : "image";
 
     private static IReadOnlyList<FaceHostRef> CollapseHosts(IEnumerable<FaceHostRef> hosts)
         => hosts
@@ -324,13 +324,13 @@ public sealed class FacePerformerPropagationService(CoveContext db, IFieldProven
     }
 
     private static AffinityHostType ToAffinityHostType(FaceHostKind kind)
-        => kind == FaceHostKind.Scene ? AffinityHostType.Scene : AffinityHostType.Image;
+        => kind == FaceHostKind.Video ? AffinityHostType.Video : AffinityHostType.Image;
 
     private static bool TryParseHostKind(string value, out FaceHostKind kind)
     {
-        if (string.Equals(value, "scene", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(value, "video", StringComparison.OrdinalIgnoreCase))
         {
-            kind = FaceHostKind.Scene;
+            kind = FaceHostKind.Video;
             return true;
         }
 
@@ -358,6 +358,6 @@ public readonly record struct FaceHostRef(
 
 public enum FaceHostKind
 {
-    Scene,
+    Video,
     Image,
 }

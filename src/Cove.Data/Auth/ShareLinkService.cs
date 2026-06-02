@@ -13,7 +13,7 @@ public sealed class ShareLinkService : IShareLinkService
 {
     private static readonly HashSet<string> ValidEntityKinds = new(StringComparer.OrdinalIgnoreCase)
     {
-        EntityKinds.Scene,
+        EntityKinds.Video,
         EntityKinds.Performer,
         EntityKinds.Tag,
         EntityKinds.Studio,
@@ -207,14 +207,14 @@ public sealed class ShareLinkService : IShareLinkService
 
         var readableCount = entityKind switch
         {
-            EntityKinds.Scene => await _db.ReadSet<Scene>().CountAsync(scene => parsedIds.Contains(scene.Id), ct),
+            EntityKinds.Video => await _db.ReadSet<Video>().CountAsync(video => parsedIds.Contains(video.Id), ct),
             EntityKinds.Performer => await _db.ReadSet<Performer>().CountAsync(performer => parsedIds.Contains(performer.Id), ct),
             EntityKinds.Tag => await _db.ReadSet<Tag>().CountAsync(tag => parsedIds.Contains(tag.Id), ct),
             EntityKinds.Studio => await _db.ReadSet<Studio>().CountAsync(studio => parsedIds.Contains(studio.Id), ct),
             EntityKinds.Gallery => await _db.ReadSet<Gallery>().CountAsync(gallery => parsedIds.Contains(gallery.Id), ct),
             EntityKinds.Image => await _db.ReadSet<Image>().CountAsync(image => parsedIds.Contains(image.Id), ct),
             EntityKinds.Group => await _db.ReadSet<Group>().CountAsync(group => parsedIds.Contains(group.Id), ct),
-            EntityKinds.Marker => await _db.ReadSet<SceneMarker>().CountAsync(marker => parsedIds.Contains(marker.Id), ct),
+            EntityKinds.Marker => await _db.ReadSet<VideoMarker>().CountAsync(marker => parsedIds.Contains(marker.Id), ct),
             _ => 0,
         };
 

@@ -57,13 +57,13 @@ public class FeatureGapTests
             FileId = 10,
             LanguageCode = "en",
             CaptionType = "vtt",
-            Filename = "scene.en.vtt"
+            Filename = "video.en.vtt"
         };
         Assert.Equal(1, caption.Id);
         Assert.Equal(10, caption.FileId);
         Assert.Equal("en", caption.LanguageCode);
         Assert.Equal("vtt", caption.CaptionType);
-        Assert.Equal("scene.en.vtt", caption.Filename);
+        Assert.Equal("video.en.vtt", caption.Filename);
     }
 
     [Fact]
@@ -111,29 +111,29 @@ public class FeatureGapTests
     [Fact]
     public void ScrapeUrlRequest_RecordCreation()
     {
-        var req = new ScrapeUrlRequest("test-scraper", "scene", "https://example.com/scene/123");
+        var req = new ScrapeUrlRequest("test-scraper", "video", "https://example.com/video/123");
         Assert.Equal("test-scraper", req.ScraperId);
-        Assert.Equal("scene", req.EntityType);
-        Assert.Equal("https://example.com/scene/123", req.Url);
+        Assert.Equal("video", req.EntityType);
+        Assert.Equal("https://example.com/video/123", req.Url);
     }
 
     [Fact]
     public void ScrapeNameRequest_RecordCreation()
     {
-        var req = new ScrapeNameRequest("test-scraper", "scene", "Search Term");
+        var req = new ScrapeNameRequest("test-scraper", "video", "Search Term");
         Assert.Equal("test-scraper", req.ScraperId);
-        Assert.Equal("scene", req.EntityType);
+        Assert.Equal("video", req.EntityType);
         Assert.Equal("Search Term", req.Name);
     }
 
     [Fact]
     public void ScrapeFragmentRequest_RecordCreation()
     {
-        var data = new Dictionary<string, object> { ["title"] = "Test Scene" };
-        var req = new ScrapeFragmentRequest("test-scraper", "scene", data);
+        var data = new Dictionary<string, object> { ["title"] = "Test Video" };
+        var req = new ScrapeFragmentRequest("test-scraper", "video", data);
         Assert.Equal("test-scraper", req.ScraperId);
-        Assert.Equal("scene", req.EntityType);
-        Assert.Equal("Test Scene", req.Fragment["title"]);
+        Assert.Equal("video", req.EntityType);
+        Assert.Equal("Test Video", req.Fragment["title"]);
     }
 
     // ── Transcode Service Tests ─────────────────────────────────
@@ -227,3 +227,4 @@ public class FeatureGapTests
         Assert.Equal("Test Director", group.Director);
     }
 }
+

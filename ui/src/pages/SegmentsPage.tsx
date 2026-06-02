@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderOpen, Loader2, Trash2 } from "lucide-react";
-import { faces, scenes, segmentDisplayProfiles, segmentLibrary, segmentSpans } from "../api/client";
+import { faces, videos, segmentDisplayProfiles, segmentLibrary, segmentSpans } from "../api/client";
 import type { FindFilter, SegmentDisplayProfile } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity } from "../auth/visibility";
@@ -25,7 +25,7 @@ import {
   readRawSegmentIdsFromUrl,
   readMultiIdCriterionIds,
   readNumberCriterion,
-  readSceneSelectionCriterion,
+  readVideoSelectionCriterion,
   readSegmentsPageContentView,
   readStringCriterion,
   readStringCriterionValue,
@@ -52,9 +52,9 @@ interface Props {
 }
 
 const DERIVED_SPAN_SORT_OPTIONS = [
-  { value: "updated_at", label: "Scene Updated" },
-  { value: "created_at", label: "Scene Created" },
-  { value: "title", label: "Scene Title" },
+  { value: "updated_at", label: "Video Updated" },
+  { value: "created_at", label: "Video Created" },
+  { value: "title", label: "Video Title" },
   { value: "span_start", label: "Span Start" },
   { value: "span_end", label: "Span End" },
   { value: "span_duration", label: "Span Duration" },
@@ -77,7 +77,7 @@ const RAW_SEGMENT_SORT_OPTIONS = [
   { value: "updated_at", label: "Updated At" },
   { value: "created_at", label: "Created At" },
   { value: "title", label: "Label" },
-  { value: "scene_title", label: "Scene Title" },
+  { value: "video_title", label: "Video Title" },
   { value: "start_sec", label: "Start Time" },
   { value: "end_sec", label: "End Time" },
   { value: "duration", label: "Duration" },
@@ -141,7 +141,7 @@ export function SegmentsPage({ onNavigate }: Props) {
     allowInfinitePageSize: true,
   });
   const { hasPermission } = useAuth();
-  const canReadScenes = canReadEntity("scene", hasPermission);
+  const canReadVideos = canReadEntity("video", hasPermission);
   const canWriteGroups = canWriteEntity("group", hasPermission);
   const canDeleteSegments = canDeleteEntity("segment", hasPermission);
   const [showAddToGroup, setShowAddToGroup] = useState(false);
@@ -152,8 +152,8 @@ export function SegmentsPage({ onNavigate }: Props) {
   const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
   const [selectedMatchingItems, setSelectedMatchingItems] = useState<{ view: SegmentsPageContentView; spans: DerivedSpanItem[]; raw: RawSegmentItem[] } | null>(null);
 
-  const sceneTitle = readStringCriterion(objectFilter.sceneTitleCriterion);
-  const sceneSelection = readSceneSelectionCriterion(objectFilter.scenesCriterion);
+  const videoTitle = readStringCriterion(objectFilter.videoTitleCriterion);
+  const videoSelection = readVideoSelectionCriterion(objectFilter.videosCriterion);
   const derivedSpanQueryFilter = useMemo(
     () => readDerivedSpanQueryFilter(objectFilter.derivedSpanQuery),
     [objectFilter.derivedSpanQuery],
@@ -300,15 +300,15 @@ export function SegmentsPage({ onNavigate }: Props) {
     setActiveProfileId(availableProfiles.find((profile) => profile.isDefault)?.id ?? availableProfiles[0].id);
   }, [activeProfileId, availableProfiles]);
 
-  const selectedSceneQueries = useQueries({
-    queries: !isRawView ? sceneSelection.includeIds.map((sceneId) => ({
-      queryKey: ["scene", sceneId],
-      queryFn: () => scenes.get(sceneId),
+  const selectedVideoQueries = useQueries({
+    queries: !isRawView ? videoSelection.includeIds.map((videoId) => ({
+      queryKey: ["video", videoId],
+      queryFn: () => videos.get(videoId),
       staleTime: 60_000,
     })) : [],
   });
 
-  const selectedScenesLoading = selectedSceneQueries.some((query) => query.isLoading);
+  const selectedVideosLoading = selectedVideoQueries.some((query) => query.isLoading);
 
   const selectedPerformerIds = useMemo(
     () => Array.from(new Set(derivedSpanQueryFilter.operands.flatMap((operand) => operand.performerIds))),
@@ -340,7 +340,7 @@ export function SegmentsPage({ onNavigate }: Props) {
     [derivedSpanQueryFilter],
   );
   const performerFaceQueriesLoading = performerFaceQueries.some((query) => query.isLoading);
-  const derivedQueryEnabled = !isRawView && activeProfileId != null && (!derivedSpanQueryActive || !performerFaceQueriesLoading) && (sceneSelection.includeIds.length === 0 || !selectedScenesLoading);
+  const derivedQueryEnabled = !isRawView && activeProfileId != null && (!derivedSpanQueryActive || !performerFaceQueriesLoading) && (videoSelection.includeIds.length === 0 || !selectedVideosLoading);
   const rawQueryEnabled = isRawView;
 
   const queryDerivedSpansPage = useCallback(async (page: number, pageSize: number) => {
@@ -361,9 +361,9 @@ export function SegmentsPage({ onNavigate }: Props) {
       sort,
       direction,
       q: q || undefined,
-      sceneTitle: sceneTitle || undefined,
-      sceneIds: sceneSelection.includeIds.length > 0 ? sceneSelection.includeIds : undefined,
-      excludeSceneIds: sceneSelection.excludeIds.length > 0 ? sceneSelection.excludeIds : undefined,
+      videoTitle: videoTitle || undefined,
+      videoIds: videoSelection.includeIds.length > 0 ? videoSelection.includeIds : undefined,
+      excludeVideoIds: videoSelection.excludeIds.length > 0 ? videoSelection.excludeIds : undefined,
       tagIds: combinedRawSegmentFilter.tagIds.length > 0 ? combinedRawSegmentFilter.tagIds : undefined,
       kind: combinedRawSegmentFilter.kind,
       sourceKey: combinedRawSegmentFilter.sourceKey,
@@ -401,12 +401,12 @@ export function SegmentsPage({ onNavigate }: Props) {
 
     return {
       items: response.items.map<DerivedSpanItem>((item) => ({
-        id: `${item.sceneId}:${item.span.spanKey}`,
-        key: `${item.sceneId}:${item.span.spanKey}`,
+        id: `${item.videoId}:${item.span.spanKey}`,
+        key: `${item.videoId}:${item.span.spanKey}`,
         kind: derivedQueryDescriptor ? "derivedQuery" : "profile",
-        sceneId: item.sceneId,
-        sceneTitle: item.sceneTitle ?? `Scene #${item.sceneId}`,
-        sceneUpdatedAt: item.sceneUpdatedAt,
+        videoId: item.videoId,
+        videoTitle: item.videoTitle ?? `Video #${item.videoId}`,
+        videoUpdatedAt: item.videoUpdatedAt,
         span: item.span,
         profileId: item.profileId,
         derivedQuery: appliedQuery != null ? {
@@ -421,15 +421,15 @@ export function SegmentsPage({ onNavigate }: Props) {
       page: response.page,
       perPage: response.perPage,
     };
-  }, [activeProfileId, appliedQuery, combinedRawSegmentFilter, derivedQueryDescriptor, direction, q, sceneSelection.excludeIds, sceneSelection.includeIds, sceneTitle, sort]);
+  }, [activeProfileId, appliedQuery, combinedRawSegmentFilter, derivedQueryDescriptor, direction, q, videoSelection.excludeIds, videoSelection.includeIds, videoTitle, sort]);
 
   const queryRawSegmentsPage = useCallback(async (page: number, pageSize: number) => {
     const response = await segmentLibrary.list({
       q: q || undefined,
       ids: rawSegmentIds.length > 0 ? rawSegmentIds.join(",") : undefined,
-      sceneIds: sceneSelection.includeIds.length > 0 ? sceneSelection.includeIds.join(",") : undefined,
-      excludeSceneIds: sceneSelection.excludeIds.length > 0 ? sceneSelection.excludeIds.join(",") : undefined,
-      sceneTitle: sceneTitle || undefined,
+      videoIds: videoSelection.includeIds.length > 0 ? videoSelection.includeIds.join(",") : undefined,
+      excludeVideoIds: videoSelection.excludeIds.length > 0 ? videoSelection.excludeIds.join(",") : undefined,
+      videoTitle: videoTitle || undefined,
       tagIds: combinedRawSegmentFilter.tagIds.length > 0 ? combinedRawSegmentFilter.tagIds.join(",") : undefined,
       kind: combinedRawSegmentFilter.kind,
       sourceKey: combinedRawSegmentFilter.sourceKey,
@@ -475,25 +475,25 @@ export function SegmentsPage({ onNavigate }: Props) {
       items: response.items.map((item) => ({
         ...item,
         key: `segment:${item.id}`,
-        sceneId: item.hostId,
-        sceneTitle: item.hostTitle?.trim() || `Scene #${item.hostId}`,
+        videoId: item.hostId,
+        videoTitle: item.hostTitle?.trim() || `Video #${item.hostId}`,
       })),
       totalCount: response.totalCount,
       page: response.page,
       perPage: response.perPage,
     };
-  }, [combinedRawSegmentFilter, direction, q, rawSegmentIds, sceneSelection.excludeIds, sceneSelection.includeIds, sceneTitle, sort]);
+  }, [combinedRawSegmentFilter, direction, q, rawSegmentIds, videoSelection.excludeIds, videoSelection.includeIds, videoTitle, sort]);
 
   const segmentsWindowQuery = useDerivedSpansQuery({
     activeProfileId,
     pageNumber,
     perPage,
     q,
-    sceneTitle,
+    videoTitle,
     sort,
     direction,
-    includeSceneIds: sceneSelection.includeIds,
-    excludeSceneIds: sceneSelection.excludeIds,
+    includeVideoIds: videoSelection.includeIds,
+    excludeVideoIds: videoSelection.excludeIds,
     appliedQuery,
     derivedQueryDescriptor: appliedQuery != null ? derivedQueryDescriptor : undefined,
     rawFilter: combinedRawSegmentFilter,
@@ -504,25 +504,25 @@ export function SegmentsPage({ onNavigate }: Props) {
     pageNumber,
     perPage,
     q,
-    sceneTitle,
+    videoTitle,
     sort,
     direction,
-    includeSceneIds: sceneSelection.includeIds,
-    excludeSceneIds: sceneSelection.excludeIds,
+    includeVideoIds: videoSelection.includeIds,
+    excludeVideoIds: videoSelection.excludeIds,
     rawSegmentIds,
     rawFilter: combinedRawSegmentFilter,
     enabled: rawQueryEnabled && !infinitePageSize,
   });
 
   const derivedInfiniteQuery = usePaginatedInfiniteQuery<DerivedSpanItem>({
-    queryKey: ["segments-page", "search", "infinite", activeProfileId, q, sceneTitle, sort, direction, sceneSelection.includeIds.join(","), sceneSelection.excludeIds.join(","), appliedQuery ?? null, combinedRawSegmentFilter],
+    queryKey: ["segments-page", "search", "infinite", activeProfileId, q, videoTitle, sort, direction, videoSelection.includeIds.join(","), videoSelection.excludeIds.join(","), appliedQuery ?? null, combinedRawSegmentFilter],
     queryFn: queryDerivedSpansPage,
     enabled: derivedQueryEnabled && infinitePageSize,
     chunkSize: defaultPerPage,
   });
 
   const rawInfiniteQuery = usePaginatedInfiniteQuery<RawSegmentItem>({
-    queryKey: ["segments-page", "raw", "infinite", q, sceneTitle, sort, direction, sceneSelection.includeIds.join(","), sceneSelection.excludeIds.join(","), rawSegmentIds.join(","), combinedRawSegmentFilter],
+    queryKey: ["segments-page", "raw", "infinite", q, videoTitle, sort, direction, videoSelection.includeIds.join(","), videoSelection.excludeIds.join(","), rawSegmentIds.join(","), combinedRawSegmentFilter],
     queryFn: queryRawSegmentsPage,
     enabled: rawQueryEnabled && infinitePageSize,
     chunkSize: defaultPerPage,
@@ -550,8 +550,8 @@ export function SegmentsPage({ onNavigate }: Props) {
   const selectionItems: Array<{ id: string | number }> = items;
 
   const isLoading = (!isRawView && profilesQuery.isLoading)
-    || (!isRawView && sceneSelection.includeIds.length > 0
-      ? selectedScenesLoading
+    || (!isRawView && videoSelection.includeIds.length > 0
+      ? selectedVideosLoading
       : false)
     || (!isRawView && performerFaceQueriesLoading)
     || (isRawView
@@ -590,9 +590,9 @@ export function SegmentsPage({ onNavigate }: Props) {
     .filter((item) => selectedIds.has(item.id))
     .map((item) => ({
       key: item.key,
-      sceneId: item.sceneId,
+      videoId: item.videoId,
       spanKey: item.span.spanKey,
-      title: buildSpanTitle(item.span, item.sceneTitle),
+      title: buildSpanTitle(item.span, item.videoTitle),
       profileId: item.profileId,
       derivedQuery: item.derivedQuery,
     })), [selectedIds, spanSelectionItems]);
@@ -621,15 +621,15 @@ export function SegmentsPage({ onNavigate }: Props) {
   const rawDeleteMutation = useMutation({
     mutationFn: async (segmentsToDelete: RawSegmentItem[]) => {
       for (const segment of segmentsToDelete) {
-        await scenes.segments.delete(segment.hostId, segment.id);
+        await videos.segments.delete(segment.hostId, segment.id);
       }
     },
     onSuccess: async (_result, segmentsToDelete) => {
       await queryClient.invalidateQueries({ queryKey: ["segments-page"] });
       for (const segment of segmentsToDelete) {
         await queryClient.invalidateQueries({ queryKey: ["segment", segment.id] });
-        await queryClient.invalidateQueries({ queryKey: ["scene", segment.hostId, "segments"] });
-        await queryClient.invalidateQueries({ queryKey: ["scene", segment.hostId] });
+        await queryClient.invalidateQueries({ queryKey: ["video", segment.hostId, "segments"] });
+        await queryClient.invalidateQueries({ queryKey: ["video", segment.hostId] });
       }
       setConfirmRawDelete(false);
       handleSelectNone();
@@ -637,8 +637,8 @@ export function SegmentsPage({ onNavigate }: Props) {
   });
 
   const customFilterSections = useMemo(
-    () => (isRawView ? [] : [createDerivedSpanCustomFilterSection(sceneSelection.includeIds)]),
-    [isRawView, sceneSelection.includeIds],
+    () => (isRawView ? [] : [createDerivedSpanCustomFilterSection(videoSelection.includeIds)]),
+    [isRawView, videoSelection.includeIds],
   );
 
   useEffect(() => {
@@ -764,7 +764,7 @@ export function SegmentsPage({ onNavigate }: Props) {
           rawSegmentIds={rawSegmentIds}
           appliedQuery={appliedQuery}
           isLoading={isLoading}
-          canReadScenes={canReadScenes}
+          canReadVideos={canReadVideos}
           onNavigate={onNavigate}
           onViewRawSegments={(segmentIds) => switchContentView("raw", segmentIds)}
           selectedIds={selectedIds}
@@ -788,3 +788,4 @@ export function SegmentsPage({ onNavigate }: Props) {
     </>
   );
 }
+

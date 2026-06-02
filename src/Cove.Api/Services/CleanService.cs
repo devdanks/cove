@@ -19,23 +19,23 @@ public class CleanService(
             using var scope = scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
 
-            // Find scenes whose files no longer exist on disk
-            var scenes = await db.Scenes
+            // Find videos whose files no longer exist on disk
+            var videos = await db.Videos
                 .Include(s => s.Files).ThenInclude(f => f.ParentFolder)
                 .ToListAsync(ct);
 
-            var orphanSceneIds = new List<int>();
-            int total = scenes.Count;
+            var orphanVideoIds = new List<int>();
+            int total = videos.Count;
 
             for (int i = 0; i < total; i++)
             {
                 ct.ThrowIfCancellationRequested();
-                var scene = scenes[i];
-                var file = scene.Files.FirstOrDefault();
+                var video = videos[i];
+                var file = video.Files.FirstOrDefault();
 
                 if (!CleanFileExists(file))
                 {
-                    orphanSceneIds.Add(scene.Id);
+                    orphanVideoIds.Add(video.Id);
                 }
 
                 progress.Report((double)(i + 1) / total, $"Checking ({i + 1}/{total})");
@@ -74,8 +74,8 @@ public class CleanService(
                 }
             }
 
-            logger.LogInformation("Clean found {Scenes} orphaned scenes, {Images} orphaned images, {Galleries} orphaned galleries",
-                orphanSceneIds.Count, orphanImageIds.Count, orphanGalleryIds.Count);
+            logger.LogInformation("Clean found {Videos} orphaned videos, {Images} orphaned images, {Galleries} orphaned galleries",
+                orphanVideoIds.Count, orphanImageIds.Count, orphanGalleryIds.Count);
 
             if (dryRun)
             {
@@ -84,10 +84,10 @@ public class CleanService(
             }
 
             // Remove orphaned records
-            if (orphanSceneIds.Count > 0)
+            if (orphanVideoIds.Count > 0)
             {
-                await db.Scenes.Where(s => orphanSceneIds.Contains(s.Id)).ExecuteDeleteAsync(ct);
-                logger.LogInformation("Removed {Count} orphaned scenes", orphanSceneIds.Count);
+                await db.Videos.Where(s => orphanVideoIds.Contains(s.Id)).ExecuteDeleteAsync(ct);
+                logger.LogInformation("Removed {Count} orphaned videos", orphanVideoIds.Count);
             }
 
             if (orphanImageIds.Count > 0)
@@ -123,3 +123,4 @@ public class CleanService(
         return Directory.Exists(folder.Path);
     }
 }
+

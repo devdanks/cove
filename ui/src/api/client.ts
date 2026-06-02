@@ -1,6 +1,6 @@
 import type {
   MeResponse,
-  Scene, SceneCreate, SceneUpdate, SceneListEntry,
+  Video, VideoCreate, VideoUpdate, VideoListEntry,
   Performer, PerformerCreate, PerformerUpdate,
   Tag, TagDetail, TagCreate, TagUpdate, TagSegmentWall,
   TagApplication, TagApplicationCreate, TagGroup, TagGroupCreate, TagGroupUpdate,
@@ -20,12 +20,12 @@ import type {
   AiDataPurgeResult,
   AiDataSelector,
   AiDataSummary,
-  AudioSimilarScene,
+  AudioSimilarVideo,
   VisualSimilarImage,
-  VisualSimilarScene,
+  VisualSimilarVideo,
   AffinityHostType,
   Segment, SegmentCreate, SegmentRecord, SegmentUpdate,
-  ResolvedSpanDetail, ResolvedSpanList, SceneResolvedSpans, SegmentDisplayProfile,
+  ResolvedSpanDetail, ResolvedSpanList, VideoResolvedSpans, SegmentDisplayProfile,
   SegmentDisplayProfileCreate, SegmentDisplayProfileUpdate,
   SegmentDisplayRule, SegmentDisplayRuleCreate, SegmentDisplayRuleUpdate,
   SegmentSpanQueryRequest, SegmentSpanSearchRequest, SegmentSpanSearchResponse,
@@ -33,7 +33,7 @@ import type {
   Face, FaceAppearance, FaceAppearancesResponse, FaceCreate, FaceUpdate, FaceLink, FaceBatchLinkTopSuggestionRequest, FaceBatchDeleteRequest, FaceBatchOperationResult, FaceCreatePerformer, FaceHostFace, FaceMerge, FaceIgnore, FaceDeleteImpact, FaceSimilar, FaceSuggestion,
   EntityEngagement, EntityFavorite, EntityEngagementBatchRequest, EntityRatings,
   EngagementInteraction, EngagementInteractionWrite,
-  SceneHistory,
+  VideoHistory,
   PaginatedResponse, Stats, SystemStatus, CoveConfig, JobInfo,
   DatabaseMigrationResult,
   ScraperSummary,
@@ -48,8 +48,8 @@ import type {
   MetadataServerPerformerBatchTagRequest,
   MetadataServerPerformerImportRequest,
   MetadataServerPerformerMatch,
-  MetadataServerSceneImportRequest,
-  MetadataServerSceneMatch,
+  MetadataServerVideoImportRequest,
+  MetadataServerVideoMatch,
   MetadataServerTagBatchTagRequest,
   MetadataServerTagImportRequest,
   MetadataServerTagMatch,
@@ -66,7 +66,7 @@ import type {
   SavedFilterUpdate,
   PerformerScrapeRequest,
   FilteredQueryRequest,
-  SceneFilterCriteria,
+  VideoFilterCriteria,
   PerformerFilterCriteria,
   TagFilterCriteria,
   StudioFilterCriteria,
@@ -77,10 +77,10 @@ import type {
   GroupFilterCriteria,
   ScrapeAttempt,
   CreateScrapeAttemptRequest,
-  ApplySceneScrapeAttemptRequest,
-  BatchSceneScrapeStartRequest,
+  ApplyVideoScrapeAttemptRequest,
+  BatchVideoScrapeStartRequest,
   BatchImageScrapeStartRequest,
-  BulkSceneUpdate,
+  BulkVideoUpdate,
   BulkPerformerUpdate,
   BulkTagUpdate,
   BulkStudioUpdate,
@@ -334,89 +334,89 @@ function buildMediaUrl(
   return `${API_BASE}${path}${query ? `?${query}` : ""}`;
 }
 
-// ===== Scenes =====
-export const scenes = {
+// ===== Videos =====
+export const videos = {
   find: (filter?: FindFilter, extra?: Record<string, string | number | boolean | undefined>) =>
-    request<PaginatedResponse<Scene>>(`/scenes${buildQuery(filter, extra)}`),
+    request<PaginatedResponse<Video>>(`/videos${buildQuery(filter, extra)}`),
   findWithCompilations: (filter?: FindFilter, extra?: Record<string, string | number | boolean | undefined>) =>
-    request<PaginatedResponse<SceneListEntry>>(`/scenes/with-compilations${buildQuery(filter, extra)}`),
-  findFiltered: (req: FilteredQueryRequest<SceneFilterCriteria>) =>
-    request<PaginatedResponse<Scene>>("/scenes/find", { method: "POST", body: JSON.stringify(normalizeCriterionPayload(req)) }),
-  get: (id: number) => request<Scene>(`/scenes/${id}`),
-  create: (data: SceneCreate) => request<Scene>("/scenes", { method: "POST", body: JSON.stringify(data) }),
-  createFromFile: (data: FileBackedCreate) => request<Scene>("/scenes/from-file", { method: "POST", body: JSON.stringify(data) }),
-  createSubScene: (parentSceneId: number, data: SceneCreate) =>
-    request<Scene>("/scenes", { method: "POST", body: JSON.stringify({ ...data, parentSceneId }) }),
-  update: (id: number, data: SceneUpdate) => request<Scene>(`/scenes/${id}`, { method: "PUT", body: JSON.stringify(data) }),
-  bulkUpdate: (data: BulkSceneUpdate) => request<void>("/scenes/bulk", { method: "POST", body: JSON.stringify(data) }),
+    request<PaginatedResponse<VideoListEntry>>(`/videos/with-compilations${buildQuery(filter, extra)}`),
+  findFiltered: (req: FilteredQueryRequest<VideoFilterCriteria>) =>
+    request<PaginatedResponse<Video>>("/videos/find", { method: "POST", body: JSON.stringify(normalizeCriterionPayload(req)) }),
+  get: (id: number) => request<Video>(`/videos/${id}`),
+  create: (data: VideoCreate) => request<Video>("/videos", { method: "POST", body: JSON.stringify(data) }),
+  createFromFile: (data: FileBackedCreate) => request<Video>("/videos/from-file", { method: "POST", body: JSON.stringify(data) }),
+  createSubVideo: (parentVideoId: number, data: VideoCreate) =>
+    request<Video>("/videos", { method: "POST", body: JSON.stringify({ ...data, parentVideoId }) }),
+  update: (id: number, data: VideoUpdate) => request<Video>(`/videos/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  bulkUpdate: (data: BulkVideoUpdate) => request<void>("/videos/bulk", { method: "POST", body: JSON.stringify(data) }),
   delete: (id: number, options?: boolean | DeleteEntityOptions) => {
     const deleteFile = typeof options === "boolean" ? options : options?.deleteFile;
     const deleteGenerated = typeof options === "boolean" ? undefined : options?.deleteGenerated;
-    return request<void>(`/scenes/${id}${buildQuery(undefined, { deleteFile, deleteGenerated })}`, { method: "DELETE" });
+    return request<void>(`/videos/${id}${buildQuery(undefined, { deleteFile, deleteGenerated })}`, { method: "DELETE" });
   },
   bulkDelete: (ids: number[], options?: boolean | DeleteEntityOptions) => {
     const deleteFiles = typeof options === "boolean" ? options : options?.deleteFile ?? false;
     const deleteGenerated = typeof options === "boolean" ? false : options?.deleteGenerated ?? false;
-    return request<{ deleted: number }>("/scenes/destroy", { method: "POST", body: JSON.stringify({ ids, deleteFiles, deleteGenerated }) });
+    return request<{ deleted: number }>("/videos/destroy", { method: "POST", body: JSON.stringify({ ids, deleteFiles, deleteGenerated }) });
   },
   merge: (targetId: number, sourceIds: number[]) =>
-    request<Scene>("/scenes/merge", { method: "POST", body: JSON.stringify({ targetId, sourceIds }) }),
-  recordPlay: (id: number) => request<void>(`/scenes/${id}/play`, { method: "POST" }),
-  incrementLike: (id: number) => request<number>(`/scenes/${id}/like`, { method: "POST" }),
-  decrementLike: (id: number) => request<void>(`/scenes/${id}/like`, { method: "DELETE" }),
-  resetLike: (id: number) => request<void>(`/scenes/${id}/like/reset`, { method: "POST" }),
-  deletePlay: (id: number) => request<void>(`/scenes/${id}/play`, { method: "DELETE" }),
-  resetPlay: (id: number) => request<void>(`/scenes/${id}/play/reset`, { method: "POST" }),
-  getHistory: (id: number) => request<SceneHistory>(`/scenes/${id}/history`),
+    request<Video>("/videos/merge", { method: "POST", body: JSON.stringify({ targetId, sourceIds }) }),
+  recordPlay: (id: number) => request<void>(`/videos/${id}/play`, { method: "POST" }),
+  incrementLike: (id: number) => request<number>(`/videos/${id}/like`, { method: "POST" }),
+  decrementLike: (id: number) => request<void>(`/videos/${id}/like`, { method: "DELETE" }),
+  resetLike: (id: number) => request<void>(`/videos/${id}/like/reset`, { method: "POST" }),
+  deletePlay: (id: number) => request<void>(`/videos/${id}/play`, { method: "DELETE" }),
+  resetPlay: (id: number) => request<void>(`/videos/${id}/play/reset`, { method: "POST" }),
+  getHistory: (id: number) => request<VideoHistory>(`/videos/${id}/history`),
   searchMetadataServer: (id: number, term?: string, endpoint?: string) =>
-    request<MetadataServerSceneMatch[]>(`/scenes/${id}/metadata-server/search${buildQuery(undefined, { term, endpoint })}`),
-  importFromMetadataServer: (id: number, data: MetadataServerSceneImportRequest) =>
-    request<Scene>(`/scenes/${id}/metadata-server/import`, { method: "POST", body: JSON.stringify(data) }),
+    request<MetadataServerVideoMatch[]>(`/videos/${id}/metadata-server/search${buildQuery(undefined, { term, endpoint })}`),
+  importFromMetadataServer: (id: number, data: MetadataServerVideoImportRequest) =>
+    request<Video>(`/videos/${id}/metadata-server/import`, { method: "POST", body: JSON.stringify(data) }),
   submitMetadataServerDraft: (id: number, endpoint: string) =>
-    request<{ draftId: string | null }>(`/scenes/${id}/metadata-server/submit-draft`, { method: "POST", body: JSON.stringify({ endpoint }) }),
+    request<{ draftId: string | null }>(`/videos/${id}/metadata-server/submit-draft`, { method: "POST", body: JSON.stringify({ endpoint }) }),
   submitFingerprints: (id: number, endpoint: string) =>
-    request<void>(`/scenes/${id}/metadata-server/submit-fingerprints`, { method: "POST", body: JSON.stringify({ endpoint }) }),
+    request<void>(`/videos/${id}/metadata-server/submit-fingerprints`, { method: "POST", body: JSON.stringify({ endpoint }) }),
   generateScreenshot: (id: number, atSeconds?: number) =>
-    request<{ success: boolean }>(`/scenes/${id}/generate-screenshot`, { method: "POST", body: JSON.stringify({ atSeconds }) }),
+    request<{ success: boolean }>(`/videos/${id}/generate-screenshot`, { method: "POST", body: JSON.stringify({ atSeconds }) }),
   setCoverFromFrame: (id: number, atSeconds?: number) =>
-    request<{ success: boolean }>(`/scenes/${id}/cover/from-frame`, { method: "POST", body: JSON.stringify({ atSeconds }) }),
+    request<{ success: boolean }>(`/videos/${id}/cover/from-frame`, { method: "POST", body: JSON.stringify({ atSeconds }) }),
   rescan: (id: number) =>
-    request<{ jobId: string }>(`/scenes/${id}/rescan`, { method: "POST" }),
+    request<{ jobId: string }>(`/videos/${id}/rescan`, { method: "POST" }),
   assignFile: (id: number, fileId: number) =>
-    request<void>(`/scenes/${id}/assign-file`, { method: "POST", body: JSON.stringify({ fileId }) }),
-  streamUrl: (id: number) => buildMediaUrl(`/stream/scene/${id}`),
-  screenshotUrl: (id: number, version?: string, seconds?: number) => buildMediaUrl(`/stream/scene/${id}/screenshot`, version, undefined, { seconds }),
-  segmentPreviewUrl: (id: number, seconds: number, version?: string) => buildMediaUrl(`/stream/scene/${id}/segment-preview`, version, undefined, { seconds }),
-  previewUrl: (id: number) => buildMediaUrl(`/stream/scene/${id}/preview`),
-  previewStatusUrl: (id: number) => buildMediaUrl(`/stream/scene/${id}/preview/status`),
-  captionUrl: (sceneId: number, captionId: number) => buildMediaUrl(`/stream/scene/${sceneId}/caption/${captionId}`),
-  transcodeUrl: (id: number, resolution?: string, start?: number) => buildMediaUrl(`/stream/scene/${id}/transcode`, undefined, undefined, { resolution, start }),
-  hlsMasterUrl: (id: number) => buildMediaUrl(`/stream/scene/${id}/hls/master.m3u8`),
-  getResolutions: (id: number) => request<string[]>(`/stream/scene/${id}/resolutions`),
+    request<void>(`/videos/${id}/assign-file`, { method: "POST", body: JSON.stringify({ fileId }) }),
+  streamUrl: (id: number) => buildMediaUrl(`/stream/video/${id}`),
+  screenshotUrl: (id: number, version?: string, seconds?: number) => buildMediaUrl(`/stream/video/${id}/screenshot`, version, undefined, { seconds }),
+  segmentPreviewUrl: (id: number, seconds: number, version?: string) => buildMediaUrl(`/stream/video/${id}/segment-preview`, version, undefined, { seconds }),
+  previewUrl: (id: number) => buildMediaUrl(`/stream/video/${id}/preview`),
+  previewStatusUrl: (id: number) => buildMediaUrl(`/stream/video/${id}/preview/status`),
+  captionUrl: (videoId: number, captionId: number) => buildMediaUrl(`/stream/video/${videoId}/caption/${captionId}`),
+  transcodeUrl: (id: number, resolution?: string, start?: number) => buildMediaUrl(`/stream/video/${id}/transcode`, undefined, undefined, { resolution, start }),
+  hlsMasterUrl: (id: number) => buildMediaUrl(`/stream/video/${id}/hls/master.m3u8`),
+  getResolutions: (id: number) => request<string[]>(`/stream/video/${id}/resolutions`),
   segments: {
-    list: (sceneId: number) => request<Segment[]>(`/scenes/${sceneId}/segments`),
-    create: (sceneId: number, data: SegmentCreate) =>
-      request<Segment>(`/scenes/${sceneId}/segments`, { method: "POST", body: JSON.stringify(data) }),
-    update: (sceneId: number, id: number, data: SegmentUpdate) =>
-      request<Segment>(`/scenes/${sceneId}/segments/${id}`, { method: "PUT", body: JSON.stringify(data) }),
-    delete: (sceneId: number, id: number) =>
-      request<void>(`/scenes/${sceneId}/segments/${id}`, { method: "DELETE" }),
-    spans: (sceneId: number, profile?: number) =>
-      request<SceneResolvedSpans>(`/scenes/${sceneId}/segments/spans${buildQuery(undefined, { profile })}`),
-    querySpans: (sceneId: number, data: SegmentSpanQueryRequest) =>
-      request<ResolvedSpanList>(`/scenes/${sceneId}/segments/spans/query`, { method: "POST", body: JSON.stringify(data) }),
-    spanDetail: (sceneId: number, spanKey: string, profile?: number) =>
-      request<ResolvedSpanDetail>(`/scenes/${sceneId}/spans/${encodeURIComponent(spanKey)}${buildQuery(undefined, { profile })}`),
+    list: (videoId: number) => request<Segment[]>(`/videos/${videoId}/segments`),
+    create: (videoId: number, data: SegmentCreate) =>
+      request<Segment>(`/videos/${videoId}/segments`, { method: "POST", body: JSON.stringify(data) }),
+    update: (videoId: number, id: number, data: SegmentUpdate) =>
+      request<Segment>(`/videos/${videoId}/segments/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+    delete: (videoId: number, id: number) =>
+      request<void>(`/videos/${videoId}/segments/${id}`, { method: "DELETE" }),
+    spans: (videoId: number, profile?: number) =>
+      request<VideoResolvedSpans>(`/videos/${videoId}/segments/spans${buildQuery(undefined, { profile })}`),
+    querySpans: (videoId: number, data: SegmentSpanQueryRequest) =>
+      request<ResolvedSpanList>(`/videos/${videoId}/segments/spans/query`, { method: "POST", body: JSON.stringify(data) }),
+    spanDetail: (videoId: number, spanKey: string, profile?: number) =>
+      request<ResolvedSpanDetail>(`/videos/${videoId}/spans/${encodeURIComponent(spanKey)}${buildQuery(undefined, { profile })}`),
   },
 
   detections: {
-    list: (sceneId: number) => request<Detection[]>(`/scenes/${sceneId}/detections`),
-    create: (sceneId: number, data: DetectionCreate) =>
-      request<Detection>(`/scenes/${sceneId}/detections`, { method: "POST", body: JSON.stringify(data) }),
-    update: (sceneId: number, id: number, data: DetectionUpdate) =>
-      request<Detection>(`/scenes/${sceneId}/detections/${id}`, { method: "PUT", body: JSON.stringify(data) }),
-    delete: (sceneId: number, id: number) =>
-      request<void>(`/scenes/${sceneId}/detections/${id}`, { method: "DELETE" }),
+    list: (videoId: number) => request<Detection[]>(`/videos/${videoId}/detections`),
+    create: (videoId: number, data: DetectionCreate) =>
+      request<Detection>(`/videos/${videoId}/detections`, { method: "POST", body: JSON.stringify(data) }),
+    update: (videoId: number, id: number, data: DetectionUpdate) =>
+      request<Detection>(`/videos/${videoId}/detections/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+    delete: (videoId: number, id: number) =>
+      request<void>(`/videos/${videoId}/detections/${id}`, { method: "DELETE" }),
   },
   findDuplicates: (options?: number | { matchType?: string; distance?: number; durationDiff?: number }) => {
     const params = new URLSearchParams();
@@ -426,7 +426,7 @@ export const scenes = {
     params.set("distance", String(distance));
     if (durationDiff !== undefined) params.set("durationDiff", String(durationDiff));
     if (matchType) params.set("matchType", matchType);
-    return request<Scene[][]>(`/scenes/duplicates?${params.toString()}`);
+    return request<Video[][]>(`/videos/duplicates?${params.toString()}`);
   },
 };
 
@@ -443,9 +443,9 @@ export const playback = {
 export const segmentLibrary = {
   list: (opts?: {
     q?: string;
-    sceneId?: number;
-    sceneIds?: string;
-    sceneTitle?: string;
+    videoId?: number;
+    videoIds?: string;
+    videoTitle?: string;
     tagId?: number;
     tagIds?: string;
     kind?: string;
@@ -467,7 +467,7 @@ export const segmentLibrary = {
     page?: number;
     perPage?: number;
     ids?: string;
-    excludeSceneIds?: string;
+    excludeVideoIds?: string;
     title?: string;
     titleModifier?: string;
     hostType?: string;
@@ -499,13 +499,13 @@ export const segmentLibrary = {
 };
 
 // ===== Faces =====
-type FaceListOptions = { q?: string; performerId?: number; performerIds?: string; linked?: boolean; ignored?: boolean; merged?: boolean; mergedIntoFaceId?: number; label?: string; labelModifier?: string; primarySourceKey?: string; primarySourceKeyModifier?: string; hasCover?: boolean; detectionCount?: number; detectionCount2?: number; detectionCountModifier?: string; appearanceCount?: number; appearanceCount2?: number; appearanceCountModifier?: string; frameSampleCount?: number; frameSampleCount2?: number; frameSampleCountModifier?: string; sceneCount?: number; sceneCount2?: number; sceneCountModifier?: string; imageCount?: number; imageCount2?: number; imageCountModifier?: string; minSuggestionConfidence?: number; suggestionConfidence?: number; suggestionConfidence2?: number; suggestionConfidenceModifier?: string; topSuggestionPerformerIds?: string; sort?: string; direction?: "asc" | "desc"; customFieldCriteria?: CustomFieldCriterion[]; page?: number; perPage?: number };
+type FaceListOptions = { q?: string; performerId?: number; performerIds?: string; linked?: boolean; ignored?: boolean; merged?: boolean; mergedIntoFaceId?: number; label?: string; labelModifier?: string; primarySourceKey?: string; primarySourceKeyModifier?: string; hasCover?: boolean; detectionCount?: number; detectionCount2?: number; detectionCountModifier?: string; appearanceCount?: number; appearanceCount2?: number; appearanceCountModifier?: string; frameSampleCount?: number; frameSampleCount2?: number; frameSampleCountModifier?: string; videoCount?: number; videoCount2?: number; videoCountModifier?: string; imageCount?: number; imageCount2?: number; imageCountModifier?: string; minSuggestionConfidence?: number; suggestionConfidence?: number; suggestionConfidence2?: number; suggestionConfidenceModifier?: string; topSuggestionPerformerIds?: string; sort?: string; direction?: "asc" | "desc"; customFieldCriteria?: CustomFieldCriterion[]; page?: number; perPage?: number };
 
 export const faces: {
   list: (opts?: FaceListOptions) => Promise<PaginatedResponse<Face>>;
   get: (id: number) => Promise<Face>;
   appearances: (id: number, opts?: { q?: string; sort?: string; direction?: "asc" | "desc"; page?: number; perPage?: number }) => Promise<PaginatedResponse<FaceAppearance>>;
-  sceneFaces: (sceneId: number) => Promise<FaceHostFace[]>;
+  videoFaces: (videoId: number) => Promise<FaceHostFace[]>;
   imageFaces: (imageId: number) => Promise<FaceHostFace[]>;
   performerFaces: (performerId: number) => Promise<Face[]>;
   reviewUnlinked: (take?: number) => Promise<Face[]>;
@@ -548,9 +548,9 @@ export const faces: {
       frameSampleCount: opts?.frameSampleCount,
       frameSampleCount2: opts?.frameSampleCount2,
       frameSampleCountModifier: opts?.frameSampleCountModifier,
-      sceneCount: opts?.sceneCount,
-      sceneCount2: opts?.sceneCount2,
-      sceneCountModifier: opts?.sceneCountModifier,
+      videoCount: opts?.videoCount,
+      videoCount2: opts?.videoCount2,
+      videoCountModifier: opts?.videoCountModifier,
       imageCount: opts?.imageCount,
       imageCount2: opts?.imageCount2,
       imageCountModifier: opts?.imageCountModifier,
@@ -566,7 +566,7 @@ export const faces: {
   get: (id: number) => request<Face>(`/faces/${id}`),
   appearances: (id: number, opts?: { q?: string; sort?: string; direction?: "asc" | "desc"; page?: number; perPage?: number }) =>
     request<PaginatedResponse<FaceAppearance>>(`/faces/${id}/appearances${buildQuery({ page: opts?.page, perPage: opts?.perPage, q: opts?.q }, { sort: opts?.sort, direction: opts?.direction })}`),
-  sceneFaces: (sceneId: number) => request<FaceHostFace[]>(`/scenes/${sceneId}/faces`),
+  videoFaces: (videoId: number) => request<FaceHostFace[]>(`/videos/${videoId}/faces`),
   imageFaces: (imageId: number) => request<FaceHostFace[]>(`/images/${imageId}/faces`),
   performerFaces: (performerId: number) => request<Face[]>(`/performers/${performerId}/faces`),
   reviewUnlinked: (take?: number) => request<Face[]>(`/faces/review/unlinked${buildQuery(undefined, { take })}`),
@@ -702,18 +702,18 @@ export function createVisualSimilarityClient(apiBasePath: string) {
   const normalizedBasePath = normalizeExtensionApiBasePath(apiBasePath);
 
   return {
-    searchScenes: (req: FilteredQueryRequest<SceneFilterCriteria>) =>
-      request<PaginatedResponse<Scene>>(`${normalizedBasePath}/scenes/search`, { method: "POST", body: JSON.stringify(normalizeCriterionPayload(req)) }),
+    searchVideos: (req: FilteredQueryRequest<VideoFilterCriteria>) =>
+      request<PaginatedResponse<Video>>(`${normalizedBasePath}/videos/search`, { method: "POST", body: JSON.stringify(normalizeCriterionPayload(req)) }),
     searchImages: (req: FilteredQueryRequest<ImageFilterCriteria>) =>
       request<PaginatedResponse<Image>>(`${normalizedBasePath}/images/search`, { method: "POST", body: JSON.stringify(normalizeCriterionPayload(req)) }),
-    similarScenesForScene: (sceneId: number, params?: { perPage?: number }) =>
-      request<{ items: VisualSimilarScene[] }>(`${normalizedBasePath}/scenes/${sceneId}/similar-scenes${buildQuery(params)}`),
-    similarScenesForImage: (imageId: number, params?: { perPage?: number }) =>
-      request<{ items: VisualSimilarScene[] }>(`${normalizedBasePath}/images/${imageId}/similar-scenes${buildQuery(params)}`),
+    similarVideosForVideo: (videoId: number, params?: { perPage?: number }) =>
+      request<{ items: VisualSimilarVideo[] }>(`${normalizedBasePath}/videos/${videoId}/similar-videos${buildQuery(params)}`),
+    similarVideosForImage: (imageId: number, params?: { perPage?: number }) =>
+      request<{ items: VisualSimilarVideo[] }>(`${normalizedBasePath}/images/${imageId}/similar-videos${buildQuery(params)}`),
     similarImagesForImage: (imageId: number, params?: { perPage?: number }) =>
       request<{ items: VisualSimilarImage[] }>(`${normalizedBasePath}/images/${imageId}/similar-images${buildQuery(params)}`),
-    similarScenesForSceneSegment: (sceneId: number, data: { intervals: Array<{ startSec: number; endSec?: number }>; perPage?: number }) =>
-      request<{ items: VisualSimilarScene[] }>(`${normalizedBasePath}/scenes/${sceneId}/similar-scenes/segment`, { method: "POST", body: JSON.stringify(data) }),
+    similarVideosForVideoSegment: (videoId: number, data: { intervals: Array<{ startSec: number; endSec?: number }>; perPage?: number }) =>
+      request<{ items: VisualSimilarVideo[] }>(`${normalizedBasePath}/videos/${videoId}/similar-videos/segment`, { method: "POST", body: JSON.stringify(data) }),
   };
 }
 
@@ -721,8 +721,8 @@ export function createAudioSimilarityClient(apiBasePath: string) {
   const normalizedBasePath = normalizeExtensionApiBasePath(apiBasePath);
 
   return {
-    similarScenesForScene: (sceneId: number, params?: { perPage?: number }) =>
-      request<{ items: AudioSimilarScene[] }>(`${normalizedBasePath}/scenes/${sceneId}/similar-scenes${buildQuery(params)}`),
+    similarVideosForVideo: (videoId: number, params?: { perPage?: number }) =>
+      request<{ items: AudioSimilarVideo[] }>(`${normalizedBasePath}/videos/${videoId}/similar-videos${buildQuery(params)}`),
   };
 }
 
@@ -848,7 +848,7 @@ export const audios = {
     request<void>(`/audios/${id}${buildQuery(undefined, { deleteFile: options?.deleteFile, deleteGenerated: options?.deleteGenerated })}`, { method: "DELETE" }),
   bulkDelete: (ids: number[], options?: DeleteEntityOptions) =>
     request<void>("/audios/bulk", { method: "DELETE", body: JSON.stringify({ ids, deleteFiles: options?.deleteFile ?? false, deleteGenerated: options?.deleteGenerated ?? false }) }),
-  getHistory: (id: number) => request<SceneHistory>(`/audios/${id}/history`),
+  getHistory: (id: number) => request<VideoHistory>(`/audios/${id}/history`),
   resetActivity: (id: number) => request<void>(`/audios/${id}/activity/reset`, { method: "POST" }),
   streamUrl: (id: number) => buildMediaUrl(`/audios/${id}/stream`),
 };
@@ -957,9 +957,9 @@ async function deleteImage(path: string): Promise<void> {
 }
 
 export const entityImages = {
-  sceneCoverUrl: (id: number, version?: string, max = 1600) => buildMediaUrl(`/scenes/${id}/image`, version, max),
-  uploadSceneCoverImage: (id: number, file: File) => uploadImage(`/scenes/${id}/image`, file),
-  deleteSceneCoverImage: (id: number) => deleteImage(`/scenes/${id}/image`),
+  videoCoverUrl: (id: number, version?: string, max = 1600) => buildMediaUrl(`/videos/${id}/image`, version, max),
+  uploadVideoCoverImage: (id: number, file: File) => uploadImage(`/videos/${id}/image`, file),
+  deleteVideoCoverImage: (id: number) => deleteImage(`/videos/${id}/image`),
 
   segmentCoverUrl: (id: number, version?: string, max = 1600) => buildMediaUrl(`/segments/${id}/image`, version, max),
   uploadSegmentCoverImage: (id: number, file: File) => uploadImage(`/segments/${id}/image`, file),
@@ -970,7 +970,7 @@ export const entityImages = {
   performerImageUrl: (id: number, version?: string, max = 640) => buildMediaUrl(`/performers/${id}/image`, version, max),
   uploadPerformerImage: (id: number, file: File) => uploadImage(`/performers/${id}/image`, file),
   deletePerformerImage: (id: number) => deleteImage(`/performers/${id}/image`),
-  setPerformerImageFromSource: (id: number, source: { imageId?: number; sceneId?: number }) =>
+  setPerformerImageFromSource: (id: number, source: { imageId?: number; videoId?: number }) =>
     request<void>(`/performers/${id}/image/source`, { method: "PUT", body: JSON.stringify(source) }),
 
   audioImageUrl: (id: number, version?: string, max = 640) => buildMediaUrl(`/audios/${id}/image`, version, max),
@@ -984,26 +984,26 @@ export const entityImages = {
   studioImageUrl: (id: number, version?: string, max = 640) => buildMediaUrl(`/studios/${id}/image`, version, max),
   uploadStudioImage: (id: number, file: File) => uploadImage(`/studios/${id}/image`, file),
   deleteStudioImage: (id: number) => deleteImage(`/studios/${id}/image`),
-  setStudioImageFromSource: (id: number, source: { imageId?: number; sceneId?: number }) =>
+  setStudioImageFromSource: (id: number, source: { imageId?: number; videoId?: number }) =>
     request<void>(`/studios/${id}/image/source`, { method: "PUT", body: JSON.stringify(source) }),
 
   tagImageUrl: (id: number, version?: string, max = 640) => buildMediaUrl(`/tags/${id}/image`, version, max),
   uploadTagImage: (id: number, file: File) => uploadImage(`/tags/${id}/image`, file),
   deleteTagImage: (id: number) => deleteImage(`/tags/${id}/image`),
-  setTagImageFromSource: (id: number, source: { imageId?: number; sceneId?: number }) =>
+  setTagImageFromSource: (id: number, source: { imageId?: number; videoId?: number }) =>
     request<void>(`/tags/${id}/image/source`, { method: "PUT", body: JSON.stringify(source) }),
 
   groupFrontImageUrl: (id: number, version?: string, max = 640) => buildMediaUrl(`/groups/${id}/image/front`, version, max),
   uploadGroupFrontImage: (id: number, file: File) => uploadImage(`/groups/${id}/image/front`, file),
   deleteGroupFrontImage: (id: number) => deleteImage(`/groups/${id}/image/front`),
-  setGroupFrontImageFromSource: (id: number, source: { imageId?: number; sceneId?: number }) =>
+  setGroupFrontImageFromSource: (id: number, source: { imageId?: number; videoId?: number }) =>
     request<void>(`/groups/${id}/image/front/source`, { method: "PUT", body: JSON.stringify(source) }),
 
   groupBackImageUrl: (id: number, version?: string, max = 640) => buildMediaUrl(`/groups/${id}/image/back`, version, max),
   uploadGroupBackImage: (id: number, file: File) => uploadImage(`/groups/${id}/image/back`, file),
   deleteGroupBackImage: (id: number) => deleteImage(`/groups/${id}/image/back`),
 
-  setGalleryImageFromSource: (id: number, source: { imageId?: number; sceneId?: number }) =>
+  setGalleryImageFromSource: (id: number, source: { imageId?: number; videoId?: number }) =>
     request<void>(`/galleries/${id}/image/source`, { method: "PUT", body: JSON.stringify(source) }),
 };
 
@@ -1060,12 +1060,12 @@ export const scrapeAttempts = {
   get: (id: string) => request<ScrapeAttempt>(`/scrape-attempts/${id}`),
   create: (data: CreateScrapeAttemptRequest) =>
     request<ScrapeAttempt>("/scrape-attempts", { method: "POST", body: JSON.stringify(data) }),
-  apply: (id: string, data: ApplySceneScrapeAttemptRequest) =>
+  apply: (id: string, data: ApplyVideoScrapeAttemptRequest) =>
     request<ScrapeAttempt>(`/scrape-attempts/${id}/apply`, { method: "POST", body: JSON.stringify(data) }),
-  applyScene: (id: string, data: ApplySceneScrapeAttemptRequest) =>
+  applyVideo: (id: string, data: ApplyVideoScrapeAttemptRequest) =>
     request<ScrapeAttempt>(`/scrape-attempts/${id}/apply`, { method: "POST", body: JSON.stringify(data) }),
-  startSceneBatch: (data: BatchSceneScrapeStartRequest) =>
-    request<{ jobId: string; queuedCount: number }>("/scrape-attempts/batch-scenes", { method: "POST", body: JSON.stringify(data) }),
+  startVideoBatch: (data: BatchVideoScrapeStartRequest) =>
+    request<{ jobId: string; queuedCount: number }>("/scrape-attempts/batch-videos", { method: "POST", body: JSON.stringify(data) }),
   startImageBatch: (data: BatchImageScrapeStartRequest) =>
     request<{ jobId: string; queuedCount: number }>("/scrape-attempts/batch-images", { method: "POST", body: JSON.stringify(data) }),
 };
@@ -1124,7 +1124,7 @@ export interface GenerateOptions {
   audioPhashes?: boolean;
   textPhashes?: boolean;
   overwrite?: boolean;
-  sceneIds?: number[];
+  videoIds?: number[];
   imageIds?: number[];
   audioIds?: number[];
   textIds?: number[];
@@ -1146,7 +1146,7 @@ export interface CleanGeneratedOptions {
 }
 
 export interface ExportOptions {
-  includeScenes?: boolean;
+  includeVideos?: boolean;
   includePerformers?: boolean;
   includeStudios?: boolean;
   includeTags?: boolean;
@@ -1169,7 +1169,7 @@ export const metadata = {
     request<{ jobId: string }>("/metadata/export", { method: "POST", body: JSON.stringify(opts ?? {}) }),
   identify: (opts?: {
     sources?: string[];
-    sceneIds?: number[];
+    videoIds?: number[];
     setCoverImage?: boolean;
     setTags?: boolean;
     setPerformers?: boolean;
@@ -1224,7 +1224,7 @@ export const database = {
 export interface StashPreviewResult {
   isValid: boolean;
   error: string | null;
-  scenes: number;
+  videos: number;
   performers: number;
   tags: number;
   studios: number;
@@ -1233,7 +1233,7 @@ export interface StashPreviewResult {
   galleries: number;
 }
 export interface StashImportResult {
-  scenes: number;
+  videos: number;
   performers: number;
   tags: number;
   studios: number;
@@ -1633,3 +1633,4 @@ export const shareLinksApi = {
     request<ShareLinkIssuedRow>("/share-links", { method: "POST", body: JSON.stringify(req) }),
   revoke: (id: string) => request<void>(`/share-links/${id}`, { method: "DELETE" }),
 };
+

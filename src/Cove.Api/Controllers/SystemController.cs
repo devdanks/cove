@@ -113,7 +113,7 @@ public class SystemController(
     [RequiresPermission(Permissions.SystemRead)]
     public async Task<ActionResult<StatsDto>> GetStats(CancellationToken ct)
     {
-        var sceneCt = await db.Scenes.CountAsync(ct);
+        var videoCt = await db.Videos.CountAsync(ct);
         var imageCt = await db.Images.CountAsync(ct);
         var galleryCt = await db.Galleries.CountAsync(ct);
         var performerCt = await db.Performers.CountAsync(ct);
@@ -131,18 +131,18 @@ public class SystemController(
         var tagApplicationCt = await db.TagApplications.CountAsync(ct);
         var aiRunCt = await db.AiRuns.CountAsync(ct);
 
-        var sceneFileSize = await db.VideoFiles.SumAsync(file => (long?)file.Size, ct) ?? 0L;
+        var videoFileSize = await db.VideoFiles.SumAsync(file => (long?)file.Size, ct) ?? 0L;
         var imageFileSize = await db.ImageFiles.SumAsync(file => (long?)file.Size, ct) ?? 0L;
         var audioFileSize = await db.AudioFiles.SumAsync(file => (long?)file.Size, ct) ?? 0L;
         var textFileSize = await db.TextFiles.SumAsync(file => (long?)file.Size, ct) ?? 0L;
-        var totalFileSize = sceneFileSize + imageFileSize + audioFileSize + textFileSize;
+        var totalFileSize = videoFileSize + imageFileSize + audioFileSize + textFileSize;
 
-        var sceneDuration = await db.VideoFiles.SumAsync(file => (double?)file.Duration, ct) ?? 0d;
+        var videoDuration = await db.VideoFiles.SumAsync(file => (double?)file.Duration, ct) ?? 0d;
         var audioDuration = await db.AudioFiles.SumAsync(file => (double?)file.Duration, ct) ?? 0d;
 
         var engagementHostTypes = new[]
         {
-            AffinityHostType.Scene,
+            AffinityHostType.Video,
             AffinityHostType.Audio,
             AffinityHostType.Text,
             AffinityHostType.Image,
@@ -180,7 +180,7 @@ public class SystemController(
             })
             .FirstOrDefaultAsync(ct);
 
-        var sceneEngagement = GetEngagementStats(AffinityHostType.Scene);
+        var videoEngagement = GetEngagementStats(AffinityHostType.Video);
         var audioEngagement = GetEngagementStats(AffinityHostType.Audio);
         var textEngagement = GetEngagementStats(AffinityHostType.Text);
         var imageEngagement = GetEngagementStats(AffinityHostType.Image);
@@ -191,7 +191,7 @@ public class SystemController(
         var totalFavorites = affinityTotals?.TotalFavorites ?? 0L;
 
         return Ok(new StatsDto(
-            sceneCt,
+            videoCt,
             imageCt,
             galleryCt,
             performerCt,
@@ -207,25 +207,25 @@ public class SystemController(
             detectionCt,
             tagApplicationCt,
             aiRunCt,
-            sceneFileSize,
+            videoFileSize,
             imageFileSize,
             audioFileSize,
             textFileSize,
             totalFileSize,
-            sceneDuration,
+            videoDuration,
             audioDuration,
-            sceneEngagement.ConsumedSeconds + audioEngagement.ConsumedSeconds + segmentEngagement.ConsumedSeconds,
-            sceneEngagement.ViewCount,
+            videoEngagement.ConsumedSeconds + audioEngagement.ConsumedSeconds + segmentEngagement.ConsumedSeconds,
+            videoEngagement.ViewCount,
             audioEngagement.ViewCount,
             textEngagement.ViewCount,
             imageEngagement.ViewCount,
             segmentEngagement.ViewCount,
-            sceneEngagement.CompleteCount,
+            videoEngagement.CompleteCount,
             audioEngagement.CompleteCount,
             textEngagement.CompleteCount,
             imageEngagement.CompleteCount,
             segmentEngagement.CompleteCount,
-            sceneEngagement.ConsumedSeconds,
+            videoEngagement.ConsumedSeconds,
             audioEngagement.ConsumedSeconds,
             textEngagement.ConsumedSeconds,
             imageEngagement.ConsumedSeconds,
@@ -398,7 +398,7 @@ public class SystemController(
     [RequiresPermission(Permissions.SystemRead)]
     public async Task<ActionResult<object?>> ScrapeUrlAuto([FromBody] ScraperMatchUrlRequest req, CancellationToken ct)
     {
-        var hit = await scraperService.ScrapeUrlAutoDetailedAsync(req.Url, req.EntityType ?? "scene", ct);
+        var hit = await scraperService.ScrapeUrlAutoDetailedAsync(req.Url, req.EntityType ?? "video", ct);
         if (hit.Result is { Count: > 0 } && hit.ScraperId is not null)
             return Ok(new { scraperId = hit.ScraperId, result = hit.Result });
 
@@ -500,7 +500,7 @@ public class SystemController(
 
                 var completionMessage = result == null
                     ? "Downloader returned no result"
-                    : importedEntityId.HasValue && entity is DownloaderEntity.Scene or DownloaderEntity.Image or DownloaderEntity.Gallery or DownloaderEntity.Audio or DownloaderEntity.Text
+                    : importedEntityId.HasValue && entity is DownloaderEntity.Video or DownloaderEntity.Image or DownloaderEntity.Gallery or DownloaderEntity.Audio or DownloaderEntity.Text
                         ? $"Imported into {entity.ToString().ToLowerInvariant()} {importedEntityId.Value}"
                         : $"Downloaded to {result.LocalPath}";
 
@@ -608,7 +608,7 @@ public class SystemController(
 
         var requirement = entity switch
         {
-            DownloaderEntity.Scene => (EntityKinds.Scene, writeAccess ? Permissions.ScenesWrite : Permissions.ScenesRead),
+            DownloaderEntity.Video => (EntityKinds.Video, writeAccess ? Permissions.VideosWrite : Permissions.VideosRead),
             DownloaderEntity.Image => (EntityKinds.Image, writeAccess ? Permissions.ImagesWrite : Permissions.ImagesRead),
             DownloaderEntity.Gallery => (EntityKinds.Gallery, writeAccess ? Permissions.GalleriesWrite : Permissions.GalleriesRead),
             DownloaderEntity.Audio => (EntityKinds.Audio, writeAccess ? Permissions.AudiosWrite : Permissions.AudiosRead),
@@ -662,3 +662,4 @@ public class SystemController(
 }
 
 public record SetLogLevelRequest(string? Level);
+

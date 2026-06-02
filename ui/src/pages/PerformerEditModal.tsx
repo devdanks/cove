@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Plus } from "lucide-react";
 import { performers, tags as tagsApi } from "../api/client";
 import type { Performer, PerformerUpdate } from "../api/types";
 import { EditModal, Field, TextInput, TextArea, NumberInput, SaveButton } from "../components/EditModal";
@@ -152,6 +153,18 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
   };
 
   const filteredTags = tagResults?.items.filter((tag) => !selectedTagIds.includes(tag.id)) ?? [];
+  const tagExactMatchExists = useMemo(
+    () => trimmedTagSearch && filteredTags.some((tag) => tag.name.toLowerCase() === trimmedTagSearch.toLowerCase()),
+    [filteredTags, trimmedTagSearch],
+  );
+  const tagCreateMutation = useMutation({
+    mutationFn: async (name: string) => tagsApi.create({ name }),
+    onSuccess: (result) => {
+      addTag(result);
+      queryClient.invalidateQueries({ queryKey: ["tags"] });
+    },
+  });
+  const showTagCreateOption = trimmedTagSearch && !tagResultsLoading && !tagExactMatchExists;
   const selectedTags = selectedTagIds
     .map((tagId) => selectedTagsById[tagId])
     .filter((tag): tag is SelectedTagOption => Boolean(tag));
@@ -311,11 +324,29 @@ export function PerformerEditModal({ performer, open, onClose }: Props) {
           <div className="max-h-32 overflow-y-auto bg-card rounded border border-border">
             {tagResultsLoading ? (
               <div className="px-3 py-1.5 text-sm text-secondary">Loading...</div>
-            ) : filteredTags.length === 0 ? (
+            ) : filteredTags.length === 0 && !showTagCreateOption ? (
               <div className="px-3 py-1.5 text-sm text-secondary">No tags found</div>
-            ) : (
+            ) : null}
+            {filteredTags.length > 0 ? (
               <GroupedTagOptionList tags={filteredTags} maxItems={20} className="border-0 bg-transparent" onSelect={addTag} preserveOrder />
-            )}
+            ) : null}
+            {showTagCreateOption ? (
+              <button
+                type="button"
+                onClick={() => tagCreateMutation.mutate(trimmedTagSearch)}
+                disabled={tagCreateMutation.isPending}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-accent hover:bg-card disabled:opacity-50"
+              >
+                {tagCreateMutation.isPending ? (
+                  <span className="text-secondary">Creating...</span>
+                ) : (
+                  <>
+                    <Plus className="h-3 w-3" />
+                    <span>Create &ldquo;{trimmedTagSearch}&rdquo;</span>
+                  </>
+                )}
+              </button>
+            ) : null}
           </div>
         )}
       </Field>

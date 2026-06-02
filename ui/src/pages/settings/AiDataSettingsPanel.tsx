@@ -16,7 +16,7 @@ const KIND_OPTIONS: Array<{ value: AiDataKind; label: string }> = [
 ];
 
 const MODALITY_OPTIONS = ["visual", "audio", "face", "text", "other"];
-const HOST_TYPE_OPTIONS = ["scene", "image", "performer", "face", "segment", "audio"];
+const HOST_TYPE_OPTIONS = ["video", "image", "performer", "face", "segment", "audio"];
 
 interface FilterDraft {
   sourceKey: string;
@@ -444,3 +444,4 @@ function formatKind(value: string) {
 function buildRowKey(item: AiDataSummaryItem) {
   return [item.kind, item.detail ?? "", item.sourceKey, item.sourceRunId ?? "", item.model ?? "", item.hostType].join("::");
 }
+

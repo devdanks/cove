@@ -719,7 +719,7 @@ public class TextsController(CoveContext db, CustomFieldService customFields, Te
             .Select(item => new GroupSummaryDto(item.GroupId, item.Group!.Name, 0))
             .ToListAsync(ct);
 
-    private async Task ReplaceWholeTextGroupItemsAsync(int textDocumentId, IReadOnlyCollection<SceneGroupInputDto> groups, string? textTitle, CancellationToken ct)
+    private async Task ReplaceWholeTextGroupItemsAsync(int textDocumentId, IReadOnlyCollection<VideoGroupInputDto> groups, string? textTitle, CancellationToken ct)
     {
         var existing = await db.GroupItems
             .Where(item => item.HostType == "text" && item.HostId == textDocumentId && item.Kind == GroupItemKind.Text)

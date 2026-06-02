@@ -18,7 +18,7 @@ namespace Cove.Api.Controllers;
 public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntityIdentifierService entityIdentifiers, CustomFieldService customFields, SegmentSpanResolver? spanResolver = null, IFieldProvenanceService? fieldProvenanceService = null) : ControllerBase
 {
     private sealed record TagUsageCounts(
-        int SceneCount,
+        int VideoCount,
         int SegmentCount,
         int ImageCount,
         int GalleryCount,
@@ -28,7 +28,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         int AudioCount,
         int TextCount)
     {
-        public int TotalUsageCount => SceneCount + SegmentCount + ImageCount + GalleryCount + GroupCount + PerformerCount + StudioCount + AudioCount + TextCount;
+        public int TotalUsageCount => VideoCount + SegmentCount + ImageCount + GalleryCount + GroupCount + PerformerCount + StudioCount + AudioCount + TextCount;
     }
 
     private sealed record GraphRelation(int ParentId, int ChildId);
@@ -42,14 +42,14 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         if (ids.Length == 0)
             return;
 
-        var sceneIds = await db.Segments.AsNoTracking()
-            .Where(segment => segment.HostType == SegmentHostType.Scene && segment.TagId.HasValue && ids.Contains(segment.TagId.Value))
+        var videoIds = await db.Segments.AsNoTracking()
+            .Where(segment => segment.HostType == SegmentHostType.Video && segment.TagId.HasValue && ids.Contains(segment.TagId.Value))
             .Select(segment => segment.HostId)
             .Distinct()
             .ToListAsync(ct);
 
-        foreach (var sceneId in sceneIds)
-            spanResolver.EvictScene(sceneId);
+        foreach (var videoId in videoIds)
+            spanResolver.EvictVideo(videoId);
     }
 
     [HttpGet]
@@ -140,7 +140,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
                     parentIdsByTagId[tag.Id],
                     childIdsByTagId[tag.Id],
                     usageCounts.TotalUsageCount,
-                    usageCounts.SceneCount,
+                    usageCounts.VideoCount,
                     usageCounts.SegmentCount,
                     usageCounts.ImageCount,
                     usageCounts.GalleryCount,
@@ -185,8 +185,8 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
 
         var segments = await (
             from segment in db.VisibleSegments().AsNoTracking()
-            join scene in db.Scenes.AsNoTracking() on segment.HostId equals scene.Id
-            where segment.HostType == SegmentHostType.Scene && segment.TagId == id
+            join video in db.Videos.AsNoTracking() on segment.HostId equals video.Id
+            where segment.HostType == SegmentHostType.Video && segment.TagId == id
             orderby segment.UpdatedAt descending, segment.Id descending
             select new TagSegmentWallDto(
                 segment.Id,
@@ -196,8 +196,8 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
                 segment.Kind ?? "segment",
                 segment.SourceKey,
                 segment.Confidence,
-                scene.Id,
-                scene.Title ?? $"Scene #{scene.Id}")
+                video.Id,
+                video.Title ?? $"Video #{video.Id}")
         )
             .Take(count)
             .ToListAsync(ct);
@@ -504,7 +504,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
             t.Aliases.Select(a => a.Alias).ToList(),
             t.ParentRelations.Where(pr => pr.Parent != null).Select(pr => MapTagDto(pr.Parent!)).ToList(),
             t.ChildRelations.Where(cr => cr.Child != null).Select(cr => MapTagDto(cr.Child!)).ToList(),
-            usageCounts.SceneCount,
+            usageCounts.VideoCount,
             usageCounts.PerformerCount,
             usageCounts.ImageCount,
             usageCounts.GalleryCount,
@@ -545,7 +545,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
                 t.Favorite,
                 t.IgnoreAutoTag,
                 t.Aliases.Select(a => a.Alias).ToList(),
-                usageCounts.SceneCount,
+                usageCounts.VideoCount,
                 usageCounts.SegmentCount,
                 usageCounts.ImageCount,
                 usageCounts.GalleryCount,
@@ -576,7 +576,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         if (ids.Length == 0)
             return [];
 
-        var sceneCounts = await EffectiveHostTagQuery.ForHostType(db, AffinityHostType.Scene)
+        var videoCounts = await EffectiveHostTagQuery.ForHostType(db, AffinityHostType.Video)
             .AsNoTracking()
             .Where(tag => ids.Contains(tag.TagId))
             .Select(tag => new { tag.TagId, tag.HostId })
@@ -584,7 +584,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
             .GroupBy(tag => tag.TagId)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToDictionaryAsync(item => item.Key, item => item.Count, ct);
-        var segmentCounts = await LoadSceneSegmentCountsAsync(ids, ct);
+        var segmentCounts = await LoadVideoSegmentCountsAsync(ids, ct);
         var imageCounts = await db.Set<ImageTag>()
             .AsNoTracking()
             .Where(imageTag => ids.Contains(imageTag.TagId))
@@ -633,7 +633,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         return ids.ToDictionary(
             id => id,
             id => new TagUsageCounts(
-                sceneCounts.GetValueOrDefault(id),
+                videoCounts.GetValueOrDefault(id),
                 segmentCounts.GetValueOrDefault(id),
                 imageCounts.GetValueOrDefault(id),
                 galleryCounts.GetValueOrDefault(id),
@@ -711,7 +711,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         return true;
     }
 
-    private async Task<Dictionary<int, int>> LoadSceneSegmentCountsAsync(IEnumerable<int> tagIds, CancellationToken ct)
+    private async Task<Dictionary<int, int>> LoadVideoSegmentCountsAsync(IEnumerable<int> tagIds, CancellationToken ct)
     {
         var ids = tagIds.Distinct().ToList();
         if (ids.Count == 0)
@@ -719,7 +719,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
 
         return await db.VisibleSegments()
             .AsNoTracking()
-            .Where(segment => segment.HostType == SegmentHostType.Scene && segment.TagId.HasValue && ids.Contains(segment.TagId.Value))
+            .Where(segment => segment.HostType == SegmentHostType.Video && segment.TagId.HasValue && ids.Contains(segment.TagId.Value))
             .GroupBy(segment => segment.TagId!.Value)
             .Select(group => new { TagId = group.Key, Count = group.Count() })
             .ToDictionaryAsync(item => item.TagId, item => item.Count, ct);
@@ -830,7 +830,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
 
         var sources = await db.Tags
             .Include(t => t.Aliases)
-            .Include(t => t.SceneTags)
+            .Include(t => t.VideoTags)
             .Include(t => t.PerformerTags)
             .Include(t => t.ImageTags)
             .Include(t => t.GalleryTags)
@@ -840,10 +840,10 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
 
         foreach (var source in sources)
         {
-            // Move scene associations
-            foreach (var st in source.SceneTags)
-                if (!target.SceneTags.Any(t => t.SceneId == st.SceneId))
-                    db.Set<SceneTag>().Add(new SceneTag { SceneId = st.SceneId, TagId = target.Id });
+            // Move video associations
+            foreach (var st in source.VideoTags)
+                if (!target.VideoTags.Any(t => t.VideoId == st.VideoId))
+                    db.Set<VideoTag>().Add(new VideoTag { VideoId = st.VideoId, TagId = target.Id });
             // Move performer associations
             foreach (var pt in source.PerformerTags)
                 if (!target.PerformerTags.Any(t => t.PerformerId == pt.PerformerId))
@@ -873,7 +873,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
     {
         var query = db.Segments
             .AsNoTracking()
-            .Where(segment => segment.HostType == SegmentHostType.Scene && segment.Title != null && segment.Title != string.Empty)
+            .Where(segment => segment.HostType == SegmentHostType.Video && segment.Title != null && segment.Title != string.Empty)
             .Select(segment => segment.Title!)
             .Distinct();
         if (!string.IsNullOrEmpty(q))
@@ -892,7 +892,7 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         var result = sort == "count"
             ? await db.Segments
                 .AsNoTracking()
-                .Where(segment => segment.HostType == SegmentHostType.Scene && segment.Title != null && segment.Title != string.Empty)
+                .Where(segment => segment.HostType == SegmentHostType.Video && segment.Title != null && segment.Title != string.Empty)
                 .GroupBy(segment => segment.Title!)
                 .OrderByDescending(group => group.Count())
                 .Select(group => group.Key)
@@ -903,3 +903,4 @@ public class TagsController(ITagRepository tagRepo, Data.CoveContext db, IEntity
         return Ok(result);
     }
 }
+

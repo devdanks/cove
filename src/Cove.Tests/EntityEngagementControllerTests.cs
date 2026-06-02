@@ -33,12 +33,12 @@ public class EntityEngagementControllerTests
         var favoriteDto = Assert.IsType<EntityEngagementDto>(favoriteOk.Value);
         Assert.True(favoriteDto.IsFavorite);
 
-        var ratingResult = await controller.SetRating(AffinityHostType.Performer, performerId, new SceneRatingDto(91), CancellationToken.None);
+        var ratingResult = await controller.SetRating(AffinityHostType.Performer, performerId, new VideoRatingDto(91), CancellationToken.None);
         var ratingOk = Assert.IsType<OkObjectResult>(ratingResult.Result);
         var ratingDto = Assert.IsType<EntityEngagementDto>(ratingOk.Value);
         Assert.Equal(91, ratingDto.Rating);
 
-        var audioRatingResult = await controller.SetRating(AffinityHostType.Performer, performerId, new SceneRatingDto(40, "audio"), CancellationToken.None);
+        var audioRatingResult = await controller.SetRating(AffinityHostType.Performer, performerId, new VideoRatingDto(40, "audio"), CancellationToken.None);
         var audioRatingOk = Assert.IsType<OkObjectResult>(audioRatingResult.Result);
         var audioRatingDto = Assert.IsType<EntityEngagementDto>(audioRatingOk.Value);
         Assert.Equal(91, audioRatingDto.Rating);
@@ -198,3 +198,4 @@ public class EntityEngagementControllerTests
         }
     }
 }
+

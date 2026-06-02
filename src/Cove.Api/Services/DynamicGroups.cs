@@ -40,7 +40,7 @@ public sealed record DynamicGroupResolvedItem(
     string? CoverPath = null,
     double? StartSec = null,
     double? EndSec = null,
-    int? SceneId = null,
+    int? VideoId = null,
     int? ImageId = null,
     int? ChildGroupId = null);
 
@@ -85,8 +85,8 @@ public sealed class DynamicGroupResolver(CoveContext db, IEnumerable<IDynamicGro
                     QuerySourceKey = sourceKey,
                     CacheTtlSec = 30,
                     AllowedHostTypes = sourceKey == ContinueWatchingSourceKey
-                        ? ["scene", "audio", "segment"]
-                        : ["scene", "audio", "text", "image", "performer", "studio", "tag", "gallery", "group", "face", "segment"],
+                        ? ["video", "audio", "segment"]
+                        : ["video", "audio", "text", "image", "performer", "studio", "tag", "gallery", "group", "face", "segment"],
                 });
                 continue;
             }
@@ -94,8 +94,8 @@ public sealed class DynamicGroupResolver(CoveContext db, IEnumerable<IDynamicGro
             existing.Name = name;
             existing.QuerySourceKey = sourceKey;
             existing.AllowedHostTypes = sourceKey == ContinueWatchingSourceKey
-                ? ["scene", "audio", "segment"]
-                : ["scene", "audio", "text", "image", "performer", "studio", "tag", "gallery", "group", "face", "segment"];
+                ? ["video", "audio", "segment"]
+                : ["video", "audio", "text", "image", "performer", "studio", "tag", "gallery", "group", "face", "segment"];
         }
 
         await db.SaveChangesAsync(ct);
@@ -110,7 +110,7 @@ public sealed class DynamicGroupResolver(CoveContext db, IEnumerable<IDynamicGro
         if (group.Kind == GroupKind.Static)
         {
             var items = await db.GroupItems.AsNoTracking()
-                .Include(item => item.Scene).ThenInclude(scene => scene!.Files)
+                .Include(item => item.Video).ThenInclude(video => video!.Files)
                 .Include(item => item.Image)
                 .Include(item => item.ChildGroup)
                 .Where(item => item.GroupId == groupId)
@@ -166,7 +166,7 @@ public sealed class DynamicGroupResolver(CoveContext db, IEnumerable<IDynamicGro
         if (group.Kind == GroupKind.Static)
         {
             var query = db.GroupItems.AsNoTracking()
-                .Include(item => item.Scene).ThenInclude(scene => scene!.Files)
+                .Include(item => item.Video).ThenInclude(video => video!.Files)
                 .Include(item => item.Image)
                 .Include(item => item.ChildGroup)
                 .Where(item => item.GroupId == groupId)
@@ -214,7 +214,7 @@ public sealed class DynamicGroupResolver(CoveContext db, IEnumerable<IDynamicGro
                 Kind = item.Kind,
                 HostType = item.HostType,
                 HostId = item.HostId,
-                SceneId = item.SceneId,
+                VideoId = item.VideoId,
                 ImageId = item.ImageId,
                 ChildGroupId = item.ChildGroupId,
                 StartSec = item.StartSec,
@@ -313,7 +313,7 @@ public sealed class DynamicGroupResolver(CoveContext db, IEnumerable<IDynamicGro
     private async Task<IReadOnlyList<DynamicGroupResolvedItem>> ResolveStaticAsync(int groupId, CancellationToken ct)
     {
         var items = await db.GroupItems.AsNoTracking()
-            .Include(item => item.Scene).ThenInclude(scene => scene!.Files)
+            .Include(item => item.Video).ThenInclude(video => video!.Files)
             .Include(item => item.Image)
             .Include(item => item.ChildGroup)
             .Where(item => item.GroupId == groupId)
@@ -325,27 +325,27 @@ public sealed class DynamicGroupResolver(CoveContext db, IEnumerable<IDynamicGro
             item.HostType,
             item.HostId,
             item.Kind,
-            item.Title ?? SceneTitle(item.Scene) ?? item.Image?.Title ?? item.ChildGroup?.Name,
+            item.Title ?? VideoTitle(item.Video) ?? item.Image?.Title ?? item.ChildGroup?.Name,
             item.OrderIndex,
-            SceneId: item.SceneId,
+            VideoId: item.VideoId,
             ImageId: item.ImageId,
             ChildGroupId: item.ChildGroupId,
             StartSec: item.StartSec,
             EndSec: item.EndSec)).ToList();
     }
 
-    private static string? SceneTitle(Scene? scene)
-        => !string.IsNullOrWhiteSpace(scene?.Title)
-            ? scene.Title
-            : scene?.Files.OrderBy(file => file.Id).FirstOrDefault()?.Basename;
+    private static string? VideoTitle(Video? video)
+        => !string.IsNullOrWhiteSpace(video?.Title)
+            ? video.Title
+            : video?.Files.OrderBy(file => file.Id).FirstOrDefault()?.Basename;
 
     private static GroupItemDto ToDto(GroupItem item) => new(
         item.Id,
         item.GroupId,
         item.OrderIndex,
         item.Kind,
-        item.SceneId,
-        SceneTitle(item.Scene),
+        item.VideoId,
+        VideoTitle(item.Video),
         item.HostType,
         item.HostId,
         item.ImageId,
@@ -368,8 +368,8 @@ public sealed class DynamicGroupResolver(CoveContext db, IEnumerable<IDynamicGro
         groupId,
         index,
         item.Kind,
-        item.SceneId,
-        item.Kind is GroupItemKind.Scene or GroupItemKind.SceneRange ? item.Title : null,
+        item.VideoId,
+        item.Kind is GroupItemKind.Video or GroupItemKind.VideoRange ? item.Title : null,
         item.HostType,
         item.HostId,
         item.ImageId,
@@ -400,7 +400,7 @@ public abstract class UserScopedDynamicGroupSource(CoveContext db) : IDynamicGro
 
     protected static GroupItemKind ToKind(AffinityHostType hostType) => hostType switch
     {
-        AffinityHostType.Scene => GroupItemKind.Scene,
+        AffinityHostType.Video => GroupItemKind.Video,
         AffinityHostType.Audio => GroupItemKind.Audio,
         AffinityHostType.Text => GroupItemKind.Text,
         AffinityHostType.Image => GroupItemKind.Image,
@@ -411,7 +411,7 @@ public abstract class UserScopedDynamicGroupSource(CoveContext db) : IDynamicGro
         AffinityHostType.Gallery => GroupItemKind.Gallery,
         AffinityHostType.Group => GroupItemKind.Group,
         AffinityHostType.Segment => GroupItemKind.Segment,
-        _ => GroupItemKind.Scene,
+        _ => GroupItemKind.Video,
     };
 
     protected static string ToHostName(AffinityHostType hostType)
@@ -421,7 +421,7 @@ public abstract class UserScopedDynamicGroupSource(CoveContext db) : IDynamicGro
         IReadOnlyList<(AffinityHostType HostType, int HostId, double SortKey)> rows,
         CancellationToken ct)
     {
-        var sceneIds = rows.Where(row => row.HostType == AffinityHostType.Scene).Select(row => row.HostId).Distinct().ToArray();
+        var videoIds = rows.Where(row => row.HostType == AffinityHostType.Video).Select(row => row.HostId).Distinct().ToArray();
         var audioIds = rows.Where(row => row.HostType == AffinityHostType.Audio).Select(row => row.HostId).Distinct().ToArray();
         var textIds = rows.Where(row => row.HostType == AffinityHostType.Text).Select(row => row.HostId).Distinct().ToArray();
         var imageIds = rows.Where(row => row.HostType == AffinityHostType.Image).Select(row => row.HostId).Distinct().ToArray();
@@ -433,14 +433,14 @@ public abstract class UserScopedDynamicGroupSource(CoveContext db) : IDynamicGro
         var groupIds = rows.Where(row => row.HostType == AffinityHostType.Group).Select(row => row.HostId).Distinct().ToArray();
         var segmentIds = rows.Where(row => row.HostType == AffinityHostType.Segment).Select(row => row.HostId).Distinct().ToArray();
 
-        var scenes = await Db.Scenes.AsNoTracking().Where(item => sceneIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => item.Title, ct);
-        var sceneFileRows = await Db.VideoFiles.AsNoTracking()
-            .Where(file => file.SceneId != null && sceneIds.Contains(file.SceneId.Value))
+        var videos = await Db.Videos.AsNoTracking().Where(item => videoIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => item.Title, ct);
+        var videoFileRows = await Db.VideoFiles.AsNoTracking()
+            .Where(file => file.VideoId != null && videoIds.Contains(file.VideoId.Value))
             .OrderBy(file => file.Id)
-            .Select(file => new { SceneId = file.SceneId!.Value, file.Basename })
+            .Select(file => new { VideoId = file.VideoId!.Value, file.Basename })
             .ToListAsync(ct);
-        var sceneFileTitles = sceneFileRows
-            .GroupBy(file => file.SceneId)
+        var videoFileTitles = videoFileRows
+            .GroupBy(file => file.VideoId)
             .ToDictionary(group => group.Key, group => group.First().Basename);
         var audios = await Db.Audios.AsNoTracking().Where(item => audioIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => !string.IsNullOrWhiteSpace(item.Title) ? item.Title! : item.MinPath ?? $"Audio {item.Id}", ct);
         var texts = await Db.TextDocuments.AsNoTracking().Where(item => textIds.Contains(item.Id)).ToDictionaryAsync(item => item.Id, item => !string.IsNullOrWhiteSpace(item.Title) ? item.Title! : item.MinPath ?? $"Text {item.Id}", ct);
@@ -458,8 +458,8 @@ public abstract class UserScopedDynamicGroupSource(CoveContext db) : IDynamicGro
 
         string? TitleFor(AffinityHostType hostType, int hostId) => hostType switch
         {
-            AffinityHostType.Scene => scenes.TryGetValue(hostId, out var sceneTitle)
-                ? !string.IsNullOrWhiteSpace(sceneTitle) ? sceneTitle : sceneFileTitles.GetValueOrDefault(hostId) ?? $"Scene {hostId}"
+            AffinityHostType.Video => videos.TryGetValue(hostId, out var videoTitle)
+                ? !string.IsNullOrWhiteSpace(videoTitle) ? videoTitle : videoFileTitles.GetValueOrDefault(hostId) ?? $"Video {hostId}"
                 : null,
             AffinityHostType.Audio => audios.GetValueOrDefault(hostId),
             AffinityHostType.Text => texts.GetValueOrDefault(hostId),
@@ -476,12 +476,12 @@ public abstract class UserScopedDynamicGroupSource(CoveContext db) : IDynamicGro
             _ => null,
         };
 
-        int? SceneIdFor(AffinityHostType hostType, int hostId)
-            => hostType == AffinityHostType.Scene
+        int? VideoIdFor(AffinityHostType hostType, int hostId)
+            => hostType == AffinityHostType.Video
                 ? hostId
                 : hostType == AffinityHostType.Segment
                     && segments.TryGetValue(hostId, out var segment)
-                    && segment.HostType == SegmentHostType.Scene
+                    && segment.HostType == SegmentHostType.Video
                     ? segment.HostId
                     : null;
 
@@ -498,7 +498,7 @@ public abstract class UserScopedDynamicGroupSource(CoveContext db) : IDynamicGro
                 ToKind(row.HostType),
                 TitleFor(row.HostType, row.HostId),
                 row.SortKey,
-                SceneId: SceneIdFor(row.HostType, row.HostId),
+                VideoId: VideoIdFor(row.HostType, row.HostId),
                 ImageId: row.HostType == AffinityHostType.Image ? row.HostId : null,
                 ChildGroupId: row.HostType == AffinityHostType.Group ? row.HostId : null,
                 StartSec: StartSecFor(row.HostType, row.HostId),
@@ -520,7 +520,7 @@ public abstract class UserScopedDynamicGroupSource(CoveContext db) : IDynamicGro
     }
 }
 
-public sealed class FilterDynamicGroupSource(CoveContext db, ISceneRepository sceneRepository, IImageRepository imageRepository) : IDynamicGroupSource, IDynamicGroupCountingSource
+public sealed class FilterDynamicGroupSource(CoveContext db, IVideoRepository videoRepository, IImageRepository imageRepository) : IDynamicGroupSource, IDynamicGroupCountingSource
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -574,7 +574,7 @@ public sealed class FilterDynamicGroupSource(CoveContext db, ISceneRepository sc
     }
 
     public Task<JsonNode> GetEditorSchemaAsync(CancellationToken ct = default)
-        => Task.FromResult<JsonNode>(new JsonObject { ["type"] = "filter", ["entityTypes"] = new JsonArray("scene", "image", "audio", "text", "segment") });
+        => Task.FromResult<JsonNode>(new JsonObject { ["type"] = "filter", ["entityTypes"] = new JsonArray("video", "image", "audio", "text", "segment") });
 
     public async Task<IReadOnlyDictionary<GroupItemKind, int>> CountByKindAsync(Group group, DynamicGroupResolveContext context, CancellationToken ct)
     {
@@ -603,7 +603,7 @@ public sealed class FilterDynamicGroupSource(CoveContext db, ISceneRepository sc
             "audio" => ResolveAudiosAsync(entityConfig, findFilter, localOffset, localLimit, ct),
             "text" => ResolveTextsAsync(entityConfig, findFilter, localOffset, localLimit, ct),
             "segment" => ResolveSegmentsAsync(entityConfig, findFilter, localOffset, localLimit, ct),
-            "scene" => ResolveScenesAsync(entityConfig, findFilter, localOffset, localLimit, ct),
+            "video" => ResolveVideosAsync(entityConfig, findFilter, localOffset, localLimit, ct),
             _ => Task.FromResult(new DynamicGroupResolveResult([], 0)),
         };
     }
@@ -613,7 +613,7 @@ public sealed class FilterDynamicGroupSource(CoveContext db, ISceneRepository sc
         var findFilter = BuildFindFilter(entityConfig.FindFilter, 0, 1);
         return entityConfig.EntityType switch
         {
-            "scene" => (await sceneRepository.FindAsync(DeserializeFilter<SceneFilter>(entityConfig.ObjectFilter) ?? new SceneFilter(), findFilter, ct)).TotalCount,
+            "video" => (await videoRepository.FindAsync(DeserializeFilter<VideoFilter>(entityConfig.ObjectFilter) ?? new VideoFilter(), findFilter, ct)).TotalCount,
             "image" => (await imageRepository.FindAsync(DeserializeFilter<ImageFilter>(entityConfig.ObjectFilter) ?? new ImageFilter(), findFilter, ct)).TotalCount,
             "audio" => await ApplyAudioFilter(ApplyAudioSearch(db.Audios.AsNoTracking(), findFilter.Q), DeserializeFilter<AudioFilter>(entityConfig.ObjectFilter)).CountAsync(ct),
             "text" => await ApplyTextFilter(ApplyTextSearch(db.TextDocuments.AsNoTracking(), findFilter.Q), DeserializeFilter<TextDocumentFilter>(entityConfig.ObjectFilter)).CountAsync(ct),
@@ -622,19 +622,19 @@ public sealed class FilterDynamicGroupSource(CoveContext db, ISceneRepository sc
         };
     }
 
-    private async Task<DynamicGroupResolveResult> ResolveScenesAsync(FilterEntityConfig entityConfig, FindFilter findFilter, int localOffset, int localLimit, CancellationToken ct)
+    private async Task<DynamicGroupResolveResult> ResolveVideosAsync(FilterEntityConfig entityConfig, FindFilter findFilter, int localOffset, int localLimit, CancellationToken ct)
     {
-        var (scenes, totalCount) = await sceneRepository.FindAsync(DeserializeFilter<SceneFilter>(entityConfig.ObjectFilter) ?? new SceneFilter(), findFilter, ct);
+        var (videos, totalCount) = await videoRepository.FindAsync(DeserializeFilter<VideoFilter>(entityConfig.ObjectFilter) ?? new VideoFilter(), findFilter, ct);
         if (localLimit <= 0 || localOffset >= totalCount)
             return new DynamicGroupResolveResult([], totalCount);
 
-        var items = scenes.Skip(localOffset).Take(localLimit).Select((scene, index) => new DynamicGroupResolvedItem(
-            "scene",
-            scene.Id,
-            GroupItemKind.Scene,
-            SceneTitle(scene),
+        var items = videos.Skip(localOffset).Take(localLimit).Select((video, index) => new DynamicGroupResolvedItem(
+            "video",
+            video.Id,
+            GroupItemKind.Video,
+            VideoTitle(video),
             localOffset + index,
-            SceneId: scene.Id)).ToList();
+            VideoId: video.Id)).ToList();
         return new DynamicGroupResolveResult(items, totalCount);
     }
 
@@ -744,9 +744,9 @@ public sealed class FilterDynamicGroupSource(CoveContext db, ISceneRepository sc
             "source_run_id" or "segment_source_run_id" => desc
                 ? query.OrderByDescending(segment => segment.SourceRunId ?? string.Empty).ThenByDescending(segment => segment.Id)
                 : query.OrderBy(segment => segment.SourceRunId ?? string.Empty).ThenBy(segment => segment.Id),
-            "scene_title" or "host_title" => desc
-                ? query.OrderByDescending(segment => db.Scenes.Where(scene => segment.HostType == SegmentHostType.Scene && scene.Id == segment.HostId).Select(scene => scene.Title).FirstOrDefault() ?? string.Empty).ThenByDescending(segment => segment.Id)
-                : query.OrderBy(segment => db.Scenes.Where(scene => segment.HostType == SegmentHostType.Scene && scene.Id == segment.HostId).Select(scene => scene.Title).FirstOrDefault() ?? string.Empty).ThenBy(segment => segment.Id),
+            "video_title" or "host_title" => desc
+                ? query.OrderByDescending(segment => db.Videos.Where(video => segment.HostType == SegmentHostType.Video && video.Id == segment.HostId).Select(video => video.Title).FirstOrDefault() ?? string.Empty).ThenByDescending(segment => segment.Id)
+                : query.OrderBy(segment => db.Videos.Where(video => segment.HostType == SegmentHostType.Video && video.Id == segment.HostId).Select(video => video.Title).FirstOrDefault() ?? string.Empty).ThenBy(segment => segment.Id),
             "host_type" => desc
                 ? query.OrderByDescending(segment => segment.HostType).ThenByDescending(segment => segment.Id)
                 : query.OrderBy(segment => segment.HostType).ThenBy(segment => segment.Id),
@@ -774,7 +774,7 @@ public sealed class FilterDynamicGroupSource(CoveContext db, ISceneRepository sc
             localOffset + index,
             StartSec: segment.StartSec,
             EndSec: segment.EndSec,
-            SceneId: segment.HostType == SegmentHostType.Scene ? segment.HostId : null,
+            VideoId: segment.HostType == SegmentHostType.Video ? segment.HostId : null,
             ImageId: segment.HostType == SegmentHostType.Image ? segment.HostId : null)).ToList(), totalCount);
     }
 
@@ -797,10 +797,10 @@ public sealed class FilterDynamicGroupSource(CoveContext db, ISceneRepository sc
     {
         var rawEntityTypes = query.EntityTypes?.Count > 0
             ? query.EntityTypes
-            : [query.EntityType ?? "scene"];
+            : [query.EntityType ?? "video"];
         var allowedHostTypes = group.AllowedHostTypes.Count > 0
             ? group.AllowedHostTypes
-            : ["scene", "image", "audio", "text", "segment"];
+            : ["video", "image", "audio", "text", "segment"];
 
         return rawEntityTypes
             .Select(NormalizeEntityType)
@@ -840,7 +840,7 @@ public sealed class FilterDynamicGroupSource(CoveContext db, ISceneRepository sc
     }
 
     private static bool IsSupportedEntityType(string entityType)
-        => entityType is "scene" or "image" or "audio" or "text" or "segment";
+        => entityType is "video" or "image" or "audio" or "text" or "segment";
 
     private static TFilter? DeserializeFilter<TFilter>(JsonElement? objectFilter)
     {
@@ -898,7 +898,7 @@ public sealed class FilterDynamicGroupSource(CoveContext db, ISceneRepository sc
 
     private static string NormalizeEntityType(string? entityType)
     {
-        var normalized = string.IsNullOrWhiteSpace(entityType) ? "scene" : entityType.Trim().ToLowerInvariant();
+        var normalized = string.IsNullOrWhiteSpace(entityType) ? "video" : entityType.Trim().ToLowerInvariant();
         return normalized.EndsWith('s') ? normalized[..^1] : normalized;
     }
 
@@ -951,8 +951,8 @@ public sealed class FilterDynamicGroupSource(CoveContext db, ISceneRepository sc
             return query;
 
         query = FilterHelpers.ApplyString(query, filter.TitleCriterion, segment => segment.Title);
-        query = ApplySegmentSceneCriterion(query, filter.ScenesCriterion);
-        query = ApplySegmentSceneTitleCriterion(query, filter.SceneTitleCriterion);
+        query = ApplySegmentVideoCriterion(query, filter.VideosCriterion);
+        query = ApplySegmentVideoTitleCriterion(query, filter.VideoTitleCriterion);
         query = ApplySegmentHostTypeCriterion(query, filter.HostTypeCriterion);
         query = ApplySegmentSourceCategoryCriterion(query, filter.SourceCategoryCriterion);
         query = FilterHelpers.ApplyString(query, filter.KindCriterion, segment => segment.Kind);
@@ -973,7 +973,7 @@ public sealed class FilterDynamicGroupSource(CoveContext db, ISceneRepository sc
         return query;
     }
 
-    private IQueryable<Segment> ApplySegmentSceneCriterion(IQueryable<Segment> query, MultiIdCriterion? criterion)
+    private IQueryable<Segment> ApplySegmentVideoCriterion(IQueryable<Segment> query, MultiIdCriterion? criterion)
     {
         if (criterion == null || (criterion.Value.Count == 0 && (criterion.Excludes == null || criterion.Excludes.Count == 0)))
             return query;
@@ -983,26 +983,26 @@ public sealed class FilterDynamicGroupSource(CoveContext db, ISceneRepository sc
         {
             query = criterion.Modifier switch
             {
-                CriterionModifier.Excludes or CriterionModifier.ExcludesAll => query.Where(segment => segment.HostType != SegmentHostType.Scene || !ids.Contains(segment.HostId)),
-                _ => query.Where(segment => segment.HostType == SegmentHostType.Scene && ids.Contains(segment.HostId)),
+                CriterionModifier.Excludes or CriterionModifier.ExcludesAll => query.Where(segment => segment.HostType != SegmentHostType.Video || !ids.Contains(segment.HostId)),
+                _ => query.Where(segment => segment.HostType == SegmentHostType.Video && ids.Contains(segment.HostId)),
             };
         }
 
         var excludedIds = criterion.Excludes?.Where(id => id > 0).Distinct().ToArray() ?? [];
         if (excludedIds.Length > 0)
-            query = query.Where(segment => segment.HostType != SegmentHostType.Scene || !excludedIds.Contains(segment.HostId));
+            query = query.Where(segment => segment.HostType != SegmentHostType.Video || !excludedIds.Contains(segment.HostId));
 
         return query;
     }
 
-    private IQueryable<Segment> ApplySegmentSceneTitleCriterion(IQueryable<Segment> query, StringCriterion? criterion)
+    private IQueryable<Segment> ApplySegmentVideoTitleCriterion(IQueryable<Segment> query, StringCriterion? criterion)
     {
         if (criterion == null)
             return query;
 
-        var sceneIds = FilterHelpers.ApplyString(db.Scenes.AsNoTracking(), criterion, scene => scene.Title)
-            .Select(scene => scene.Id);
-        return query.Where(segment => segment.HostType == SegmentHostType.Scene && sceneIds.Contains(segment.HostId));
+        var videoIds = FilterHelpers.ApplyString(db.Videos.AsNoTracking(), criterion, video => video.Title)
+            .Select(video => video.Id);
+        return query.Where(segment => segment.HostType == SegmentHostType.Video && videoIds.Contains(segment.HostId));
     }
 
     private static IQueryable<Segment> ApplySegmentHostTypeCriterion(IQueryable<Segment> query, StringCriterion? criterion)
@@ -1451,7 +1451,7 @@ public sealed class FilterDynamicGroupSource(CoveContext db, ISceneRepository sc
         "audio" => GroupItemKind.Audio,
         "text" => GroupItemKind.Text,
         "segment" => GroupItemKind.Segment,
-        _ => GroupItemKind.Scene,
+        _ => GroupItemKind.Video,
     };
 
     private IQueryable<Audio> ApplyAudioSort(IQueryable<Audio> query, string? sort, bool desc)
@@ -1522,10 +1522,10 @@ public sealed class FilterDynamicGroupSource(CoveContext db, ISceneRepository sc
         }
     }
 
-    private static string SceneTitle(Scene scene)
-        => !string.IsNullOrWhiteSpace(scene.Title)
-            ? scene.Title
-            : scene.Files.OrderBy(file => file.Id).FirstOrDefault()?.Basename ?? $"Scene {scene.Id}";
+    private static string VideoTitle(Video video)
+        => !string.IsNullOrWhiteSpace(video.Title)
+            ? video.Title
+            : video.Files.OrderBy(file => file.Id).FirstOrDefault()?.Basename ?? $"Video {video.Id}";
 
     private sealed class FilterDynamicGroupQuery
     {
@@ -1539,8 +1539,8 @@ public sealed class FilterDynamicGroupSource(CoveContext db, ISceneRepository sc
 
     private sealed class SegmentFilter
     {
-        public StringCriterion? SceneTitleCriterion { get; set; }
-        public MultiIdCriterion? ScenesCriterion { get; set; }
+        public StringCriterion? VideoTitleCriterion { get; set; }
+        public MultiIdCriterion? VideosCriterion { get; set; }
         public StringCriterion? TitleCriterion { get; set; }
         public StringCriterion? HostTypeCriterion { get; set; }
         public StringCriterion? SourceCategoryCriterion { get; set; }
@@ -1607,7 +1607,7 @@ public sealed class ContinueWatchingDynamicGroupSource(CoveContext db) : UserSco
     {
         var query = Db.UserEntityAffinities.AsNoTracking()
             .Where(affinity => affinity.UserId == context.UserId
-                && (affinity.HostType == AffinityHostType.Scene || affinity.HostType == AffinityHostType.Audio || affinity.HostType == AffinityHostType.Segment)
+                && (affinity.HostType == AffinityHostType.Video || affinity.HostType == AffinityHostType.Audio || affinity.HostType == AffinityHostType.Segment)
                 && affinity.LastConsumedAt != null
                 && affinity.LastPositionSec > 0
                 && affinity.CompleteCount == 0)
@@ -1615,14 +1615,14 @@ public sealed class ContinueWatchingDynamicGroupSource(CoveContext db) : UserSco
         var rows = await query
             .Select(affinity => new { affinity.HostType, affinity.HostId, affinity.LastConsumedAt, affinity.LastPositionSec })
             .ToListAsync(ct);
-        var sceneIds = rows.Where(row => row.HostType == AffinityHostType.Scene).Select(row => row.HostId).Distinct().ToArray();
-        var sceneDurations = await Db.Scenes.AsNoTracking()
-            .Where(scene => sceneIds.Contains(scene.Id))
-            .Select(scene => new { scene.Id, scene.MaxDuration })
-            .ToDictionaryAsync(scene => scene.Id, scene => scene.MaxDuration, ct);
+        var videoIds = rows.Where(row => row.HostType == AffinityHostType.Video).Select(row => row.HostId).Distinct().ToArray();
+        var videoDurations = await Db.Videos.AsNoTracking()
+            .Where(video => videoIds.Contains(video.Id))
+            .Select(video => new { video.Id, video.MaxDuration })
+            .ToDictionaryAsync(video => video.Id, video => video.MaxDuration, ct);
         var filteredRows = rows
-            .Where(row => row.HostType != AffinityHostType.Scene
-                || !sceneDurations.TryGetValue(row.HostId, out var maxDuration)
+            .Where(row => row.HostType != AffinityHostType.Video
+                || !videoDurations.TryGetValue(row.HostId, out var maxDuration)
                 || maxDuration <= 0
                 || row.LastPositionSec < maxDuration * 0.95)
             .Select(row => (row.HostType, row.HostId, (double)row.LastConsumedAt!.Value.Ticks))
@@ -1630,3 +1630,4 @@ public sealed class ContinueWatchingDynamicGroupSource(CoveContext db) : UserSco
         return await HydratePageAsync(filteredRows, context, ct);
     }
 }
+

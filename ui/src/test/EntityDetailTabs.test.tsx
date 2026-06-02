@@ -8,7 +8,7 @@ describe("EntityDetailTabs", () => {
       <EntityDetailTabs
         tabs={[
           { key: "images", label: "Images", count: 5 },
-          { key: "scenes", label: "Scenes", count: 1 },
+          { key: "videos", label: "Videos", count: 1 },
           { key: "fileinfo", label: "File Info" },
         ]}
         activeTab="images"
@@ -19,3 +19,4 @@ describe("EntityDetailTabs", () => {
     expect(screen.getByRole("tablist", { name: /detail tabs/i })).not.toHaveClass("mx-auto");
   });
 });
+

@@ -22,25 +22,25 @@ public class DynamicGroupsAndBookmarksTests
         await using var scope = CreateContext();
         var context = scope.Context;
         var principalAccessor = scope.PrincipalAccessor;
-        context.Scenes.Add(new Scene { Title = "Saved Scene" });
+        context.Videos.Add(new Video { Title = "Saved Video" });
         await context.SaveChangesAsync();
-        var sceneId = await context.Scenes.Select(scene => scene.Id).SingleAsync();
+        var videoId = await context.Videos.Select(video => video.Id).SingleAsync();
         var controller = new BookmarksController(context, principalAccessor);
 
         principalAccessor.Set(CreatePrincipal(7));
-        var saveResult = await controller.Toggle(new BookmarkToggleDto(AffinityHostType.Scene, sceneId, true), CancellationToken.None);
+        var saveResult = await controller.Toggle(new BookmarkToggleDto(AffinityHostType.Video, videoId, true), CancellationToken.None);
         var saveOk = Assert.IsType<OkObjectResult>(saveResult.Result);
         var saveState = Assert.IsType<BookmarkStateDto>(saveOk.Value);
         Assert.True(saveState.Saved);
 
-        var userBatchResult = await controller.Batch(new BookmarkBatchRequestDto(AffinityHostType.Scene, [sceneId]), CancellationToken.None);
+        var userBatchResult = await controller.Batch(new BookmarkBatchRequestDto(AffinityHostType.Video, [videoId]), CancellationToken.None);
         var userBatchOk = Assert.IsType<OkObjectResult>(userBatchResult.Result);
         var userStates = Assert.IsAssignableFrom<IReadOnlyList<BookmarkStateDto>>(userBatchOk.Value);
         Assert.True(userStates.Single().Saved);
 
         context.ChangeTracker.Clear();
         principalAccessor.Set(CreatePrincipal(9));
-        var otherBatchResult = await controller.Batch(new BookmarkBatchRequestDto(AffinityHostType.Scene, [sceneId]), CancellationToken.None);
+        var otherBatchResult = await controller.Batch(new BookmarkBatchRequestDto(AffinityHostType.Video, [videoId]), CancellationToken.None);
         var otherBatchOk = Assert.IsType<OkObjectResult>(otherBatchResult.Result);
         var otherStates = Assert.IsAssignableFrom<IReadOnlyList<BookmarkStateDto>>(otherBatchOk.Value);
         Assert.False(otherStates.Single().Saved);
@@ -56,21 +56,21 @@ public class DynamicGroupsAndBookmarksTests
         var principalAccessor = scope.PrincipalAccessor;
         principalAccessor.Set(CreatePrincipal(7));
 
-        var firstScene = new Scene { Title = "First" };
-        var secondScene = new Scene { Title = "Second" };
+        var firstVideo = new Video { Title = "First" };
+        var secondVideo = new Video { Title = "Second" };
         var group = new Group { Name = "Save for Later", Kind = GroupKind.Dynamic, QuerySourceKey = DynamicGroupResolver.SaveForLaterSourceKey };
-        context.AddRange(firstScene, secondScene, group);
+        context.AddRange(firstVideo, secondVideo, group);
         await context.SaveChangesAsync();
         context.UserBookmarks.AddRange(
-            new UserBookmark { UserId = 7, HostType = AffinityHostType.Scene, HostId = firstScene.Id, CreatedAt = DateTime.UtcNow.AddMinutes(-10) },
-            new UserBookmark { UserId = 7, HostType = AffinityHostType.Scene, HostId = secondScene.Id, CreatedAt = DateTime.UtcNow });
+            new UserBookmark { UserId = 7, HostType = AffinityHostType.Video, HostId = firstVideo.Id, CreatedAt = DateTime.UtcNow.AddMinutes(-10) },
+            new UserBookmark { UserId = 7, HostType = AffinityHostType.Video, HostId = secondVideo.Id, CreatedAt = DateTime.UtcNow });
         await context.SaveChangesAsync();
 
         var resolver = CreateResolver(context, principalAccessor);
         var items = await resolver.ResolveDtosAsync(group.Id, forceRefresh: true, CancellationToken.None);
 
         Assert.Equal(["Second", "First"], items.Select(item => item.Title ?? string.Empty).ToArray());
-        Assert.All(items, item => Assert.Equal("scene", item.HostType));
+        Assert.All(items, item => Assert.Equal("video", item.HostType));
         Assert.Equal(2, await context.Groups.Where(item => item.Id == group.Id).Select(item => item.CachedItemCount).SingleAsync());
     }
 
@@ -82,40 +82,40 @@ public class DynamicGroupsAndBookmarksTests
         var principalAccessor = scope.PrincipalAccessor;
         principalAccessor.Set(CreatePrincipal(7));
 
-        var scene = new Scene { Title = "Still exists" };
+        var video = new Video { Title = "Still exists" };
         var group = new Group { Name = "Save for Later", Kind = GroupKind.Dynamic, QuerySourceKey = DynamicGroupResolver.SaveForLaterSourceKey };
-        context.AddRange(scene, group);
+        context.AddRange(video, group);
         await context.SaveChangesAsync();
         context.UserBookmarks.AddRange(
-            new UserBookmark { UserId = 7, HostType = AffinityHostType.Scene, HostId = scene.Id, CreatedAt = DateTime.UtcNow },
-            new UserBookmark { UserId = 7, HostType = AffinityHostType.Scene, HostId = 999_999, CreatedAt = DateTime.UtcNow.AddMinutes(-1) });
+            new UserBookmark { UserId = 7, HostType = AffinityHostType.Video, HostId = video.Id, CreatedAt = DateTime.UtcNow },
+            new UserBookmark { UserId = 7, HostType = AffinityHostType.Video, HostId = 999_999, CreatedAt = DateTime.UtcNow.AddMinutes(-1) });
         await context.SaveChangesAsync();
 
         var resolver = CreateResolver(context, principalAccessor);
         var page = await resolver.ResolvePageDtosAsync(group.Id, new FindFilter { Page = 1, PerPage = 10 }, forceRefresh: true, CancellationToken.None);
 
         var item = Assert.Single(page.Items);
-        Assert.Equal(scene.Id, item.SceneId);
+        Assert.Equal(video.Id, item.VideoId);
         Assert.Equal(1, page.TotalCount);
         Assert.Equal(1, await context.Groups.Where(item => item.Id == group.Id).Select(item => item.CachedItemCount).SingleAsync());
     }
 
     [Fact]
-    public async Task ContinueWatchingDynamicGroup_ExcludesCompletedScenes()
+    public async Task ContinueWatchingDynamicGroup_ExcludesCompletedVideos()
     {
         await using var scope = CreateContext();
         var context = scope.Context;
         var principalAccessor = scope.PrincipalAccessor;
         principalAccessor.Set(CreatePrincipal(7));
 
-        var unfinished = new Scene { Title = "Unfinished", MaxDuration = 100 };
-        var complete = new Scene { Title = "Complete", MaxDuration = 100 };
+        var unfinished = new Video { Title = "Unfinished", MaxDuration = 100 };
+        var complete = new Video { Title = "Complete", MaxDuration = 100 };
         var group = new Group { Name = "Continue Watching", Kind = GroupKind.Dynamic, QuerySourceKey = DynamicGroupResolver.ContinueWatchingSourceKey };
         context.AddRange(unfinished, complete, group);
         await context.SaveChangesAsync();
         context.UserEntityAffinities.AddRange(
-            new UserEntityAffinity { UserId = 7, HostType = AffinityHostType.Scene, HostId = unfinished.Id, LastConsumedAt = DateTime.UtcNow, LastPositionSec = 42, TotalConsumedSec = 42 },
-            new UserEntityAffinity { UserId = 7, HostType = AffinityHostType.Scene, HostId = complete.Id, LastConsumedAt = DateTime.UtcNow, LastPositionSec = 98, TotalConsumedSec = 96 });
+            new UserEntityAffinity { UserId = 7, HostType = AffinityHostType.Video, HostId = unfinished.Id, LastConsumedAt = DateTime.UtcNow, LastPositionSec = 42, TotalConsumedSec = 42 },
+            new UserEntityAffinity { UserId = 7, HostType = AffinityHostType.Video, HostId = complete.Id, LastConsumedAt = DateTime.UtcNow, LastPositionSec = 98, TotalConsumedSec = 96 });
         await context.SaveChangesAsync();
 
         var resolver = CreateResolver(context, principalAccessor);
@@ -123,7 +123,7 @@ public class DynamicGroupsAndBookmarksTests
 
         var item = Assert.Single(items);
         Assert.Equal("Unfinished", item.Title);
-        Assert.Equal(unfinished.Id, item.SceneId);
+        Assert.Equal(unfinished.Id, item.VideoId);
     }
 
     [Fact]
@@ -135,14 +135,14 @@ public class DynamicGroupsAndBookmarksTests
         principalAccessor.Set(CreatePrincipal(7));
 
         var audio = new Audio { Title = "Unfinished audio" };
-        var scene = new Scene { Title = "Segment scene" };
+        var video = new Video { Title = "Segment video" };
         var group = new Group { Name = "Continue Watching", Kind = GroupKind.Dynamic, QuerySourceKey = DynamicGroupResolver.ContinueWatchingSourceKey };
-        context.AddRange(audio, scene, group);
+        context.AddRange(audio, video, group);
         await context.SaveChangesAsync();
         var segment = new Segment
         {
-            HostType = SegmentHostType.Scene,
-            HostId = scene.Id,
+            HostType = SegmentHostType.Video,
+            HostId = video.Id,
             SourceKey = "test",
             StartSec = 12,
             EndSec = 24,
@@ -159,7 +159,7 @@ public class DynamicGroupsAndBookmarksTests
         var items = await resolver.ResolveDtosAsync(group.Id, forceRefresh: true, CancellationToken.None);
 
         Assert.Contains(items, item => item.HostType == "audio" && item.HostId == audio.Id && item.Title == "Unfinished audio");
-        Assert.Contains(items, item => item.HostType == "segment" && item.HostId == segment.Id && item.SceneId == scene.Id && item.StartSec == 12);
+        Assert.Contains(items, item => item.HostType == "segment" && item.HostId == segment.Id && item.VideoId == video.Id && item.StartSec == 12);
     }
 
     [Fact]
@@ -221,16 +221,16 @@ public class DynamicGroupsAndBookmarksTests
         var principalAccessor = scope.PrincipalAccessor;
         principalAccessor.Set(CreatePrincipal(7));
 
-        var firstScene = new Scene { Title = "First" };
-        var secondScene = new Scene { Title = "Second" };
-        var thirdScene = new Scene { Title = "Third" };
+        var firstVideo = new Video { Title = "First" };
+        var secondVideo = new Video { Title = "Second" };
+        var thirdVideo = new Video { Title = "Third" };
         var group = new Group { Name = "Save for Later", Kind = GroupKind.Dynamic, QuerySourceKey = DynamicGroupResolver.SaveForLaterSourceKey };
-        context.AddRange(firstScene, secondScene, thirdScene, group);
+        context.AddRange(firstVideo, secondVideo, thirdVideo, group);
         await context.SaveChangesAsync();
         context.UserBookmarks.AddRange(
-            new UserBookmark { UserId = 7, HostType = AffinityHostType.Scene, HostId = firstScene.Id, CreatedAt = DateTime.UtcNow.AddMinutes(-30) },
-            new UserBookmark { UserId = 7, HostType = AffinityHostType.Scene, HostId = secondScene.Id, CreatedAt = DateTime.UtcNow.AddMinutes(-20) },
-            new UserBookmark { UserId = 7, HostType = AffinityHostType.Scene, HostId = thirdScene.Id, CreatedAt = DateTime.UtcNow.AddMinutes(-10) });
+            new UserBookmark { UserId = 7, HostType = AffinityHostType.Video, HostId = firstVideo.Id, CreatedAt = DateTime.UtcNow.AddMinutes(-30) },
+            new UserBookmark { UserId = 7, HostType = AffinityHostType.Video, HostId = secondVideo.Id, CreatedAt = DateTime.UtcNow.AddMinutes(-20) },
+            new UserBookmark { UserId = 7, HostType = AffinityHostType.Video, HostId = thirdVideo.Id, CreatedAt = DateTime.UtcNow.AddMinutes(-10) });
         await context.SaveChangesAsync();
 
         var resolver = CreateResolver(context, principalAccessor);
@@ -266,21 +266,21 @@ public class DynamicGroupsAndBookmarksTests
     }
 
     [Fact]
-    public async Task FilterDynamicGroupSource_UsesSavedSceneFilter()
+    public async Task FilterDynamicGroupSource_UsesSavedVideoFilter()
     {
         await using var scope = CreateContext();
         var context = scope.Context;
         var principalAccessor = scope.PrincipalAccessor;
         principalAccessor.Set(CreatePrincipal(7));
 
-        var included = new Scene { Title = "Included", Organized = true };
-        var excluded = new Scene { Title = "Excluded", Organized = false };
+        var included = new Video { Title = "Included", Organized = true };
+        var excluded = new Video { Title = "Excluded", Organized = false };
         var group = new Group
         {
-            Name = "Organized Scenes",
+            Name = "Organized Videos",
             Kind = GroupKind.Dynamic,
             QuerySourceKey = DynamicGroupResolver.FilterSourceKey,
-            QueryJson = "{\"entityType\":\"scene\",\"findFilter\":{\"sort\":\"title\",\"direction\":\"asc\"},\"objectFilter\":{\"organized\":true}}",
+            QueryJson = "{\"entityType\":\"video\",\"findFilter\":{\"sort\":\"title\",\"direction\":\"asc\"},\"objectFilter\":{\"organized\":true}}",
         };
         context.AddRange(included, excluded, group);
         await context.SaveChangesAsync();
@@ -290,7 +290,7 @@ public class DynamicGroupsAndBookmarksTests
 
         var item = Assert.Single(page.Items);
         Assert.Equal(1, page.TotalCount);
-        Assert.Equal(included.Id, item.SceneId);
+        Assert.Equal(included.Id, item.VideoId);
         Assert.Equal("Included", item.Title);
     }
 
@@ -303,18 +303,18 @@ public class DynamicGroupsAndBookmarksTests
         principalAccessor.Set(CreatePrincipal(7));
 
         var performer = new Performer { Name = "Matched Performer" };
-        var included = new Scene { Title = "Included" };
-        included.ScenePerformers.Add(new ScenePerformer { Performer = performer });
-        var excluded = new Scene { Title = "Excluded" };
+        var included = new Video { Title = "Included" };
+        included.VideoPerformers.Add(new VideoPerformer { Performer = performer });
+        var excluded = new Video { Title = "Excluded" };
         context.AddRange(included, excluded);
         await context.SaveChangesAsync();
 
         var group = new Group
         {
-            Name = "Performer Scenes",
+            Name = "Performer Videos",
             Kind = GroupKind.Dynamic,
             QuerySourceKey = DynamicGroupResolver.FilterSourceKey,
-            QueryJson = "{\"entityTypes\":[\"scene\"],\"findFilters\":{\"scene\":{\"sort\":\"title\",\"direction\":\"asc\"}},\"objectFilters\":{\"scene\":{\"performersCriterion\":{\"value\":[" + performer.Id + "],\"modifier\":\"INCLUDES_ALL\"}}}}",
+            QueryJson = "{\"entityTypes\":[\"video\"],\"findFilters\":{\"video\":{\"sort\":\"title\",\"direction\":\"asc\"}},\"objectFilters\":{\"video\":{\"performersCriterion\":{\"value\":[" + performer.Id + "],\"modifier\":\"INCLUDES_ALL\"}}}}",
         };
         context.Add(group);
         await context.SaveChangesAsync();
@@ -324,7 +324,7 @@ public class DynamicGroupsAndBookmarksTests
 
         var item = Assert.Single(page.Items);
         Assert.Equal(1, page.TotalCount);
-        Assert.Equal(included.Id, item.SceneId);
+        Assert.Equal(included.Id, item.VideoId);
         Assert.Equal("Included", item.Title);
     }
 
@@ -336,14 +336,14 @@ public class DynamicGroupsAndBookmarksTests
         var principalAccessor = scope.PrincipalAccessor;
         principalAccessor.Set(CreatePrincipal(7));
 
-        var scene = new Scene { Title = "Host Scene" };
-        context.Add(scene);
+        var video = new Video { Title = "Host Video" };
+        context.Add(video);
         await context.SaveChangesAsync();
 
-        var shortIncluded = new Segment { HostType = SegmentHostType.Scene, HostId = scene.Id, StartSec = 3, EndSec = 5, ImageBlobId = "short-cover", Title = "Short Included" };
-        var longIncluded = new Segment { HostType = SegmentHostType.Scene, HostId = scene.Id, StartSec = 4, EndSec = 14, ImageBlobId = "long-cover", Title = "Long Included" };
-        var missingCover = new Segment { HostType = SegmentHostType.Scene, HostId = scene.Id, StartSec = 5, EndSec = 20, Title = "Missing Cover" };
-        var early = new Segment { HostType = SegmentHostType.Scene, HostId = scene.Id, StartSec = 1, EndSec = 30, ImageBlobId = "early-cover", Title = "Early" };
+        var shortIncluded = new Segment { HostType = SegmentHostType.Video, HostId = video.Id, StartSec = 3, EndSec = 5, ImageBlobId = "short-cover", Title = "Short Included" };
+        var longIncluded = new Segment { HostType = SegmentHostType.Video, HostId = video.Id, StartSec = 4, EndSec = 14, ImageBlobId = "long-cover", Title = "Long Included" };
+        var missingCover = new Segment { HostType = SegmentHostType.Video, HostId = video.Id, StartSec = 5, EndSec = 20, Title = "Missing Cover" };
+        var early = new Segment { HostType = SegmentHostType.Video, HostId = video.Id, StartSec = 1, EndSec = 30, ImageBlobId = "early-cover", Title = "Early" };
         var group = new Group
         {
             Name = "Covered Segments",
@@ -372,9 +372,9 @@ public class DynamicGroupsAndBookmarksTests
 
         var performer = new Performer { Name = "Matched Performer" };
         var tag = new Tag { Name = "Matched Tag" };
-        var scene = new Scene { Title = "Host Scene" };
-        var otherScene = new Scene { Title = "Other Scene" };
-        context.AddRange(performer, tag, scene, otherScene);
+        var video = new Video { Title = "Host Video" };
+        var otherVideo = new Video { Title = "Other Video" };
+        context.AddRange(performer, tag, video, otherVideo);
         await context.SaveChangesAsync();
 
         var alphaFace = new Face { Label = "Alpha Face", PerformerId = performer.Id };
@@ -384,8 +384,8 @@ public class DynamicGroupsAndBookmarksTests
 
         var betaSegment = new Segment
         {
-            HostType = SegmentHostType.Scene,
-            HostId = scene.Id,
+            HostType = SegmentHostType.Video,
+            HostId = video.Id,
             StartSec = 10,
             EndSec = 12,
             TagId = tag.Id,
@@ -397,8 +397,8 @@ public class DynamicGroupsAndBookmarksTests
         };
         var alphaSegment = new Segment
         {
-            HostType = SegmentHostType.Scene,
-            HostId = scene.Id,
+            HostType = SegmentHostType.Video,
+            HostId = video.Id,
             StartSec = 20,
             EndSec = 22,
             TagId = tag.Id,
@@ -410,8 +410,8 @@ public class DynamicGroupsAndBookmarksTests
         };
         var excludedWrongSource = new Segment
         {
-            HostType = SegmentHostType.Scene,
-            HostId = scene.Id,
+            HostType = SegmentHostType.Video,
+            HostId = video.Id,
             StartSec = 30,
             EndSec = 32,
             TagId = tag.Id,
@@ -421,10 +421,10 @@ public class DynamicGroupsAndBookmarksTests
             SourceRunId = "run-match",
             Title = "Wrong Source",
         };
-        var excludedWrongScene = new Segment
+        var excludedWrongVideo = new Segment
         {
-            HostType = SegmentHostType.Scene,
-            HostId = otherScene.Id,
+            HostType = SegmentHostType.Video,
+            HostId = otherVideo.Id,
             StartSec = 40,
             EndSec = 42,
             TagId = tag.Id,
@@ -432,7 +432,7 @@ public class DynamicGroupsAndBookmarksTests
             RefId = alphaFace.Id,
             SourceKey = "ext:ai.faces",
             SourceRunId = "run-match",
-            Title = "Wrong Scene",
+            Title = "Wrong Video",
         };
         var group = new Group
         {
@@ -445,9 +445,9 @@ public class DynamicGroupsAndBookmarksTests
                 findFilter = new FindFilter { Sort = "ref", Direction = SortDirection.Asc },
                 objectFilter = new
                 {
-                    sceneTitleCriterion = new StringCriterion { Value = "Host", Modifier = CriterionModifier.Includes },
-                    scenesCriterion = new MultiIdCriterion { Value = [scene.Id], Modifier = CriterionModifier.Includes },
-                    hostTypeCriterion = new StringCriterion { Value = "scene", Modifier = CriterionModifier.Equals },
+                    videoTitleCriterion = new StringCriterion { Value = "Host", Modifier = CriterionModifier.Includes },
+                    videosCriterion = new MultiIdCriterion { Value = [video.Id], Modifier = CriterionModifier.Includes },
+                    hostTypeCriterion = new StringCriterion { Value = "video", Modifier = CriterionModifier.Equals },
                     sourceCategoryCriterion = new StringCriterion { Value = "extensions", Modifier = CriterionModifier.Equals },
                     sourceRunIdCriterion = new StringCriterion { Value = "run-match", Modifier = CriterionModifier.Equals },
                     tagsCriterion = new MultiIdCriterion { Value = [tag.Id], Modifier = CriterionModifier.Includes },
@@ -456,7 +456,7 @@ public class DynamicGroupsAndBookmarksTests
                 },
             }),
         };
-        context.AddRange(betaSegment, alphaSegment, excludedWrongSource, excludedWrongScene, group);
+        context.AddRange(betaSegment, alphaSegment, excludedWrongSource, excludedWrongVideo, group);
         await context.SaveChangesAsync();
 
         var resolver = CreateResolver(context, principalAccessor, includeFilterSource: true);
@@ -476,7 +476,7 @@ public class DynamicGroupsAndBookmarksTests
         principalAccessor.Set(CreatePrincipal(7));
 
         for (var index = 0; index < 40; index++)
-            context.Scenes.Add(new Scene { Title = $"Scene {index:D2}" });
+            context.Videos.Add(new Video { Title = $"Video {index:D2}" });
         for (var index = 0; index < 25; index++)
             context.Images.Add(new Image { Title = $"Image {index:D2}" });
 
@@ -485,7 +485,7 @@ public class DynamicGroupsAndBookmarksTests
             Name = "Mixed Dynamic",
             Kind = GroupKind.Dynamic,
             QuerySourceKey = DynamicGroupResolver.FilterSourceKey,
-            QueryJson = "{\"entityTypes\":[\"scene\",\"image\"],\"findFilters\":{\"scene\":{\"sort\":\"title\",\"direction\":\"asc\"},\"image\":{\"sort\":\"title\",\"direction\":\"asc\"}}}",
+            QueryJson = "{\"entityTypes\":[\"video\",\"image\"],\"findFilters\":{\"video\":{\"sort\":\"title\",\"direction\":\"asc\"},\"image\":{\"sort\":\"title\",\"direction\":\"asc\"}}}",
         };
         context.Groups.Add(group);
         await context.SaveChangesAsync();
@@ -495,7 +495,7 @@ public class DynamicGroupsAndBookmarksTests
 
         Assert.Equal(65, page.TotalCount);
         Assert.Equal(40, page.Items.Count);
-        Assert.All(page.Items, item => Assert.Equal("scene", item.HostType));
+        Assert.All(page.Items, item => Assert.Equal("video", item.HostType));
     }
 
     [Fact]
@@ -506,11 +506,11 @@ public class DynamicGroupsAndBookmarksTests
         var principalAccessor = scope.PrincipalAccessor;
         principalAccessor.Set(CreatePrincipal(7));
 
-        var scene = new Scene { Title = "Snapshot Scene" };
+        var video = new Video { Title = "Snapshot Video" };
         var group = new Group { Name = "Saved Snapshot", Kind = GroupKind.Dynamic, QuerySourceKey = DynamicGroupResolver.SaveForLaterSourceKey };
-        context.AddRange(scene, group);
+        context.AddRange(video, group);
         await context.SaveChangesAsync();
-        context.UserBookmarks.Add(new UserBookmark { UserId = 7, HostType = AffinityHostType.Scene, HostId = scene.Id, CreatedAt = DateTime.UtcNow });
+        context.UserBookmarks.Add(new UserBookmark { UserId = 7, HostType = AffinityHostType.Video, HostId = video.Id, CreatedAt = DateTime.UtcNow });
         await context.SaveChangesAsync();
 
         var resolver = CreateResolver(context, principalAccessor);
@@ -520,10 +520,10 @@ public class DynamicGroupsAndBookmarksTests
         Assert.Equal(GroupKind.Static, updatedGroup.Kind);
         Assert.Null(updatedGroup.QuerySourceKey);
         var item = Assert.Single(updatedGroup.GroupItems);
-        Assert.Equal("scene", item.HostType);
-        Assert.Equal(scene.Id, item.HostId);
-        Assert.Equal(scene.Id, item.SceneId);
-        Assert.Equal(GroupItemKind.Scene, item.Kind);
+        Assert.Equal("video", item.HostType);
+        Assert.Equal(video.Id, item.HostId);
+        Assert.Equal(video.Id, item.VideoId);
+        Assert.Equal(GroupItemKind.Video, item.Kind);
     }
 
     [Fact]
@@ -553,7 +553,7 @@ public class DynamicGroupsAndBookmarksTests
             new ContinueWatchingDynamicGroupSource(context),
         };
         if (includeFilterSource)
-            sources.Add(new FilterDynamicGroupSource(context, new SceneRepository(context), new ImageRepository(context)));
+            sources.Add(new FilterDynamicGroupSource(context, new VideoRepository(context), new ImageRepository(context)));
 
         return new DynamicGroupResolver(context, sources, principalAccessor);
     }
@@ -590,3 +590,4 @@ public class DynamicGroupsAndBookmarksTests
         }
     }
 }
+

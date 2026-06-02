@@ -9,6 +9,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Scene = Cove.Core.Entities.Video;
 
 namespace Cove.Tests;
 
@@ -27,7 +28,7 @@ public class StashMigrationMetadataTests
             UpdatedAt = updatedAt,
         };
 
-        context.Scenes.Add(scene);
+        context.Videos.Add(scene);
         await context.SaveChangesAsync();
 
         Assert.Equal(createdAt, scene.CreatedAt);
@@ -588,9 +589,9 @@ VALUES (10, 120, 'H264', 'mp4', 'AAC', 1920, 1080, 30, 2000000, 0, NULL);
             1d,
             CancellationToken.None);
 
-        var scene = await context.Scenes.Include(s => s.Files).SingleAsync();
+        var scene = await context.Videos.Include(s => s.Files).SingleAsync();
         var file = Assert.Single(scene.Files);
-        var affinity = await context.UserEntityAffinities.SingleAsync(item => item.HostType == AffinityHostType.Scene && item.HostId == scene.Id);
+        var affinity = await context.UserEntityAffinities.SingleAsync(item => item.HostType == AffinityHostType.Video && item.HostId == scene.Id);
         Assert.Equal(new DateTime(2024, 3, 1, 0, 0, 0, DateTimeKind.Utc), affinity.LastConsumedAt);
         Assert.Equal(1, affinity.ViewCount);
         Assert.Equal(15, affinity.LastPositionSec);
@@ -1087,7 +1088,7 @@ INSERT INTO scene_markers_tags (scene_marker_id, tag_id) VALUES (1, 9);
                 Assert.Equal(1, imported);
 
                 var segment = await context.Segments.SingleAsync();
-                Assert.Equal(SegmentHostType.Scene, segment.HostType);
+                Assert.Equal(SegmentHostType.Video, segment.HostType);
                 Assert.Equal(scene.Id, segment.HostId);
                 Assert.Equal(12.5, segment.StartSec);
                 Assert.Equal(18.0, segment.EndSec);

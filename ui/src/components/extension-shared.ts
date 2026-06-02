@@ -55,10 +55,10 @@ export type { TutorialOpenRequest } from "./ManualContext";
 // ─── Entity Cards & Popovers ─────────────────────────────────────────────
 export {
   PopoverButton,
-  SceneCardPopovers,
+  VideoCardPopovers,
   PerformerTile,
-  SceneCard,
-  SceneTile,
+  VideoCard,
+  VideoTile,
 } from "./EntityCards";
 
 // ─── Detail Page Building Blocks ──────────────────────────────────────────
@@ -81,3 +81,4 @@ export { useAppConfig } from "../state/AppConfigContext";
 
 // ─── Types ────────────────────────────────────────────────────────────────
 export type { FindFilter } from "../api/types";
+

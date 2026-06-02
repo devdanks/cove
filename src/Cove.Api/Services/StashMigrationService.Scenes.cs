@@ -3,6 +3,13 @@ using Microsoft.Data.Sqlite;
 using Cove.Core.Entities;
 using Cove.Core.Enums;
 using Cove.Core.Interfaces;
+using Scene = Cove.Core.Entities.Video;
+using SceneUrl = Cove.Core.Entities.VideoUrl;
+using SceneTag = Cove.Core.Entities.VideoTag;
+using ScenePerformer = Cove.Core.Entities.VideoPerformer;
+using SceneLikeHistory = Cove.Core.Entities.VideoLikeHistory;
+using ScenePlayHistory = Cove.Core.Entities.VideoPlayHistory;
+using SceneRemoteId = Cove.Core.Entities.VideoRemoteId;
 
 namespace Cove.Api.Services;
 
@@ -173,10 +180,10 @@ public partial class StashMigrationService
                 CreatedAt = ParseDateTime(row.CreatedAt),
                 UpdatedAt = ParseDateTime(row.UpdatedAt),
                 Urls = sceneUrls.GetValueOrDefault(row.Id, []).Select(u => new SceneUrl { Url = u }).ToList(),
-                SceneTags = sceneTagMap.GetValueOrDefault(row.Id, [])
+                VideoTags = sceneTagMap.GetValueOrDefault(row.Id, [])
                     .Where(tagIdMap.ContainsKey)
                     .Select(t => new SceneTag { TagId = tagIdMap[t] }).ToList(),
-                ScenePerformers = scenePerformerMap.GetValueOrDefault(row.Id, [])
+                VideoPerformers = scenePerformerMap.GetValueOrDefault(row.Id, [])
                     .Where(performerIdMap.ContainsKey)
                     .Select(p => new ScenePerformer { PerformerId = performerIdMap[p] }).ToList(),
                 GroupItems = sceneGroupMap.GetValueOrDefault(row.Id, [])
@@ -185,7 +192,7 @@ public partial class StashMigrationService
                     {
                         GroupId = groupIdMap[g.GroupId],
                         OrderIndex = g.Index,
-                        Kind = GroupItemKind.Scene,
+                        Kind = GroupItemKind.Video,
                     }).ToList(),
                 LikeHistory = oHistory.Select(d => new SceneLikeHistory { OccurredAt = d }).ToList(),
                 PlayHistory = viewHistory.Select(d => new ScenePlayHistory { PlayedAt = d }).ToList(),
@@ -222,7 +229,7 @@ public partial class StashMigrationService
                 });
             }
 
-            _db.Scenes.Add(scene);
+            _db.Videos.Add(scene);
             pendingBatch.Add((row.Id, scene));
             count++;
 
@@ -251,7 +258,7 @@ public partial class StashMigrationService
         await AddImportedOverallRatingsAsync(
             sceneRows.Select(row => new ImportedRatingSeed(row.Id, row.Rating)),
             idMap,
-            RatingHostType.Scene,
+            RatingHostType.Video,
             ct);
 
         var sceneAffinitySeeds = new List<ImportedAffinitySeed>(sceneRows.Count);
@@ -268,7 +275,7 @@ public partial class StashMigrationService
                 TotalConsumedSec: row.PlayDuration,
                 LastConsumedAt: lastConsumedAt));
         }
-        await AddImportedAffinitiesAsync(sceneAffinitySeeds, idMap, AffinityHostType.Scene, ct);
+        await AddImportedAffinitiesAsync(sceneAffinitySeeds, idMap, AffinityHostType.Video, ct);
 
         _logger.LogInformation("Imported {Count} scenes in {Elapsed}", count, stopwatch.Elapsed);
 
@@ -378,7 +385,7 @@ public partial class StashMigrationService
 
             _db.Segments.Add(new Segment
             {
-                HostType = SegmentHostType.Scene,
+                HostType = SegmentHostType.Video,
                 HostId = coveSceneId,
                 StartSec = row.Seconds,
                 EndSec = row.EndSeconds,

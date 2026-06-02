@@ -32,7 +32,7 @@ public partial class CoveContext : DbContext
     protected CoveContext(DbContextOptions options) : base(options) { }
 
     // Core entities
-    public DbSet<Scene> Scenes => Set<Scene>();
+    public DbSet<Video> Videos => Set<Video>();
     public DbSet<Performer> Performers => Set<Performer>();
     public DbSet<Tag> Tags => Set<Tag>();
     public DbSet<TagGroup> TagGroups => Set<TagGroup>();
@@ -44,7 +44,7 @@ public partial class CoveContext : DbContext
     public DbSet<Group> Groups => Set<Group>();
     public DbSet<CustomFieldDefinition> CustomFieldDefinitions => Set<CustomFieldDefinition>();
     public DbSet<CustomFieldValue> CustomFieldValues => Set<CustomFieldValue>();
-    public DbSet<SceneMarker> SceneMarkers => Set<SceneMarker>();
+    public DbSet<VideoMarker> VideoMarkers => Set<VideoMarker>();
     public DbSet<TagApplication> TagApplications => Set<TagApplication>();
     public DbSet<FieldProvenance> FieldProvenance => Set<FieldProvenance>();
     public DbSet<Segment> Segments => Set<Segment>();
@@ -180,7 +180,7 @@ public partial class CoveContext : DbContext
 
     private static void ConfigureSearchVectors(ModelBuilder modelBuilder)
     {
-        ConfigureSearchVector<Scene>(modelBuilder, """
+        ConfigureSearchVector<Video>(modelBuilder, """
             setweight(to_tsvector('simple', coalesce("Title", '') || ' ' || coalesce("Code", '')), 'A') ||
             setweight(to_tsvector('simple', coalesce("Details", '') || ' ' || coalesce("Director", '')), 'B') ||
             setweight(to_tsvector('simple', coalesce("Captions", '') || ' ' || coalesce("FileSearchText", '') || ' ' || coalesce("SearchText", '')), 'C')
@@ -489,7 +489,7 @@ public partial class CoveContext : DbContext
     private IReadOnlyList<EngagementCleanupTarget> CollectDeletedEngagementTargets()
     {
         var targets = new List<EngagementCleanupTarget>();
-        AddDeletedTargets(targets, ChangeTracker.Entries<Scene>(), entry => entry.Entity.Id, AffinityHostType.Scene, InteractionHostType.Scene, RatingHostType.Scene);
+        AddDeletedTargets(targets, ChangeTracker.Entries<Video>(), entry => entry.Entity.Id, AffinityHostType.Video, InteractionHostType.Video, RatingHostType.Video);
         AddDeletedTargets(targets, ChangeTracker.Entries<Image>(), entry => entry.Entity.Id, AffinityHostType.Image, InteractionHostType.Image, RatingHostType.Image);
         AddDeletedTargets(targets, ChangeTracker.Entries<Audio>(), entry => entry.Entity.Id, AffinityHostType.Audio, InteractionHostType.Audio, RatingHostType.Audio);
         AddDeletedTargets(targets, ChangeTracker.Entries<TextDocument>(), entry => entry.Entity.Id, AffinityHostType.Text, InteractionHostType.Text, RatingHostType.Text);
@@ -539,9 +539,9 @@ public partial class CoveContext : DbContext
 
     private void MaintainDenormalizedIdArrays()
     {
-        // Refresh GIN-indexed Scene/Image/Gallery TagIds/PerformerIds arrays whenever
+        // Refresh GIN-indexed Video/Image/Gallery TagIds/PerformerIds arrays whenever
         // the corresponding join tables change. The arrays let combo filters like
-        // "scenes with tags A AND B AND performer C" run as a single index-only
+        // "videos with tags A AND B AND performer C" run as a single index-only
         // array-containment scan instead of N joins per filter term.
         //
         // Strategy: collect parent ids whose link rows changed in this unit of work,
@@ -550,23 +550,23 @@ public partial class CoveContext : DbContext
 
         InitializeAddedParentIdArrays();
 
-        var sceneTagParents = CollectChangedParentIds<SceneTag>(e => e.SceneId);
-        var scenePerformerParents = CollectChangedParentIds<ScenePerformer>(e => e.SceneId);
+        var videoTagParents = CollectChangedParentIds<VideoTag>(e => e.VideoId);
+        var videoPerformerParents = CollectChangedParentIds<VideoPerformer>(e => e.VideoId);
         var imageTagParents = CollectChangedParentIds<ImageTag>(e => e.ImageId);
         var imagePerformerParents = CollectChangedParentIds<ImagePerformer>(e => e.ImageId);
         var galleryTagParents = CollectChangedParentIds<GalleryTag>(e => e.GalleryId);
         var galleryPerformerParents = CollectChangedParentIds<GalleryPerformer>(e => e.GalleryId);
 
-        // Also handle Added Scene/Image/Gallery rows whose join collections were set
+        // Also handle Added Video/Image/Gallery rows whose join collections were set
         // through the navigation property: in that case the link entries are Added too
         // and will already be picked up above. But a freshly-Added parent with no links
         // still needs its arrays initialized to an empty array (the default), so nothing
         // extra is needed here.
 
-        if (sceneTagParents.Count > 0)
-            RebuildArray<Scene, SceneTag>(sceneTagParents, s => s.TagIds, e => e.SceneId, e => e.TagId);
-        if (scenePerformerParents.Count > 0)
-            RebuildArray<Scene, ScenePerformer>(scenePerformerParents, s => s.PerformerIds, e => e.SceneId, e => e.PerformerId);
+        if (videoTagParents.Count > 0)
+            RebuildArray<Video, VideoTag>(videoTagParents, s => s.TagIds, e => e.VideoId, e => e.TagId);
+        if (videoPerformerParents.Count > 0)
+            RebuildArray<Video, VideoPerformer>(videoPerformerParents, s => s.PerformerIds, e => e.VideoId, e => e.PerformerId);
         if (imageTagParents.Count > 0)
             RebuildArray<Image, ImageTag>(imageTagParents, i => i.TagIds, e => e.ImageId, e => e.TagId);
         if (imagePerformerParents.Count > 0)
@@ -582,25 +582,25 @@ public partial class CoveContext : DbContext
         HashSet<int> StudioIds,
         HashSet<int> PerformerIds,
         HashSet<int> GalleryIds,
-        HashSet<int> SceneIds,
+        HashSet<int> VideoIds,
         HashSet<int> ImageIds)
     {
         public bool HasAny => TagIds.Count > 0
             || StudioIds.Count > 0
             || PerformerIds.Count > 0
             || GalleryIds.Count > 0
-            || SceneIds.Count > 0
+            || VideoIds.Count > 0
             || ImageIds.Count > 0;
     }
 
     private readonly record struct PostSaveDerivedCountTargets(
-        IReadOnlyList<VideoFile> VideoFilesWithDeferredSceneIds,
+        IReadOnlyList<VideoFile> VideoFilesWithDeferredVideoIds,
         IReadOnlyList<ImageFile> ImageFilesWithDeferredImageIds);
 
     private PostSaveDerivedCountTargets CollectPostSaveDerivedCountTargets()
     {
         var videoFiles = ChangeTracker.Entries<VideoFile>()
-            .Where(entry => entry.State == EntityState.Added && entry.Entity.SceneId is null or <= 0)
+            .Where(entry => entry.State == EntityState.Added && entry.Entity.VideoId is null or <= 0)
             .Select(entry => entry.Entity)
             .ToList();
 
@@ -614,10 +614,10 @@ public partial class CoveContext : DbContext
 
     private static void AddPostSaveDerivedCountTargets(DerivedCountTargets targets, PostSaveDerivedCountTargets postSaveTargets)
     {
-        foreach (var videoFile in postSaveTargets.VideoFilesWithDeferredSceneIds)
+        foreach (var videoFile in postSaveTargets.VideoFilesWithDeferredVideoIds)
         {
-            AddIfPositive(targets.SceneIds, videoFile.SceneId);
-            AddIfPositive(targets.SceneIds, videoFile.Scene?.Id);
+            AddIfPositive(targets.VideoIds, videoFile.VideoId);
+            AddIfPositive(targets.VideoIds, videoFile.Video?.Id);
         }
 
         foreach (var imageFile in postSaveTargets.ImageFilesWithDeferredImageIds)
@@ -634,30 +634,30 @@ public partial class CoveContext : DbContext
             CollectAffectedStudioCountIds(),
             CollectAffectedPerformerCountIds(),
             CollectAffectedGalleryCountIds(),
-            CollectAffectedSceneMetricIds(),
+            CollectAffectedVideoMetricIds(),
             CollectAffectedImageIds());
     }
 
-    private HashSet<int> CollectAffectedSceneMetricIds()
+    private HashSet<int> CollectAffectedVideoMetricIds()
     {
         var ids = new HashSet<int>();
-        CollectChangedNullableIntKey(ids, ChangeTracker.Entries<VideoFile>(), entry => entry.SceneId, nameof(VideoFile.SceneId));
+        CollectChangedNullableIntKey(ids, ChangeTracker.Entries<VideoFile>(), entry => entry.VideoId, nameof(VideoFile.VideoId));
 
-        foreach (var entry in ChangeTracker.Entries<Scene>())
+        foreach (var entry in ChangeTracker.Entries<Video>())
         {
-            if (entry.State is EntityState.Modified or EntityState.Added && entry.Entity.ParentSceneId.HasValue)
+            if (entry.State is EntityState.Modified or EntityState.Added && entry.Entity.ParentVideoId.HasValue)
                 AddIfPositive(ids, entry.Entity.Id);
         }
 
-        var sourceSceneIds = ids.ToArray();
-        if (sourceSceneIds.Length > 0)
+        var sourceVideoIds = ids.ToArray();
+        if (sourceVideoIds.Length > 0)
         {
-            foreach (var childSceneId in Scenes.AsNoTracking()
-                .Where(scene => scene.ParentSceneId.HasValue && sourceSceneIds.Contains(scene.ParentSceneId.Value))
-                .Select(scene => scene.Id)
+            foreach (var childVideoId in Videos.AsNoTracking()
+                .Where(video => video.ParentVideoId.HasValue && sourceVideoIds.Contains(video.ParentVideoId.Value))
+                .Select(video => video.Id)
                 .ToList())
             {
-                AddIfPositive(ids, childSceneId);
+                AddIfPositive(ids, childVideoId);
             }
         }
 
@@ -706,19 +706,19 @@ public partial class CoveContext : DbContext
     {
         var ids = new HashSet<int>();
 
-        CollectChangedIntKey(ids, ChangeTracker.Entries<ScenePerformer>(), entry => entry.PerformerId, nameof(ScenePerformer.PerformerId));
+        CollectChangedIntKey(ids, ChangeTracker.Entries<VideoPerformer>(), entry => entry.PerformerId, nameof(VideoPerformer.PerformerId));
         CollectChangedIntKey(ids, ChangeTracker.Entries<ImagePerformer>(), entry => entry.PerformerId, nameof(ImagePerformer.PerformerId));
         CollectChangedIntKey(ids, ChangeTracker.Entries<GalleryPerformer>(), entry => entry.PerformerId, nameof(GalleryPerformer.PerformerId));
         CollectChangedIntKey(ids, ChangeTracker.Entries<PerformerTag>(), entry => entry.PerformerId, nameof(PerformerTag.PerformerId));
 
         AddRelatedIdsFromDeletedParents(ids,
-            ChangeTracker.Entries<Scene>()
+            ChangeTracker.Entries<Video>()
                 .Where(entry => entry.State == EntityState.Deleted)
                 .Select(entry => entry.Entity.Id)
                 .ToArray(),
-            sceneIds => Set<ScenePerformer>().AsNoTracking()
-                .Where(scenePerformer => sceneIds.Contains(scenePerformer.SceneId))
-                .Select(scenePerformer => scenePerformer.PerformerId));
+            videoIds => Set<VideoPerformer>().AsNoTracking()
+                .Where(videoPerformer => videoIds.Contains(videoPerformer.VideoId))
+                .Select(videoPerformer => videoPerformer.PerformerId));
 
         AddRelatedIdsFromDeletedParents(ids,
             ChangeTracker.Entries<Image>()
@@ -755,7 +755,7 @@ public partial class CoveContext : DbContext
         var ids = new HashSet<int>();
 
         CollectChangedIntKey(ids, ChangeTracker.Entries<ImageGallery>(), entry => entry.GalleryId, nameof(ImageGallery.GalleryId));
-        CollectChangedIntKey(ids, ChangeTracker.Entries<SceneGallery>(), entry => entry.GalleryId, nameof(SceneGallery.GalleryId));
+        CollectChangedIntKey(ids, ChangeTracker.Entries<VideoGallery>(), entry => entry.GalleryId, nameof(VideoGallery.GalleryId));
         CollectChangedIntKey(ids, ChangeTracker.Entries<GalleryPerformer>(), entry => entry.GalleryId, nameof(GalleryPerformer.GalleryId));
         CollectChangedIntKey(ids, ChangeTracker.Entries<GalleryTag>(), entry => entry.GalleryId, nameof(GalleryTag.GalleryId));
 
@@ -769,13 +769,13 @@ public partial class CoveContext : DbContext
                 .Select(imageGallery => imageGallery.GalleryId));
 
         AddRelatedIdsFromDeletedParents(ids,
-            ChangeTracker.Entries<Scene>()
+            ChangeTracker.Entries<Video>()
                 .Where(entry => entry.State == EntityState.Deleted)
                 .Select(entry => entry.Entity.Id)
                 .ToArray(),
-            sceneIds => Set<SceneGallery>().AsNoTracking()
-                .Where(sceneGallery => sceneIds.Contains(sceneGallery.SceneId))
-                .Select(sceneGallery => sceneGallery.GalleryId));
+            videoIds => Set<VideoGallery>().AsNoTracking()
+                .Where(videoGallery => videoIds.Contains(videoGallery.VideoId))
+                .Select(videoGallery => videoGallery.GalleryId));
 
         AddRelatedIdsFromDeletedParents(ids,
             ChangeTracker.Entries<Performer>()
@@ -802,7 +802,7 @@ public partial class CoveContext : DbContext
     {
         var ids = new HashSet<int>();
 
-        CollectChangedIntKey(ids, ChangeTracker.Entries<SceneTag>(), entry => entry.TagId, nameof(SceneTag.TagId));
+        CollectChangedIntKey(ids, ChangeTracker.Entries<VideoTag>(), entry => entry.TagId, nameof(VideoTag.TagId));
         CollectChangedIntKey(ids, ChangeTracker.Entries<PerformerTag>(), entry => entry.TagId, nameof(PerformerTag.TagId));
         CollectChangedIntKey(ids, ChangeTracker.Entries<ImageTag>(), entry => entry.TagId, nameof(ImageTag.TagId));
         CollectChangedIntKey(ids, ChangeTracker.Entries<GalleryTag>(), entry => entry.TagId, nameof(GalleryTag.TagId));
@@ -810,7 +810,7 @@ public partial class CoveContext : DbContext
         CollectChangedIntKey(ids, ChangeTracker.Entries<GroupTag>(), entry => entry.TagId, nameof(GroupTag.TagId));
         CollectChangedIntKey(ids, ChangeTracker.Entries<TagApplication>(), entry => entry.TagId, nameof(TagApplication.TagId));
         CollectChangedNullableIntKey(ids, ChangeTracker.Entries<Segment>(), entry => entry.TagId, nameof(Segment.TagId));
-        CollectChangedIntKey(ids, ChangeTracker.Entries<SceneMarkerTag>(), entry => entry.TagId, nameof(SceneMarkerTag.TagId));
+        CollectChangedIntKey(ids, ChangeTracker.Entries<VideoMarkerTag>(), entry => entry.TagId, nameof(VideoMarkerTag.TagId));
 
         foreach (var entry in ChangeTracker.Entries<Tag>())
         {
@@ -824,23 +824,23 @@ public partial class CoveContext : DbContext
             }
         }
 
-        foreach (var entry in ChangeTracker.Entries<SceneMarker>())
+        foreach (var entry in ChangeTracker.Entries<VideoMarker>())
         {
             if (entry.State is not (EntityState.Added or EntityState.Modified or EntityState.Deleted))
                 continue;
 
             AddIfPositive(ids, entry.Entity.PrimaryTagId);
-            AddIfPositive(ids, entry.Property<int>(nameof(SceneMarker.PrimaryTagId)).OriginalValue);
+            AddIfPositive(ids, entry.Property<int>(nameof(VideoMarker.PrimaryTagId)).OriginalValue);
         }
 
         AddRelatedIdsFromDeletedParents(ids,
-            ChangeTracker.Entries<Scene>()
+            ChangeTracker.Entries<Video>()
                 .Where(entry => entry.State == EntityState.Deleted)
                 .Select(entry => entry.Entity.Id)
                 .ToArray(),
-            sceneIds => Set<SceneTag>().AsNoTracking()
-                .Where(sceneTag => sceneIds.Contains(sceneTag.SceneId))
-                .Select(sceneTag => sceneTag.TagId));
+            videoIds => Set<VideoTag>().AsNoTracking()
+                .Where(videoTag => videoIds.Contains(videoTag.VideoId))
+                .Select(videoTag => videoTag.TagId));
 
         AddRelatedIdsFromDeletedParents(ids,
             ChangeTracker.Entries<Performer>()
@@ -888,13 +888,13 @@ public partial class CoveContext : DbContext
                 .Select(groupTag => groupTag.TagId));
 
         AddRelatedIdsFromDeletedParents(ids,
-            ChangeTracker.Entries<SceneMarker>()
+            ChangeTracker.Entries<VideoMarker>()
                 .Where(entry => entry.State == EntityState.Deleted)
                 .Select(entry => entry.Entity.Id)
                 .ToArray(),
-            markerIds => Set<SceneMarkerTag>().AsNoTracking()
-                .Where(sceneMarkerTag => markerIds.Contains(sceneMarkerTag.SceneMarkerId))
-                .Select(sceneMarkerTag => sceneMarkerTag.TagId));
+            markerIds => Set<VideoMarkerTag>().AsNoTracking()
+                .Where(videoMarkerTag => markerIds.Contains(videoMarkerTag.VideoMarkerId))
+                .Select(videoMarkerTag => videoMarkerTag.TagId));
 
         return ids;
     }
@@ -903,44 +903,44 @@ public partial class CoveContext : DbContext
     {
         var ids = new HashSet<int>();
 
-        CollectChangedNullableIntKey(ids, ChangeTracker.Entries<Scene>(), entry => entry.StudioId, nameof(Scene.StudioId));
+        CollectChangedNullableIntKey(ids, ChangeTracker.Entries<Video>(), entry => entry.StudioId, nameof(Video.StudioId));
         CollectChangedNullableIntKey(ids, ChangeTracker.Entries<Image>(), entry => entry.StudioId, nameof(Image.StudioId));
         CollectChangedNullableIntKey(ids, ChangeTracker.Entries<Gallery>(), entry => entry.StudioId, nameof(Gallery.StudioId));
         CollectChangedNullableIntKey(ids, ChangeTracker.Entries<Group>(), entry => entry.StudioId, nameof(Group.StudioId));
         CollectChangedNullableIntKey(ids, ChangeTracker.Entries<Studio>(), entry => entry.ParentId, nameof(Studio.ParentId));
         CollectChangedIntKey(ids, ChangeTracker.Entries<StudioTag>(), entry => entry.StudioId, nameof(StudioTag.StudioId));
 
-        var sceneIds = new HashSet<int>();
-        foreach (var entry in ChangeTracker.Entries<ScenePerformer>())
+        var videoIds = new HashSet<int>();
+        foreach (var entry in ChangeTracker.Entries<VideoPerformer>())
         {
             if (entry.State is not (EntityState.Added or EntityState.Modified or EntityState.Deleted))
                 continue;
 
-            AddIfPositive(sceneIds, entry.Entity.SceneId);
-            AddIfPositive(sceneIds, entry.Property<int>(nameof(ScenePerformer.SceneId)).OriginalValue);
+            AddIfPositive(videoIds, entry.Entity.VideoId);
+            AddIfPositive(videoIds, entry.Property<int>(nameof(VideoPerformer.VideoId)).OriginalValue);
         }
 
-        if (sceneIds.Count > 0)
+        if (videoIds.Count > 0)
         {
-            var trackedScenes = ChangeTracker.Entries<Scene>()
-                .Where(entry => sceneIds.Contains(entry.Entity.Id))
+            var trackedVideos = ChangeTracker.Entries<Video>()
+                .Where(entry => videoIds.Contains(entry.Entity.Id))
                 .ToDictionary(entry => entry.Entity.Id);
 
-            foreach (var sceneId in sceneIds)
+            foreach (var videoId in videoIds)
             {
-                if (!trackedScenes.TryGetValue(sceneId, out var trackedScene))
+                if (!trackedVideos.TryGetValue(videoId, out var trackedVideo))
                     continue;
 
-                AddIfPositive(ids, trackedScene.Entity.StudioId);
-                AddIfPositive(ids, trackedScene.Property<int?>(nameof(Scene.StudioId)).OriginalValue);
+                AddIfPositive(ids, trackedVideo.Entity.StudioId);
+                AddIfPositive(ids, trackedVideo.Property<int?>(nameof(Video.StudioId)).OriginalValue);
             }
 
-            var missingSceneIds = sceneIds.Where(sceneId => !trackedScenes.ContainsKey(sceneId)).ToArray();
-            if (missingSceneIds.Length > 0)
+            var missingVideoIds = videoIds.Where(videoId => !trackedVideos.ContainsKey(videoId)).ToArray();
+            if (missingVideoIds.Length > 0)
             {
-                foreach (var studioId in Scenes.AsNoTracking()
-                    .Where(scene => missingSceneIds.Contains(scene.Id) && scene.StudioId.HasValue)
-                    .Select(scene => scene.StudioId)
+                foreach (var studioId in Videos.AsNoTracking()
+                    .Where(video => missingVideoIds.Contains(video.Id) && video.StudioId.HasValue)
+                    .Select(video => video.StudioId)
                     .ToList())
                 {
                     AddIfPositive(ids, studioId);
@@ -953,9 +953,9 @@ public partial class CoveContext : DbContext
                 .Where(entry => entry.State == EntityState.Deleted)
                 .Select(entry => entry.Entity.Id)
                 .ToArray(),
-            performerIds => Set<ScenePerformer>().AsNoTracking()
-                .Where(scenePerformer => performerIds.Contains(scenePerformer.PerformerId) && scenePerformer.Scene!.StudioId.HasValue)
-                .Select(scenePerformer => scenePerformer.Scene!.StudioId!.Value));
+            performerIds => Set<VideoPerformer>().AsNoTracking()
+                .Where(videoPerformer => performerIds.Contains(videoPerformer.PerformerId) && videoPerformer.Video!.StudioId.HasValue)
+                .Select(videoPerformer => videoPerformer.Video!.StudioId!.Value));
 
         return ids;
     }
@@ -976,8 +976,8 @@ public partial class CoveContext : DbContext
                 RefreshPerformerCounts(derivedCountTargets.PerformerIds);
             if (derivedCountTargets.GalleryIds.Count > 0)
                 RefreshGalleryCounts(derivedCountTargets.GalleryIds);
-            if (derivedCountTargets.SceneIds.Count > 0)
-                RefreshSceneMetrics(derivedCountTargets.SceneIds);
+            if (derivedCountTargets.VideoIds.Count > 0)
+                RefreshVideoMetrics(derivedCountTargets.VideoIds);
             if (derivedCountTargets.ImageIds.Count > 0)
                 RefreshImageMetrics(derivedCountTargets.ImageIds);
 
@@ -1006,8 +1006,8 @@ public partial class CoveContext : DbContext
                 await RefreshPerformerCountsAsync(derivedCountTargets.PerformerIds, cancellationToken);
             if (derivedCountTargets.GalleryIds.Count > 0)
                 await RefreshGalleryCountsAsync(derivedCountTargets.GalleryIds, cancellationToken);
-            if (derivedCountTargets.SceneIds.Count > 0)
-                await RefreshSceneMetricsAsync(derivedCountTargets.SceneIds, cancellationToken);
+            if (derivedCountTargets.VideoIds.Count > 0)
+                await RefreshVideoMetricsAsync(derivedCountTargets.VideoIds, cancellationToken);
             if (derivedCountTargets.ImageIds.Count > 0)
                 await RefreshImageMetricsAsync(derivedCountTargets.ImageIds, cancellationToken);
 
@@ -1027,7 +1027,7 @@ public partial class CoveContext : DbContext
             return;
 
         var ids = tags.Keys.ToArray();
-        var sceneCounts = EffectiveHostTagQuery.ForHostType(this, AffinityHostType.Scene)
+        var videoCounts = EffectiveHostTagQuery.ForHostType(this, AffinityHostType.Video)
             .AsNoTracking()
             .Where(tag => ids.Contains(tag.TagId))
             .Select(tag => new { tag.TagId, tag.HostId })
@@ -1035,8 +1035,8 @@ public partial class CoveContext : DbContext
             .GroupBy(tag => tag.TagId)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToDictionary(x => x.Key, x => x.Count);
-        var sceneSegmentCounts = Segments.AsNoTracking()
-            .Where(segment => segment.HostType == SegmentHostType.Scene && segment.TagId.HasValue && ids.Contains(segment.TagId.Value))
+        var videoSegmentCounts = Segments.AsNoTracking()
+            .Where(segment => segment.HostType == SegmentHostType.Video && segment.TagId.HasValue && ids.Contains(segment.TagId.Value))
             .GroupBy(segment => segment.TagId!.Value)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToDictionary(x => x.Key, x => x.Count);
@@ -1063,8 +1063,8 @@ public partial class CoveContext : DbContext
 
         foreach (var tag in tags.Values)
         {
-            tag.SceneCount = sceneCounts.GetValueOrDefault(tag.Id, 0);
-            tag.SceneMarkerCount = sceneSegmentCounts.GetValueOrDefault(tag.Id, 0);
+            tag.VideoCount = videoCounts.GetValueOrDefault(tag.Id, 0);
+            tag.VideoMarkerCount = videoSegmentCounts.GetValueOrDefault(tag.Id, 0);
             tag.ImageCount = imageCounts.GetValueOrDefault(tag.Id, 0);
             tag.GalleryCount = galleryCounts.GetValueOrDefault(tag.Id, 0);
             tag.GroupCount = groupCounts.GetValueOrDefault(tag.Id, 0);
@@ -1080,7 +1080,7 @@ public partial class CoveContext : DbContext
             return;
 
         var ids = tags.Keys.ToArray();
-        var sceneCounts = await EffectiveHostTagQuery.ForHostType(this, AffinityHostType.Scene)
+        var videoCounts = await EffectiveHostTagQuery.ForHostType(this, AffinityHostType.Video)
             .AsNoTracking()
             .Where(tag => ids.Contains(tag.TagId))
             .Select(tag => new { tag.TagId, tag.HostId })
@@ -1088,8 +1088,8 @@ public partial class CoveContext : DbContext
             .GroupBy(tag => tag.TagId)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
-        var sceneSegmentCounts = await Segments.AsNoTracking()
-            .Where(segment => segment.HostType == SegmentHostType.Scene && segment.TagId.HasValue && ids.Contains(segment.TagId.Value))
+        var videoSegmentCounts = await Segments.AsNoTracking()
+            .Where(segment => segment.HostType == SegmentHostType.Video && segment.TagId.HasValue && ids.Contains(segment.TagId.Value))
             .GroupBy(segment => segment.TagId!.Value)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
@@ -1116,8 +1116,8 @@ public partial class CoveContext : DbContext
 
         foreach (var tag in tags.Values)
         {
-            tag.SceneCount = sceneCounts.GetValueOrDefault(tag.Id, 0);
-            tag.SceneMarkerCount = sceneSegmentCounts.GetValueOrDefault(tag.Id, 0);
+            tag.VideoCount = videoCounts.GetValueOrDefault(tag.Id, 0);
+            tag.VideoMarkerCount = videoSegmentCounts.GetValueOrDefault(tag.Id, 0);
             tag.ImageCount = imageCounts.GetValueOrDefault(tag.Id, 0);
             tag.GalleryCount = galleryCounts.GetValueOrDefault(tag.Id, 0);
             tag.GroupCount = groupCounts.GetValueOrDefault(tag.Id, 0);
@@ -1126,19 +1126,19 @@ public partial class CoveContext : DbContext
         }
     }
 
-    private void RefreshSceneMetrics(HashSet<int> affectedSceneIds)
+    private void RefreshVideoMetrics(HashSet<int> affectedVideoIds)
     {
-        var scenes = Scenes.Where(BuildIdContainsPredicate<Scene>(affectedSceneIds.ToArray())).ToDictionary(scene => scene.Id);
-        if (scenes.Count == 0)
+        var videos = Videos.Where(BuildIdContainsPredicate<Video>(affectedVideoIds.ToArray())).ToDictionary(video => video.Id);
+        if (videos.Count == 0)
             return;
 
-        var ids = scenes.Keys.ToArray();
-        var sourceIds = ids.Concat(scenes.Values.Select(scene => scene.ParentSceneId).Where(parentId => parentId.HasValue).Select(parentId => parentId!.Value)).Distinct().ToArray();
+        var ids = videos.Keys.ToArray();
+        var sourceIds = ids.Concat(videos.Values.Select(video => video.ParentVideoId).Where(parentId => parentId.HasValue).Select(parentId => parentId!.Value)).Distinct().ToArray();
         var fileRows = VideoFiles.AsNoTracking()
-            .Where(file => file.SceneId.HasValue && sourceIds.Contains(file.SceneId.Value))
+            .Where(file => file.VideoId.HasValue && sourceIds.Contains(file.VideoId.Value))
             .Select(file => new
             {
-                SceneId = file.SceneId!.Value,
+                VideoId = file.VideoId!.Value,
                 file.Path,
                 file.Duration,
                 file.Width,
@@ -1151,7 +1151,7 @@ public partial class CoveContext : DbContext
             })
             .ToList();
         var summaries = fileRows
-            .GroupBy(file => file.SceneId)
+            .GroupBy(file => file.VideoId)
             .ToDictionary(
                 group => group.Key,
                 group => new
@@ -1175,66 +1175,66 @@ public partial class CoveContext : DbContext
                     HasNonInteractiveFiles = group.Any(file => !file.Interactive),
                 });
 
-        foreach (var scene in scenes.Values)
+        foreach (var video in videos.Values)
         {
-            var sourceSceneId = scene.ParentSceneId ?? scene.Id;
-            if (!summaries.TryGetValue(sourceSceneId, out var summary))
+            var sourceVideoId = video.ParentVideoId ?? video.Id;
+            if (!summaries.TryGetValue(sourceVideoId, out var summary))
             {
-                scene.FileCount = 0;
-                scene.MaxDuration = 0;
-                scene.MaxResolution = 0;
-                scene.MaxHeight = 0;
-                scene.MaxFrameRate = 0;
-                scene.MaxBitRate = 0;
-                scene.MaxFileSize = 0;
-                scene.MaxFileModTime = null;
-                scene.MinPath = null;
-                scene.MaxPath = null;
-                scene.FileSearchText = null;
-                scene.HasDimensionData = false;
-                scene.HasLandscapeFiles = false;
-                scene.HasPortraitFiles = false;
-                scene.HasSquareFiles = false;
-                scene.HasInteractiveFiles = false;
-                scene.HasNonInteractiveFiles = false;
+                video.FileCount = 0;
+                video.MaxDuration = 0;
+                video.MaxResolution = 0;
+                video.MaxHeight = 0;
+                video.MaxFrameRate = 0;
+                video.MaxBitRate = 0;
+                video.MaxFileSize = 0;
+                video.MaxFileModTime = null;
+                video.MinPath = null;
+                video.MaxPath = null;
+                video.FileSearchText = null;
+                video.HasDimensionData = false;
+                video.HasLandscapeFiles = false;
+                video.HasPortraitFiles = false;
+                video.HasSquareFiles = false;
+                video.HasInteractiveFiles = false;
+                video.HasNonInteractiveFiles = false;
                 continue;
             }
 
-            scene.FileCount = summary.FileCount;
-            scene.MaxDuration = scene.ParentSceneId.HasValue
-                ? Math.Max(0, Math.Min(scene.ClipEndSec ?? summary.MaxDuration, summary.MaxDuration) - Math.Max(0, scene.ClipStartSec ?? 0))
+            video.FileCount = summary.FileCount;
+            video.MaxDuration = video.ParentVideoId.HasValue
+                ? Math.Max(0, Math.Min(video.ClipEndSec ?? summary.MaxDuration, summary.MaxDuration) - Math.Max(0, video.ClipStartSec ?? 0))
                 : summary.MaxDuration;
-            scene.MaxResolution = summary.MaxResolution;
-            scene.MaxHeight = summary.MaxHeight;
-            scene.MaxFrameRate = summary.MaxFrameRate;
-            scene.MaxBitRate = summary.MaxBitRate;
-            scene.MaxFileSize = summary.MaxFileSize;
-            scene.MaxFileModTime = summary.MaxFileModTime;
-            scene.MinPath = summary.MinPath;
-            scene.MaxPath = summary.MaxPath;
-            scene.FileSearchText = summary.FileSearchText;
-            scene.HasDimensionData = summary.HasDimensionData;
-            scene.HasLandscapeFiles = summary.HasLandscapeFiles;
-            scene.HasPortraitFiles = summary.HasPortraitFiles;
-            scene.HasSquareFiles = summary.HasSquareFiles;
-            scene.HasInteractiveFiles = summary.HasInteractiveFiles;
-            scene.HasNonInteractiveFiles = summary.HasNonInteractiveFiles;
+            video.MaxResolution = summary.MaxResolution;
+            video.MaxHeight = summary.MaxHeight;
+            video.MaxFrameRate = summary.MaxFrameRate;
+            video.MaxBitRate = summary.MaxBitRate;
+            video.MaxFileSize = summary.MaxFileSize;
+            video.MaxFileModTime = summary.MaxFileModTime;
+            video.MinPath = summary.MinPath;
+            video.MaxPath = summary.MaxPath;
+            video.FileSearchText = summary.FileSearchText;
+            video.HasDimensionData = summary.HasDimensionData;
+            video.HasLandscapeFiles = summary.HasLandscapeFiles;
+            video.HasPortraitFiles = summary.HasPortraitFiles;
+            video.HasSquareFiles = summary.HasSquareFiles;
+            video.HasInteractiveFiles = summary.HasInteractiveFiles;
+            video.HasNonInteractiveFiles = summary.HasNonInteractiveFiles;
         }
     }
 
-    private async Task RefreshSceneMetricsAsync(HashSet<int> affectedSceneIds, CancellationToken cancellationToken)
+    private async Task RefreshVideoMetricsAsync(HashSet<int> affectedVideoIds, CancellationToken cancellationToken)
     {
-        var scenes = await Scenes.Where(BuildIdContainsPredicate<Scene>(affectedSceneIds.ToArray())).ToDictionaryAsync(scene => scene.Id, cancellationToken);
-        if (scenes.Count == 0)
+        var videos = await Videos.Where(BuildIdContainsPredicate<Video>(affectedVideoIds.ToArray())).ToDictionaryAsync(video => video.Id, cancellationToken);
+        if (videos.Count == 0)
             return;
 
-        var ids = scenes.Keys.ToArray();
-        var sourceIds = ids.Concat(scenes.Values.Select(scene => scene.ParentSceneId).Where(parentId => parentId.HasValue).Select(parentId => parentId!.Value)).Distinct().ToArray();
+        var ids = videos.Keys.ToArray();
+        var sourceIds = ids.Concat(videos.Values.Select(video => video.ParentVideoId).Where(parentId => parentId.HasValue).Select(parentId => parentId!.Value)).Distinct().ToArray();
         var fileRows = await VideoFiles.AsNoTracking()
-            .Where(file => file.SceneId.HasValue && sourceIds.Contains(file.SceneId.Value))
+            .Where(file => file.VideoId.HasValue && sourceIds.Contains(file.VideoId.Value))
             .Select(file => new
             {
-                SceneId = file.SceneId!.Value,
+                VideoId = file.VideoId!.Value,
                 file.Path,
                 file.Duration,
                 file.Width,
@@ -1247,7 +1247,7 @@ public partial class CoveContext : DbContext
             })
             .ToListAsync(cancellationToken);
         var summaries = fileRows
-            .GroupBy(file => file.SceneId)
+            .GroupBy(file => file.VideoId)
             .ToDictionary(
                 group => group.Key,
                 group => new
@@ -1271,50 +1271,50 @@ public partial class CoveContext : DbContext
                     HasNonInteractiveFiles = group.Any(file => !file.Interactive),
                 });
 
-        foreach (var scene in scenes.Values)
+        foreach (var video in videos.Values)
         {
-            var sourceSceneId = scene.ParentSceneId ?? scene.Id;
-            if (!summaries.TryGetValue(sourceSceneId, out var summary))
+            var sourceVideoId = video.ParentVideoId ?? video.Id;
+            if (!summaries.TryGetValue(sourceVideoId, out var summary))
             {
-                scene.FileCount = 0;
-                scene.MaxDuration = 0;
-                scene.MaxResolution = 0;
-                scene.MaxHeight = 0;
-                scene.MaxFrameRate = 0;
-                scene.MaxBitRate = 0;
-                scene.MaxFileSize = 0;
-                scene.MaxFileModTime = null;
-                scene.MinPath = null;
-                scene.MaxPath = null;
-                scene.FileSearchText = null;
-                scene.HasDimensionData = false;
-                scene.HasLandscapeFiles = false;
-                scene.HasPortraitFiles = false;
-                scene.HasSquareFiles = false;
-                scene.HasInteractiveFiles = false;
-                scene.HasNonInteractiveFiles = false;
+                video.FileCount = 0;
+                video.MaxDuration = 0;
+                video.MaxResolution = 0;
+                video.MaxHeight = 0;
+                video.MaxFrameRate = 0;
+                video.MaxBitRate = 0;
+                video.MaxFileSize = 0;
+                video.MaxFileModTime = null;
+                video.MinPath = null;
+                video.MaxPath = null;
+                video.FileSearchText = null;
+                video.HasDimensionData = false;
+                video.HasLandscapeFiles = false;
+                video.HasPortraitFiles = false;
+                video.HasSquareFiles = false;
+                video.HasInteractiveFiles = false;
+                video.HasNonInteractiveFiles = false;
                 continue;
             }
 
-            scene.FileCount = summary.FileCount;
-            scene.MaxDuration = scene.ParentSceneId.HasValue
-                ? Math.Max(0, Math.Min(scene.ClipEndSec ?? summary.MaxDuration, summary.MaxDuration) - Math.Max(0, scene.ClipStartSec ?? 0))
+            video.FileCount = summary.FileCount;
+            video.MaxDuration = video.ParentVideoId.HasValue
+                ? Math.Max(0, Math.Min(video.ClipEndSec ?? summary.MaxDuration, summary.MaxDuration) - Math.Max(0, video.ClipStartSec ?? 0))
                 : summary.MaxDuration;
-            scene.MaxResolution = summary.MaxResolution;
-            scene.MaxHeight = summary.MaxHeight;
-            scene.MaxFrameRate = summary.MaxFrameRate;
-            scene.MaxBitRate = summary.MaxBitRate;
-            scene.MaxFileSize = summary.MaxFileSize;
-            scene.MaxFileModTime = summary.MaxFileModTime;
-            scene.MinPath = summary.MinPath;
-            scene.MaxPath = summary.MaxPath;
-            scene.FileSearchText = summary.FileSearchText;
-            scene.HasDimensionData = summary.HasDimensionData;
-            scene.HasLandscapeFiles = summary.HasLandscapeFiles;
-            scene.HasPortraitFiles = summary.HasPortraitFiles;
-            scene.HasSquareFiles = summary.HasSquareFiles;
-            scene.HasInteractiveFiles = summary.HasInteractiveFiles;
-            scene.HasNonInteractiveFiles = summary.HasNonInteractiveFiles;
+            video.MaxResolution = summary.MaxResolution;
+            video.MaxHeight = summary.MaxHeight;
+            video.MaxFrameRate = summary.MaxFrameRate;
+            video.MaxBitRate = summary.MaxBitRate;
+            video.MaxFileSize = summary.MaxFileSize;
+            video.MaxFileModTime = summary.MaxFileModTime;
+            video.MinPath = summary.MinPath;
+            video.MaxPath = summary.MaxPath;
+            video.FileSearchText = summary.FileSearchText;
+            video.HasDimensionData = summary.HasDimensionData;
+            video.HasLandscapeFiles = summary.HasLandscapeFiles;
+            video.HasPortraitFiles = summary.HasPortraitFiles;
+            video.HasSquareFiles = summary.HasSquareFiles;
+            video.HasInteractiveFiles = summary.HasInteractiveFiles;
+            video.HasNonInteractiveFiles = summary.HasNonInteractiveFiles;
         }
     }
 
@@ -1497,8 +1497,8 @@ public partial class CoveContext : DbContext
             return;
 
         var ids = performers.Keys.ToArray();
-        var sceneCounts = Set<ScenePerformer>().AsNoTracking().Where(scenePerformer => ids.Contains(scenePerformer.PerformerId))
-            .GroupBy(scenePerformer => scenePerformer.PerformerId)
+        var videoCounts = Set<VideoPerformer>().AsNoTracking().Where(videoPerformer => ids.Contains(videoPerformer.PerformerId))
+            .GroupBy(videoPerformer => videoPerformer.PerformerId)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToDictionary(x => x.Key, x => x.Count);
         var imageCounts = Set<ImagePerformer>().AsNoTracking().Where(imagePerformer => ids.Contains(imagePerformer.PerformerId))
@@ -1516,7 +1516,7 @@ public partial class CoveContext : DbContext
 
         foreach (var performer in performers.Values)
         {
-            performer.SceneCount = sceneCounts.GetValueOrDefault(performer.Id, 0);
+            performer.VideoCount = videoCounts.GetValueOrDefault(performer.Id, 0);
             performer.ImageCount = imageCounts.GetValueOrDefault(performer.Id, 0);
             performer.GalleryCount = galleryCounts.GetValueOrDefault(performer.Id, 0);
             performer.TagCount = tagCounts.GetValueOrDefault(performer.Id, 0);
@@ -1530,8 +1530,8 @@ public partial class CoveContext : DbContext
             return;
 
         var ids = performers.Keys.ToArray();
-        var sceneCounts = await Set<ScenePerformer>().AsNoTracking().Where(scenePerformer => ids.Contains(scenePerformer.PerformerId))
-            .GroupBy(scenePerformer => scenePerformer.PerformerId)
+        var videoCounts = await Set<VideoPerformer>().AsNoTracking().Where(videoPerformer => ids.Contains(videoPerformer.PerformerId))
+            .GroupBy(videoPerformer => videoPerformer.PerformerId)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
         var imageCounts = await Set<ImagePerformer>().AsNoTracking().Where(imagePerformer => ids.Contains(imagePerformer.PerformerId))
@@ -1549,7 +1549,7 @@ public partial class CoveContext : DbContext
 
         foreach (var performer in performers.Values)
         {
-            performer.SceneCount = sceneCounts.GetValueOrDefault(performer.Id, 0);
+            performer.VideoCount = videoCounts.GetValueOrDefault(performer.Id, 0);
             performer.ImageCount = imageCounts.GetValueOrDefault(performer.Id, 0);
             performer.GalleryCount = galleryCounts.GetValueOrDefault(performer.Id, 0);
             performer.TagCount = tagCounts.GetValueOrDefault(performer.Id, 0);
@@ -1567,8 +1567,8 @@ public partial class CoveContext : DbContext
             .GroupBy(imageGallery => imageGallery.GalleryId)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToDictionary(x => x.Key, x => x.Count);
-        var sceneCounts = Set<SceneGallery>().AsNoTracking().Where(sceneGallery => ids.Contains(sceneGallery.GalleryId))
-            .GroupBy(sceneGallery => sceneGallery.GalleryId)
+        var videoCounts = Set<VideoGallery>().AsNoTracking().Where(videoGallery => ids.Contains(videoGallery.GalleryId))
+            .GroupBy(videoGallery => videoGallery.GalleryId)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToDictionary(x => x.Key, x => x.Count);
         var performerCounts = Set<GalleryPerformer>().AsNoTracking().Where(galleryPerformer => ids.Contains(galleryPerformer.GalleryId))
@@ -1583,7 +1583,7 @@ public partial class CoveContext : DbContext
         foreach (var gallery in galleries.Values)
         {
             gallery.ImageCount = imageCounts.GetValueOrDefault(gallery.Id, 0);
-            gallery.SceneCount = sceneCounts.GetValueOrDefault(gallery.Id, 0);
+            gallery.VideoCount = videoCounts.GetValueOrDefault(gallery.Id, 0);
             gallery.PerformerCount = performerCounts.GetValueOrDefault(gallery.Id, 0);
             gallery.TagCount = tagCounts.GetValueOrDefault(gallery.Id, 0);
         }
@@ -1600,8 +1600,8 @@ public partial class CoveContext : DbContext
             .GroupBy(imageGallery => imageGallery.GalleryId)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
-        var sceneCounts = await Set<SceneGallery>().AsNoTracking().Where(sceneGallery => ids.Contains(sceneGallery.GalleryId))
-            .GroupBy(sceneGallery => sceneGallery.GalleryId)
+        var videoCounts = await Set<VideoGallery>().AsNoTracking().Where(videoGallery => ids.Contains(videoGallery.GalleryId))
+            .GroupBy(videoGallery => videoGallery.GalleryId)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
         var performerCounts = await Set<GalleryPerformer>().AsNoTracking().Where(galleryPerformer => ids.Contains(galleryPerformer.GalleryId))
@@ -1616,7 +1616,7 @@ public partial class CoveContext : DbContext
         foreach (var gallery in galleries.Values)
         {
             gallery.ImageCount = imageCounts.GetValueOrDefault(gallery.Id, 0);
-            gallery.SceneCount = sceneCounts.GetValueOrDefault(gallery.Id, 0);
+            gallery.VideoCount = videoCounts.GetValueOrDefault(gallery.Id, 0);
             gallery.PerformerCount = performerCounts.GetValueOrDefault(gallery.Id, 0);
             gallery.TagCount = tagCounts.GetValueOrDefault(gallery.Id, 0);
         }
@@ -1644,8 +1644,8 @@ public partial class CoveContext : DbContext
             return;
 
         var ids = studios.Keys.ToArray();
-        var sceneCounts = Scenes.AsNoTracking().Where(scene => scene.StudioId.HasValue && ids.Contains(scene.StudioId.Value))
-            .GroupBy(scene => scene.StudioId!.Value)
+        var videoCounts = Videos.AsNoTracking().Where(video => video.StudioId.HasValue && ids.Contains(video.StudioId.Value))
+            .GroupBy(video => video.StudioId!.Value)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToDictionary(x => x.Key, x => x.Count);
         var imageCounts = Images.AsNoTracking().Where(image => image.StudioId.HasValue && ids.Contains(image.StudioId.Value))
@@ -1660,9 +1660,9 @@ public partial class CoveContext : DbContext
             .GroupBy(groupEntity => groupEntity.StudioId!.Value)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToDictionary(x => x.Key, x => x.Count);
-        var performerCounts = Set<ScenePerformer>().AsNoTracking().Where(scenePerformer => scenePerformer.Scene!.StudioId.HasValue && ids.Contains(scenePerformer.Scene.StudioId.Value))
-            .GroupBy(scenePerformer => scenePerformer.Scene!.StudioId!.Value)
-            .Select(group => new { group.Key, Count = group.Select(scenePerformer => scenePerformer.PerformerId).Distinct().Count() })
+        var performerCounts = Set<VideoPerformer>().AsNoTracking().Where(videoPerformer => videoPerformer.Video!.StudioId.HasValue && ids.Contains(videoPerformer.Video.StudioId.Value))
+            .GroupBy(videoPerformer => videoPerformer.Video!.StudioId!.Value)
+            .Select(group => new { group.Key, Count = group.Select(videoPerformer => videoPerformer.PerformerId).Distinct().Count() })
             .ToDictionary(x => x.Key, x => x.Count);
         var childCounts = Studios.AsNoTracking().Where(studio => studio.ParentId.HasValue && ids.Contains(studio.ParentId.Value))
             .GroupBy(studio => studio.ParentId!.Value)
@@ -1675,7 +1675,7 @@ public partial class CoveContext : DbContext
 
         foreach (var studio in studios.Values)
         {
-            studio.SceneCount = sceneCounts.GetValueOrDefault(studio.Id, 0);
+            studio.VideoCount = videoCounts.GetValueOrDefault(studio.Id, 0);
             studio.ImageCount = imageCounts.GetValueOrDefault(studio.Id, 0);
             studio.GalleryCount = galleryCounts.GetValueOrDefault(studio.Id, 0);
             studio.GroupCount = groupCounts.GetValueOrDefault(studio.Id, 0);
@@ -1692,8 +1692,8 @@ public partial class CoveContext : DbContext
             return;
 
         var ids = studios.Keys.ToArray();
-        var sceneCounts = await Scenes.AsNoTracking().Where(scene => scene.StudioId.HasValue && ids.Contains(scene.StudioId.Value))
-            .GroupBy(scene => scene.StudioId!.Value)
+        var videoCounts = await Videos.AsNoTracking().Where(video => video.StudioId.HasValue && ids.Contains(video.StudioId.Value))
+            .GroupBy(video => video.StudioId!.Value)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
         var imageCounts = await Images.AsNoTracking().Where(image => image.StudioId.HasValue && ids.Contains(image.StudioId.Value))
@@ -1708,9 +1708,9 @@ public partial class CoveContext : DbContext
             .GroupBy(groupEntity => groupEntity.StudioId!.Value)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
-        var performerCounts = await Set<ScenePerformer>().AsNoTracking().Where(scenePerformer => scenePerformer.Scene!.StudioId.HasValue && ids.Contains(scenePerformer.Scene.StudioId.Value))
-            .GroupBy(scenePerformer => scenePerformer.Scene!.StudioId!.Value)
-            .Select(group => new { group.Key, Count = group.Select(scenePerformer => scenePerformer.PerformerId).Distinct().Count() })
+        var performerCounts = await Set<VideoPerformer>().AsNoTracking().Where(videoPerformer => videoPerformer.Video!.StudioId.HasValue && ids.Contains(videoPerformer.Video.StudioId.Value))
+            .GroupBy(videoPerformer => videoPerformer.Video!.StudioId!.Value)
+            .Select(group => new { group.Key, Count = group.Select(videoPerformer => videoPerformer.PerformerId).Distinct().Count() })
             .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
         var childCounts = await Studios.AsNoTracking().Where(studio => studio.ParentId.HasValue && ids.Contains(studio.ParentId.Value))
             .GroupBy(studio => studio.ParentId!.Value)
@@ -1723,7 +1723,7 @@ public partial class CoveContext : DbContext
 
         foreach (var studio in studios.Values)
         {
-            studio.SceneCount = sceneCounts.GetValueOrDefault(studio.Id, 0);
+            studio.VideoCount = videoCounts.GetValueOrDefault(studio.Id, 0);
             studio.ImageCount = imageCounts.GetValueOrDefault(studio.Id, 0);
             studio.GalleryCount = galleryCounts.GetValueOrDefault(studio.Id, 0);
             studio.GroupCount = groupCounts.GetValueOrDefault(studio.Id, 0);
@@ -1791,16 +1791,16 @@ public partial class CoveContext : DbContext
 
     private void InitializeAddedParentIdArrays()
     {
-        foreach (var entry in ChangeTracker.Entries<Scene>().Where(e => e.State == EntityState.Added))
+        foreach (var entry in ChangeTracker.Entries<Video>().Where(e => e.State == EntityState.Added))
         {
-            entry.Entity.TagIds = entry.Entity.SceneTags
-                .Select(sceneTag => sceneTag.TagId)
+            entry.Entity.TagIds = entry.Entity.VideoTags
+                .Select(videoTag => videoTag.TagId)
                 .Where(tagId => tagId > 0)
                 .Distinct()
                 .OrderBy(tagId => tagId)
                 .ToArray();
-            entry.Entity.PerformerIds = entry.Entity.ScenePerformers
-                .Select(scenePerformer => scenePerformer.PerformerId)
+            entry.Entity.PerformerIds = entry.Entity.VideoPerformers
+                .Select(videoPerformer => videoPerformer.PerformerId)
                 .Where(performerId => performerId > 0)
                 .Distinct()
                 .OrderBy(performerId => performerId)
@@ -2090,4 +2090,5 @@ public partial class CoveContext : DbContext
         }
     }
 }
+
 

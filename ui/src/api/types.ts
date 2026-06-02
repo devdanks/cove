@@ -1,6 +1,6 @@
 // ===== Entity Types =====
 
-export interface Scene {
+export interface Video {
   id: number;
   title?: string;
   code?: string;
@@ -18,32 +18,32 @@ export interface Scene {
   files: VideoFile[];
   groups: GroupSummary[];
   galleries: GallerySummary[];
-  remoteIds: SceneRemoteId[];
+  remoteIds: VideoRemoteId[];
   customFields?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
   contextTagApplications?: TagApplication[];
   fieldProvenance?: FieldProvenance[];
-  parentSceneId?: number | null;
-  parentSceneTitle?: string | null;
+  parentVideoId?: number | null;
+  parentVideoTitle?: string | null;
   clipStartSec?: number | null;
   clipEndSec?: number | null;
   imagePath?: string | null;
 }
 
-export interface SceneListEntry {
-  kind: "scene" | "compilation";
+export interface VideoListEntry {
+  kind: "video" | "compilation";
   id: number;
-  scene?: Scene;
+  video?: Video;
   group?: Group;
 }
 
-export interface SceneRemoteId {
+export interface VideoRemoteId {
   endpoint: string;
   remoteId: string;
 }
 
-export interface SceneCreate {
+export interface VideoCreate {
   title?: string;
   code?: string;
   details?: string;
@@ -58,10 +58,10 @@ export interface SceneCreate {
   tagIds?: number[];
   performerIds?: number[];
   galleryIds?: number[];
-  groups?: SceneGroupInput[];
-  remoteIds?: SceneRemoteId[];
+  groups?: VideoGroupInput[];
+  remoteIds?: VideoRemoteId[];
   customFields?: Record<string, unknown>;
-  parentSceneId?: number | null;
+  parentVideoId?: number | null;
   clipStartSec?: number | null;
   clipEndSec?: number | null;
 }
@@ -70,7 +70,7 @@ export interface FileBackedCreate {
   filePath: string;
 }
 
-export interface SceneUpdate extends Partial<SceneCreate> {}
+export interface VideoUpdate extends Partial<VideoCreate> {}
 
 export interface Performer {
   id: number;
@@ -101,7 +101,7 @@ export interface Performer {
   aliases: string[];
   tags: Tag[];
   remoteIds: PerformerRemoteId[];
-  sceneCount: number;
+  videoCount: number;
   imageCount: number;
   galleryCount: number;
   groupCount: number;
@@ -126,7 +126,7 @@ export interface PerformerSummary {
   birthdate?: string;
   favorite: boolean;
   imagePath?: string;
-  sceneCount?: number;
+  videoCount?: number;
   imageCount?: number;
   galleryCount?: number;
   audioCount?: number;
@@ -224,7 +224,7 @@ export interface Tag {
   effectiveDurationSec?: number | null;
   effectiveDurationPercent?: number | null;
   aliases: string[];
-  sceneCount?: number;
+  videoCount?: number;
   segmentCount?: number;
   imageCount?: number;
   galleryCount?: number;
@@ -315,7 +315,7 @@ export interface TagDetail extends Tag {
   sortName?: string;
   parents: Tag[];
   children: Tag[];
-  sceneCount: number;
+  videoCount: number;
   performerCount: number;
   imageCount: number;
   galleryCount: number;
@@ -343,7 +343,7 @@ export interface TagGraphNode {
   parentIds: number[];
   childIds: number[];
   totalUsageCount: number;
-  sceneCount: number;
+  videoCount: number;
   segmentCount: number;
   imageCount: number;
   galleryCount: number;
@@ -400,7 +400,7 @@ export interface Studio {
   aliases: string[];
   tags: Tag[];
   remoteIds: StudioRemoteId[];
-  sceneCount: number;
+  videoCount: number;
   imageCount: number;
   galleryCount: number;
   groupCount: number;
@@ -452,8 +452,8 @@ export interface Gallery {
   tags: Tag[];
   performers: PerformerSummary[];
   imageCount: number;
-  sceneCount: number;
-  sceneIds: number[];
+  videoCount: number;
+  videoIds: number[];
   folderPath?: string;
   files: GalleryFileInfo[];
   customFields?: Record<string, unknown>;
@@ -501,7 +501,7 @@ export interface GalleryCreate {
   urls?: string[];
   tagIds?: number[];
   performerIds?: number[];
-  sceneIds?: number[];
+  videoIds?: number[];
   customFields?: Record<string, unknown>;
 }
 
@@ -543,16 +543,16 @@ export interface Image {
 }
 
 
-export interface VisualSimilarScene {
-  scene: Scene;
+export interface VisualSimilarVideo {
+  video: Video;
   distance: number;
   sectionIndex: number;
   startSec?: number;
   endSec?: number;
 }
 
-export interface AudioSimilarScene {
-  scene: Scene;
+export interface AudioSimilarVideo {
+  video: Video;
   distance: number;
   sectionIndex: number;
   startSec?: number;
@@ -577,7 +577,7 @@ export interface ImageCreate {
   performerIds?: number[];
   galleryIds?: number[];
   customFields?: Record<string, unknown>;
-  groupIds?: SceneGroupInput[];
+  groupIds?: VideoGroupInput[];
 }
 
 export interface ImageUpdate {
@@ -594,7 +594,7 @@ export interface ImageUpdate {
   performerIds?: number[];
   galleryIds?: number[];
   customFields?: Record<string, unknown>;
-  groupIds?: SceneGroupInput[];
+  groupIds?: VideoGroupInput[];
 }
 
 export interface AudioFile {
@@ -656,7 +656,7 @@ export interface AudioCreate {
   tagIds?: number[];
   performerIds?: number[];
   customFields?: Record<string, unknown>;
-  groupIds?: SceneGroupInput[];
+  groupIds?: VideoGroupInput[];
 }
 
 export interface AudioUpdate {
@@ -670,7 +670,7 @@ export interface AudioUpdate {
   tagIds?: number[];
   performerIds?: number[];
   customFields?: Record<string, unknown>;
-  groupIds?: SceneGroupInput[];
+  groupIds?: VideoGroupInput[];
 }
 
 export interface TextFile {
@@ -720,7 +720,7 @@ export interface TextCreate {
   tagIds?: number[];
   performerIds?: number[];
   customFields?: Record<string, unknown>;
-  groupIds?: SceneGroupInput[];
+  groupIds?: VideoGroupInput[];
 }
 
 export interface TextUpdate {
@@ -734,7 +734,7 @@ export interface TextUpdate {
   tagIds?: number[];
   performerIds?: number[];
   customFields?: Record<string, unknown>;
-  groupIds?: SceneGroupInput[];
+  groupIds?: VideoGroupInput[];
 }
 
 export interface TextContent {
@@ -763,7 +763,7 @@ export interface Group {
   backImagePath?: string;
   urls: string[];
   tags: Tag[];
-  sceneCount: number;
+  videoCount: number;
   imageCount?: number;
   audioCount?: number;
   textCount?: number;
@@ -785,7 +785,7 @@ export interface Group {
   queryJson?: string | null;
   lastResolvedAt?: string | null;
   cachedItemCount?: number | null;
-  showInSceneLists?: boolean;
+  showInVideoLists?: boolean;
   allowedHostTypes?: string[];
   sortOrder?: number;
   fieldProvenance?: FieldProvenance[];
@@ -799,18 +799,18 @@ export interface GroupReorder {
 export interface GroupSummary {
   id: number;
   name: string;
-  sceneIndex: number;
+  videoIndex: number;
 }
 
-export type GroupItemKind = "scene" | "sceneRange" | "image" | "audio" | "text" | "group" | "performer" | "studio" | "tag" | "gallery" | "face" | "segment";
+export type GroupItemKind = "video" | "videoRange" | "image" | "audio" | "text" | "group" | "performer" | "studio" | "tag" | "gallery" | "face" | "segment";
 
 export interface GroupItem {
   id: number;
   groupId: number;
   orderIndex: number;
   kind: GroupItemKind;
-  sceneId?: number | null;
-  sceneTitle?: string;
+  videoId?: number | null;
+  videoTitle?: string;
   hostType?: string;
   hostId?: number;
   imageId?: number | null;
@@ -832,7 +832,7 @@ export interface GroupItem {
 export interface GroupItemCreate {
   orderIndex: number;
   kind: GroupItemKind;
-  sceneId?: number;
+  videoId?: number;
   startSec?: number;
   endSec?: number;
   title?: string;
@@ -865,7 +865,7 @@ export interface GroupItemsRemoveHosts {
 
 export interface GroupItemSpanInput {
   spanKey?: string;
-  sceneId?: number;
+  videoId?: number;
   startSec?: number;
   endSec?: number;
   title?: string;
@@ -881,12 +881,12 @@ export interface GroupPlaybackManifestItem {
   groupItemId: number;
   hostType: string;
   hostId: number;
-  sceneId?: number | null;
+  videoId?: number | null;
   audioId?: number | null;
   imageId?: number | null;
   textId?: number | null;
   segmentId?: number | null;
-  sceneTitle?: string;
+  videoTitle?: string;
   src: string;
   startSec: number;
   endSec?: number;
@@ -922,7 +922,7 @@ export interface GroupCreate {
   kind?: GroupKind;
   querySourceKey?: string;
   queryJson?: string | null;
-  showInSceneLists?: boolean;
+  showInVideoLists?: boolean;
   allowedHostTypes?: string[];
   sortOrder?: number;
 }
@@ -1001,13 +1001,13 @@ export interface TagSegmentWall {
   kind: string;
   sourceKey: string;
   confidence?: number;
-  sceneId: number;
-  sceneTitle: string;
+  videoId: number;
+  videoTitle: string;
 }
 
-export type SegmentHostType = "scene" | "image" | "audio";
-export type DetectionHostType = "scene" | "image";
-export type AffinityHostType = "scene" | "audio" | "text" | "image" | "performer" | "face" | "tag" | "studio" | "gallery" | "group" | "segment";
+export type SegmentHostType = "video" | "image" | "audio";
+export type DetectionHostType = "video" | "image";
+export type AffinityHostType = "video" | "audio" | "text" | "image" | "performer" | "face" | "tag" | "studio" | "gallery" | "group" | "segment";
 export type InteractionHostType = AffinityHostType | "segment" | "search" | "collection";
 
 export interface Segment {
@@ -1079,14 +1079,14 @@ export interface ResolvedSpanInterval {
 
 export interface ResolvedSpanDetail {
   span: ResolvedSpan;
-  sceneId: number;
-  sceneTitle?: string;
+  videoId: number;
+  videoTitle?: string;
   intervals: ResolvedSpanInterval[];
   profileId: number;
   profileVersion: number;
 }
 
-export interface SceneResolvedSpans {
+export interface VideoResolvedSpans {
   spans: ResolvedSpan[];
   profileId: number;
   profileVersion: number;
@@ -1168,9 +1168,9 @@ export interface SegmentSpanSearchRequest {
   sort?: string;
   direction?: "asc" | "desc";
   q?: string;
-  sceneTitle?: string;
-  sceneIds?: number[];
-  excludeSceneIds?: number[];
+  videoTitle?: string;
+  videoIds?: number[];
+  excludeVideoIds?: number[];
   tagIds?: number[];
   kind?: string;
   sourceKey?: string;
@@ -1208,9 +1208,9 @@ export interface SegmentSpanSearchRequest {
 
 export interface SegmentSpanSearchResultItem {
   span: ResolvedSpan;
-  sceneId: number;
-  sceneTitle?: string;
-  sceneUpdatedAt?: string;
+  videoId: number;
+  videoTitle?: string;
+  videoUpdatedAt?: string;
   profileId: number;
 }
 
@@ -1266,7 +1266,7 @@ export interface SegmentDisplayRuleCreate {
 export interface SegmentDisplayRuleUpdate extends SegmentDisplayRuleCreate {}
 
 export interface SegmentDisplayProfilePreviewRequest {
-  sceneId: number;
+  videoId: number;
   rules: SegmentDisplayRuleCreate[];
 }
 
@@ -1335,7 +1335,7 @@ export interface Face {
   ignored: boolean;
   mergedIntoFaceId?: number;
   detectionCount: number;
-  sceneCount: number;
+  videoCount: number;
   imageCount: number;
   primarySourceKey?: string;
   createdAt: string;
@@ -1348,7 +1348,7 @@ export interface Face {
 
 export interface FaceAppearance {
   appearanceId: number;
-  hostType: "scene" | "image";
+  hostType: "video" | "image";
   hostId: number;
   title: string;
   thumbnailUrl: string;
@@ -1362,7 +1362,7 @@ export interface FaceAppearance {
 
 export interface FaceAppearancesResponse {
   items: FaceAppearance[];
-  totalScenes: number;
+  totalVideos: number;
   totalImages: number;
 }
 
@@ -1374,7 +1374,7 @@ export interface FaceHostFace {
   coverImageUrl?: string;
   appearanceCount: number;
   frameSampleCount: number;
-  sceneCount: number;
+  videoCount: number;
   imageCount: number;
   firstSeenAtSec?: number;
   lastSeenAtSec?: number;
@@ -1468,7 +1468,7 @@ export interface FaceSimilar {
   ignored: boolean;
   mergedIntoFaceId?: number;
   detectionCount: number;
-  sceneCount: number;
+  videoCount: number;
   imageCount: number;
   primarySourceKey?: string;
   createdAt: string;
@@ -1578,7 +1578,7 @@ export interface EngagementInteraction {
   meta?: Record<string, unknown>;
 }
 
-export interface SceneInteractionEvent {
+export interface VideoInteractionEvent {
   kind: string;
   at: string;
   meta?: unknown;
@@ -1623,7 +1623,7 @@ export interface PlaybackInterval {
   recordedAt: string;
 }
 
-export interface ScenePlaybackSession {
+export interface VideoPlaybackSession {
   sessionId: string;
   startedAt: string;
   lastSeenAt: string;
@@ -1636,13 +1636,13 @@ export interface ScenePlaybackSession {
   intervals: PlaybackInterval[];
 }
 
-export interface SceneHistory {
+export interface VideoHistory {
   playHistory: string[];
   likeHistory: string[];
-  events?: SceneInteractionEvent[];
+  events?: VideoInteractionEvent[];
   allTimeWatchedIntervals?: PlaybackInterval[];
   totalDistinctWatchedSec?: number;
-  sessions?: ScenePlaybackSession[];
+  sessions?: VideoPlaybackSession[];
 }
 
 export interface EntityEngagementBatchRequest {
@@ -1658,7 +1658,7 @@ export interface PaginatedResponse<T> {
 }
 
 export interface Stats {
-  sceneCount: number;
+  videoCount: number;
   imageCount: number;
   galleryCount: number;
   performerCount: number;
@@ -1674,25 +1674,25 @@ export interface Stats {
   detectionCount: number;
   tagApplicationCount: number;
   aiRunCount: number;
-  sceneFileSize: number;
+  videoFileSize: number;
   imageFileSize: number;
   audioFileSize: number;
   textFileSize: number;
   totalFileSize: number;
-  sceneDuration: number;
+  videoDuration: number;
   audioDuration: number;
   totalPlayDuration: number;
-  scenePlayCount: number;
+  videoPlayCount: number;
   audioPlayCount: number;
   textReadCount: number;
   imageViewCount: number;
   segmentViewCount: number;
-  sceneCompleteCount: number;
+  videoCompleteCount: number;
   audioCompleteCount: number;
   textCompleteCount: number;
   imageCompleteCount: number;
   segmentCompleteCount: number;
-  sceneConsumedSeconds: number;
+  videoConsumedSeconds: number;
   audioConsumedSeconds: number;
   textConsumedSeconds: number;
   imageConsumedSeconds: number;
@@ -1744,7 +1744,7 @@ export interface UserUiPreferences {
   theme?: UserThemePreferences | null;
   ratingSystemOptions?: RatingSystemOptions | null;
   tracking?: UserTrackingPreferences | null;
-  scenes?: UserScenesPreferences | null;
+  videos?: UserVideosPreferences | null;
   keybindingOverrides?: Record<string, string> | null;
   playback?: UserPlaybackPreferences | null;
 }
@@ -1758,7 +1758,7 @@ export interface UserTrackingPreferences {
   sessionIdleTimeoutSec?: number | null;
 }
 
-export interface UserScenesPreferences {
+export interface UserVideosPreferences {
   includeCompilationGroups?: boolean | null;
 }
 
@@ -1789,8 +1789,8 @@ export interface InterfaceConfig {
   disableDropdownCreateTag: boolean;
 }
 
-export type CustomFieldEntityType = "scene" | "audio" | "text" | "performer" | "tag" | "studio" | "gallery" | "image" | "group" | "face";
-export type CustomFieldType = "text" | "longText" | "number" | "boolean" | "date" | "timestamp" | "duration" | "percent" | "url" | "enum" | "tag" | "performer" | "studio" | "scene" | "gallery" | "image" | "group";
+export type CustomFieldEntityType = "video" | "audio" | "text" | "performer" | "tag" | "studio" | "gallery" | "image" | "group" | "face";
+export type CustomFieldType = "text" | "longText" | "number" | "boolean" | "date" | "timestamp" | "duration" | "percent" | "url" | "enum" | "tag" | "performer" | "studio" | "video" | "gallery" | "image" | "group";
 
 export interface CustomFieldDefinition {
   id?: number;
@@ -2078,7 +2078,7 @@ export interface ScrapeCollectionItemSelection {
   action: ScrapeCollectionItemAction;
 }
 
-export interface ApplySceneScrapeAttemptRequest {
+export interface ApplyVideoScrapeAttemptRequest {
   replaceFields?: string[];
   collectionModes?: Record<string, string>;
   createMissingTags?: boolean;
@@ -2091,12 +2091,12 @@ export interface ApplySceneScrapeAttemptRequest {
   performerSelections?: ScrapeCollectionItemSelection[];
 }
 
-export type ApplyScrapeAttemptRequest = ApplySceneScrapeAttemptRequest;
+export type ApplyScrapeAttemptRequest = ApplyVideoScrapeAttemptRequest;
 
-export interface BatchSceneScrapeStartRequest {
+export interface BatchVideoScrapeStartRequest {
   scraperId: string;
   inputKind: "url" | "name";
-  sceneIds: number[];
+  videoIds: number[];
   autoApply?: boolean;
   createMissingTags?: boolean;
   createMissingPerformers?: boolean;
@@ -2183,7 +2183,7 @@ export interface DownloaderBatchGenerateOptions {
   imageThumbnails?: boolean;
   imagePhashes?: boolean;
   overwrite?: boolean;
-  sceneIds?: number[];
+  videoIds?: number[];
   paths?: string[];
 }
 
@@ -2204,11 +2204,11 @@ export interface DownloaderBatchItem {
   markOrganized?: boolean;
   hydratePerformers?: boolean;
   galleryIds?: number[];
-  groupIds?: SceneGroupInput[];
+  groupIds?: VideoGroupInput[];
 }
 
 export interface DownloaderBatchFollowUp {
-  scrapeScenes?: boolean;
+  scrapeVideos?: boolean;
   allowDuplicateDownloads?: boolean;
   generate?: DownloaderBatchGenerateOptions;
 }
@@ -2330,14 +2330,14 @@ export interface MetadataServerEntityCandidate {
   localId?: number;
 }
 
-export interface MetadataServerSceneEntityOverride {
+export interface MetadataServerVideoEntityOverride {
   remoteId: string;
   name: string;
   action: string;
   localId?: number;
 }
 
-export interface MetadataServerSceneMatch {
+export interface MetadataServerVideoMatch {
   endpoint: string;
   serverName: string;
   id: string;
@@ -2366,9 +2366,9 @@ export interface MetadataServerFingerprint {
   duration?: number;
 }
 
-export interface MetadataServerSceneImportRequest {
+export interface MetadataServerVideoImportRequest {
   endpoint: string;
-  sceneId: string;
+  videoId: string;
   setCoverImage?: boolean;
   setTags?: boolean;
   setPerformers?: boolean;
@@ -2379,9 +2379,9 @@ export interface MetadataServerSceneImportRequest {
   markOrganized?: boolean;
   excludedTagNames?: string[];
   excludedPerformerNames?: string[];
-  studioOverride?: MetadataServerSceneEntityOverride;
-  performerOverrides?: MetadataServerSceneEntityOverride[];
-  tagOverrides?: MetadataServerSceneEntityOverride[];
+  studioOverride?: MetadataServerVideoEntityOverride;
+  performerOverrides?: MetadataServerVideoEntityOverride[];
+  tagOverrides?: MetadataServerVideoEntityOverride[];
   fieldStrategies?: Record<string, "ignore" | "merge" | "overwrite">;
 }
 
@@ -2458,7 +2458,7 @@ export interface FingerprintCriterion {
   modifier: CriterionModifier;
 }
 
-export interface SceneFilterCriteria {
+export interface VideoFilterCriteria {
   title?: string;
   code?: string;
   path?: string;
@@ -2536,7 +2536,7 @@ export interface PerformerFilterCriteria {
   favoriteCriterion?: BoolCriterion;
   tagsCriterion?: MultiIdCriterion;
   studiosCriterion?: MultiIdCriterion;
-  sceneCountCriterion?: IntCriterion;
+  videoCountCriterion?: IntCriterion;
   studioCountCriterion?: IntCriterion;
   imageCountCriterion?: IntCriterion;
   galleryCountCriterion?: IntCriterion;
@@ -2579,8 +2579,8 @@ export interface TagFilterCriteria {
   name?: string;
   favorite?: boolean;
   favoriteCriterion?: BoolCriterion;
-  sceneCountCriterion?: IntCriterion;
-  sceneCountIncludesChildren?: boolean;
+  videoCountCriterion?: IntCriterion;
+  videoCountIncludesChildren?: boolean;
   performerCountCriterion?: IntCriterion;
   performerCountIncludesChildren?: boolean;
   parentsCriterion?: MultiIdCriterion;
@@ -2619,7 +2619,7 @@ export interface StudioFilterCriteria {
   ratingCriterion?: IntCriterion;
   favoriteCriterion?: BoolCriterion;
   tagsCriterion?: MultiIdCriterion;
-  sceneCountCriterion?: IntCriterion;
+  videoCountCriterion?: IntCriterion;
   urlCriterion?: StringCriterion;
   remoteIdCriterion?: StringCriterion;
   remoteIdCountCriterion?: IntCriterion;
@@ -2672,7 +2672,7 @@ export interface GalleryFilterCriteria {
   performerCountCriterion?: IntCriterion;
   performerAgeCriterion?: IntCriterion;
   typicalResolutionCriterion?: IntCriterion;
-  scenesCriterion?: MultiIdCriterion;
+  videosCriterion?: MultiIdCriterion;
   performerTagsCriterion?: MultiIdCriterion;
   customFieldCriterion?: CustomFieldCriterion;
   customFieldCriteria?: CustomFieldCriterion[];
@@ -2806,7 +2806,7 @@ export interface GroupFilterCriteria {
   querySourceKeyCriterion?: StringCriterion;
   allowedHostTypesCriterion?: StringCriterion;
   hasQueryCriterion?: BoolCriterion;
-  showInSceneListsCriterion?: BoolCriterion;
+  showInVideoListsCriterion?: BoolCriterion;
   lastResolvedAtCriterion?: TimestampCriterion;
   sortOrderCriterion?: IntCriterion;
   cachedItemCountCriterion?: IntCriterion;
@@ -2815,7 +2815,7 @@ export interface GroupFilterCriteria {
   synopsisCriterion?: StringCriterion;
   performersCriterion?: MultiIdCriterion;
   itemCountCriterion?: IntCriterion;
-  sceneCountCriterion?: IntCriterion;
+  videoCountCriterion?: IntCriterion;
   imageCountCriterion?: IntCriterion;
   audioCountCriterion?: IntCriterion;
   textCountCriterion?: IntCriterion;
@@ -2841,12 +2841,12 @@ export interface FilteredQueryRequest<T = Record<string, unknown>> {
 
 export type BulkUpdateMode = "SET" | "ADD" | "REMOVE";
 
-export interface SceneGroupInput {
+export interface VideoGroupInput {
   groupId: number;
-  sceneIndex: number;
+  videoIndex: number;
 }
 
-export interface BulkSceneUpdate {
+export interface BulkVideoUpdate {
   ids: number[];
   clearFields?: string[];
   rating?: number;
@@ -2861,7 +2861,7 @@ export interface BulkSceneUpdate {
   performerMode?: BulkUpdateMode;
   galleryIds?: number[];
   galleryMode?: BulkUpdateMode;
-  groupIds?: SceneGroupInput[];
+  groupIds?: VideoGroupInput[];
   groupMode?: BulkUpdateMode;
 }
 
@@ -3351,3 +3351,4 @@ export interface RegistryUninstallResult {
   dependents?: ExtensionDependencyImpact[];
   uninstalledExtensions?: string[];
 }
+

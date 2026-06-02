@@ -21,7 +21,7 @@ export interface RouteEntry {
 export interface SlotEntry<TContext = any> {
   /** Unique id for this extension contribution */
   id: string;
-  /** Named extension slot (e.g. "scene-detail-sidebar") */
+  /** Named extension slot (e.g. "video-detail-sidebar") */
   slot: string;
   /** Render function invoked with the host-provided context */
   render: (context: TContext) => ReactNode;
@@ -108,3 +108,4 @@ export function ExtensionSlot<TContext>({ slot, context }: { slot: string; conte
     </>
   );
 }
+

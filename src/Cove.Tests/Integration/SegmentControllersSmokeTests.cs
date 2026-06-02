@@ -13,19 +13,19 @@ public sealed class GroupItemsControllerSmokeTests
         using var factory = new CoveWebApplicationFactory();
         await factory.ResetDatabaseAsync();
 
-        var (groupId, sceneId) = await factory.WithDbContextAsync(async db =>
+        var (groupId, videoId) = await factory.WithDbContextAsync(async db =>
         {
-            var scene = new Scene { Title = "Explicit Derived Query Scene", MaxDuration = 120 };
+            var video = new Video { Title = "Explicit Derived Query Video", MaxDuration = 120 };
             var group = new Group { Name = "Explicit Derived Query Group" };
-            db.Scenes.Add(scene);
+            db.Videos.Add(video);
             db.Groups.Add(group);
             await db.SaveChangesAsync();
 
             db.Segments.AddRange(
                 new Segment
                 {
-                    HostType = SegmentHostType.Scene,
-                    HostId = scene.Id,
+                    HostType = SegmentHostType.Video,
+                    HostId = video.Id,
                     StartSec = 10,
                     EndSec = 12,
                     Kind = "face",
@@ -33,21 +33,21 @@ public sealed class GroupItemsControllerSmokeTests
                 },
                 new Segment
                 {
-                    HostType = SegmentHostType.Scene,
-                    HostId = scene.Id,
+                    HostType = SegmentHostType.Video,
+                    HostId = video.Id,
                     StartSec = 11,
                     EndSec = 13,
                     Kind = "user.face",
                     SourceKey = "user",
                 });
             await db.SaveChangesAsync();
-            return (group.Id, scene.Id);
+            return (group.Id, video.Id);
         });
 
         var request = new GroupItemsFromSpansDto([
             new GroupItemSpanInputDto(
                 null,
-                sceneId,
+                videoId,
                 null,
                 null,
                 "Intersection snapshot",
@@ -69,7 +69,7 @@ public sealed class GroupItemsControllerSmokeTests
         var payload = await response.Content.ReadApiJsonAsync<List<GroupItemDto>>();
         Assert.NotNull(payload);
         var item = Assert.Single(payload);
-        Assert.Equal(GroupItemKind.SceneRange, item.Kind);
+        Assert.Equal(GroupItemKind.VideoRange, item.Kind);
         Assert.StartsWith("dq-intersection-", item.SourceSpanKey, StringComparison.Ordinal);
 
         await factory.WithDbContextAsync(async db =>
@@ -79,7 +79,7 @@ public sealed class GroupItemsControllerSmokeTests
     }
 }
 
-public sealed class SceneSegmentsControllerSmokeTests
+public sealed class VideoSegmentsControllerSmokeTests
 {
     [Fact]
     public async Task List_ReturnsOk()
@@ -87,16 +87,16 @@ public sealed class SceneSegmentsControllerSmokeTests
         using var factory = new CoveWebApplicationFactory();
         await factory.ResetDatabaseAsync();
 
-        var sceneId = await factory.WithDbContextAsync(async db =>
+        var videoId = await factory.WithDbContextAsync(async db =>
         {
-            var scene = new Scene { Title = "Segment Scene" };
-            db.Scenes.Add(scene);
+            var video = new Video { Title = "Segment Video" };
+            db.Videos.Add(video);
             await db.SaveChangesAsync();
 
             db.Segments.Add(new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 StartSec = 12.5,
                 EndSec = 18.25,
                 Kind = "face",
@@ -107,11 +107,11 @@ public sealed class SceneSegmentsControllerSmokeTests
                 ColorHint = "#ffaa00",
             });
             await db.SaveChangesAsync();
-            return scene.Id;
+            return video.Id;
         });
 
         using var client = factory.CreateAuthenticatedClient();
-        var response = await client.GetAsync($"/api/scenes/{sceneId}/segments");
+        var response = await client.GetAsync($"/api/videos/{videoId}/segments");
         response.EnsureSuccessStatusCode();
 
         var payload = await response.Content.ReadApiJsonAsync<List<SegmentDto>>();
@@ -128,17 +128,17 @@ public sealed class SegmentDisplayProfilesControllerSmokeTests
         using var factory = new CoveWebApplicationFactory();
         await factory.ResetDatabaseAsync();
 
-        var sceneId = await factory.WithDbContextAsync(async db =>
+        var videoId = await factory.WithDbContextAsync(async db =>
         {
-            var scene = new Scene { Title = "Preview Scene" };
+            var video = new Video { Title = "Preview Video" };
             var tag = new Tag { Name = "Highlight" };
-            db.AddRange(scene, tag);
+            db.AddRange(video, tag);
             await db.SaveChangesAsync();
 
             db.Segments.Add(new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 StartSec = 3,
                 EndSec = 9,
                 TagId = tag.Id,
@@ -146,7 +146,7 @@ public sealed class SegmentDisplayProfilesControllerSmokeTests
                 SourceKey = "ext:ai.actions",
             });
             await db.SaveChangesAsync();
-            return scene.Id;
+            return video.Id;
         });
 
         using var client = factory.CreateAuthenticatedClient();
@@ -165,7 +165,7 @@ public sealed class SegmentDisplayProfilesControllerSmokeTests
         var globalRules = await globalRulesResponse.Content.ReadApiJsonAsync<List<SegmentDisplayRuleDto>>();
         Assert.NotNull(globalRules);
         var globalDefaultRule = Assert.Single(globalRules);
-        Assert.Equal(SegmentHostType.Scene, globalDefaultRule.HostType);
+        Assert.Equal(SegmentHostType.Video, globalDefaultRule.HostType);
         Assert.True(globalDefaultRule.Visible);
         Assert.Equal(10, globalDefaultRule.MinDurationSec);
         Assert.Equal(8, globalDefaultRule.MergeGapSec);
@@ -175,20 +175,20 @@ public sealed class SegmentDisplayProfilesControllerSmokeTests
         var userRules = await userRulesResponse.Content.ReadApiJsonAsync<List<SegmentDisplayRuleDto>>();
         Assert.NotNull(userRules);
         var userDefaultRule = Assert.Single(userRules);
-        Assert.Equal(SegmentHostType.Scene, userDefaultRule.HostType);
+        Assert.Equal(SegmentHostType.Video, userDefaultRule.HostType);
         Assert.True(userDefaultRule.Visible);
         Assert.Equal(10, userDefaultRule.MinDurationSec);
         Assert.Equal(8, userDefaultRule.MergeGapSec);
 
         var previewResponse = await client.PostAsJsonAsync("/api/segment-display-profiles/preview", new SegmentDisplayProfilePreviewRequestDto(
-            sceneId,
+            videoId,
             [
                 new SegmentDisplayRuleCreateDto(
                     "ext:ai.actions",
                     "action",
                     null,
                     null,
-                    SegmentHostType.Scene,
+                    SegmentHostType.Video,
                     true,
                     null,
                     null,
@@ -214,15 +214,15 @@ public sealed class SegmentsControllerSmokeTests
         using var factory = new CoveWebApplicationFactory();
         await factory.ResetDatabaseAsync();
 
-        var (sceneId, profileId) = await factory.WithDbContextAsync(async db =>
+        var (videoId, profileId) = await factory.WithDbContextAsync(async db =>
         {
-            var scene = new Scene
+            var video = new Video
             {
-                Title = "Library Scene",
+                Title = "Library Video",
                 MaxDuration = 120,
                 UpdatedAt = new DateTime(2024, 1, 1, 12, 0, 0, DateTimeKind.Utc),
             };
-            db.Scenes.Add(scene);
+            db.Videos.Add(video);
             await db.SaveChangesAsync();
 
             var profile = new SegmentDisplayProfile
@@ -245,8 +245,8 @@ public sealed class SegmentsControllerSmokeTests
             db.Segments.AddRange(
                 new Segment
                 {
-                    HostType = SegmentHostType.Scene,
-                    HostId = scene.Id,
+                    HostType = SegmentHostType.Video,
+                    HostId = video.Id,
                     StartSec = 5,
                     EndSec = 7,
                     Kind = "clip",
@@ -255,8 +255,8 @@ public sealed class SegmentsControllerSmokeTests
                 },
                 new Segment
                 {
-                    HostType = SegmentHostType.Scene,
-                    HostId = scene.Id,
+                    HostType = SegmentHostType.Video,
+                    HostId = video.Id,
                     StartSec = 10,
                     EndSec = 14,
                     Kind = "action",
@@ -265,12 +265,12 @@ public sealed class SegmentsControllerSmokeTests
                 });
             await db.SaveChangesAsync();
 
-            return (scene.Id, profile.Id);
+            return (video.Id, profile.Id);
         });
 
         using var client = factory.CreateAuthenticatedClient();
 
-        var listResponse = await client.GetAsync($"/api/segments?sceneId={sceneId}&page=1&perPage=20");
+        var listResponse = await client.GetAsync($"/api/segments?videoId={videoId}&page=1&perPage=20");
         listResponse.EnsureSuccessStatusCode();
         var listPayload = await listResponse.Content.ReadApiJsonAsync<PaginatedResponse<SegmentRecordDto>>();
         Assert.NotNull(listPayload);
@@ -291,7 +291,7 @@ public sealed class SegmentsControllerSmokeTests
             "asc",
             null,
             null,
-            [sceneId],
+            [videoId],
             null));
         spansResponse.EnsureSuccessStatusCode();
         var spansPayload = await spansResponse.Content.ReadApiJsonAsync<SegmentSpanSearchResponseDto>();
@@ -301,3 +301,4 @@ public sealed class SegmentsControllerSmokeTests
         Assert.Contains(spansPayload.Items, item => item.Span.SourceKey == "ext:ai.actions");
     }
 }
+

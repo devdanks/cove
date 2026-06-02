@@ -14,43 +14,43 @@ public class FilteredQueryRequest<TFilter> where TFilter : class, new()
     public TFilter? ObjectFilter { get; set; }
 }
 
-// ===== SCENE DTOs =====
-public record SceneDto(
+// ===== VIDEO DTOs =====
+public record VideoDto(
     int Id, string? Title, string? Code, string? Details, string? Director,
     string? Date, bool Organized, bool IsVr, int? StudioId, string? StudioName,
     string? Captions, int? InteractiveSpeed,
     List<string> Urls, List<TagDto> Tags, List<PerformerSummaryDto> Performers,
     List<VideoFileDto> Files,
     List<GroupSummaryDto> Groups, List<GallerySummaryDto> Galleries,
-    List<SceneRemoteIdDto> RemoteIds, Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
+    List<VideoRemoteIdDto> RemoteIds, Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
     List<TagApplicationDto>? ContextTagApplications = null,
     List<FieldProvenanceDto>? FieldProvenance = null,
-    int? ParentSceneId = null,
-    string? ParentSceneTitle = null,
+    int? ParentVideoId = null,
+    string? ParentVideoTitle = null,
     double? ClipStartSec = null,
     double? ClipEndSec = null,
-    int ChildSceneCount = 0,
+    int ChildVideoCount = 0,
     string? ImagePath = null);
 
-public record SceneListEntryDto(string Kind, int Id, SceneDto? Scene = null, GroupDto? Group = null);
+public record VideoListEntryDto(string Kind, int Id, VideoDto? Video = null, GroupDto? Group = null);
 
-public record SceneRemoteIdDto(string Endpoint, string RemoteId);
+public record VideoRemoteIdDto(string Endpoint, string RemoteId);
 
-public record SceneGroupInputDto(int GroupId, int SceneIndex = 0);
-public record SceneCreateDto(
+public record VideoGroupInputDto(int GroupId, int VideoIndex = 0);
+public record VideoCreateDto(
     string? Title, string? Code, string? Details, string? Director,
     string? Date, int? Rating, bool Organized, int? StudioId,
     string? Captions, int? InteractiveSpeed,
     List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? GalleryIds,
-    List<SceneGroupInputDto>? Groups, List<SceneRemoteIdDto>? RemoteIds = null, Dictionary<string, object>? CustomFields = null,
-    int? ParentSceneId = null, double? ClipStartSec = null, double? ClipEndSec = null, bool IsVr = false);
+    List<VideoGroupInputDto>? Groups, List<VideoRemoteIdDto>? RemoteIds = null, Dictionary<string, object>? CustomFields = null,
+    int? ParentVideoId = null, double? ClipStartSec = null, double? ClipEndSec = null, bool IsVr = false);
 
-public record SceneUpdateDto(
+public record VideoUpdateDto(
     string? Title, string? Code, string? Details, string? Director,
     string? Date, int? Rating, bool? Organized, int? StudioId,
     string? Captions, int? InteractiveSpeed,
     List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? GalleryIds,
-    List<SceneGroupInputDto>? Groups, List<SceneRemoteIdDto>? RemoteIds, Dictionary<string, object>? CustomFields,
+    List<VideoGroupInputDto>? Groups, List<VideoRemoteIdDto>? RemoteIds, Dictionary<string, object>? CustomFields,
     double? ClipStartSec = null, double? ClipEndSec = null, bool? IsVr = null);
 
 // ===== PERFORMER DTOs =====
@@ -63,13 +63,13 @@ public record PerformerDto(
     bool Favorite, string? Details, bool IgnoreAutoTag,
     List<string> Urls, List<string> Aliases, List<TagDto> Tags,
     List<PerformerRemoteIdDto> RemoteIds,
-    int SceneCount, int ImageCount, int GalleryCount, int GroupCount, int AudioCount, int TextCount,
+    int VideoCount, int ImageCount, int GalleryCount, int GroupCount, int AudioCount, int TextCount,
     string? ImagePath, Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
     List<FieldProvenanceDto>? FieldProvenance = null);
 
 public record PerformerRemoteIdDto(string Endpoint, string RemoteId);
 
-public record PerformerSummaryDto(int Id, string Name, string? Disambiguation, string? Gender, string? Birthdate, bool Favorite, string? ImagePath, int SceneCount = 0, int ImageCount = 0, int GalleryCount = 0, int AudioCount = 0, int TextCount = 0);
+public record PerformerSummaryDto(int Id, string Name, string? Disambiguation, string? Gender, string? Birthdate, bool Favorite, string? ImagePath, int VideoCount = 0, int ImageCount = 0, int GalleryCount = 0, int AudioCount = 0, int TextCount = 0);
 
 public record GallerySummaryDto(int Id, string? Title, string? Date);
 
@@ -143,7 +143,7 @@ public record TagListDto(
     bool Favorite,
     bool IgnoreAutoTag,
     List<string> Aliases,
-    int SceneCount,
+    int VideoCount,
     int SegmentCount,
     int ImageCount,
     int GalleryCount,
@@ -165,7 +165,7 @@ public record TagListDto(
 public record TagDetailDto(
     int Id, string Name, string? SortName, string? Description, bool Favorite, bool IgnoreAutoTag,
     List<string> Aliases, List<TagDto> Parents, List<TagDto> Children,
-    int SceneCount, int PerformerCount, int ImageCount, int GalleryCount,
+    int VideoCount, int PerformerCount, int ImageCount, int GalleryCount,
     int StudioCount, int GroupCount, int AudioCount, int TextCount, int SegmentCount,
     Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
     bool? ShowAsSegment = null, string? SegmentColorOverride = null, int? SegmentLaneOverride = null,
@@ -184,8 +184,8 @@ public record TagSegmentWallDto(
     string Kind,
     string SourceKey,
     float? Confidence,
-    int SceneId,
-    string SceneTitle);
+    int VideoId,
+    string VideoTitle);
 
 public record TagGraphNodeDto(
     int Id,
@@ -199,7 +199,7 @@ public record TagGraphNodeDto(
     List<int> ParentIds,
     List<int> ChildIds,
     int TotalUsageCount,
-    int SceneCount,
+    int VideoCount,
     int SegmentCount,
     int ImageCount,
     int GalleryCount,
@@ -283,7 +283,7 @@ public record TagUpdateDto(
 // ===== STUDIO DTOs =====
 public record StudioDto(int Id, string Name, int? ParentId, string? ParentName, bool Favorite, string? Details, bool IgnoreAutoTag, bool Organized,
     List<string> Urls, List<string> Aliases, List<TagDto> Tags, List<StudioRemoteIdDto> RemoteIds,
-    int SceneCount, int ImageCount, int GalleryCount, int GroupCount, int PerformerCount, int ChildStudioCount, int AudioCount, int TextCount,
+    int VideoCount, int ImageCount, int GalleryCount, int GroupCount, int PerformerCount, int ChildStudioCount, int AudioCount, int TextCount,
     string? ImagePath, Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
     List<FieldProvenanceDto>? FieldProvenance = null);
 
@@ -299,7 +299,7 @@ public record StudioUpdateDto(string? Name, int? ParentId, int? Rating, bool? Fa
 public record GalleryDto(int Id, string? Title, string? Code, string? Date, string? Details, string? Photographer,
     bool Organized, int? StudioId, string? StudioName,
     List<string> Urls, List<TagDto> Tags, List<PerformerSummaryDto> Performers,
-    int ImageCount, int SceneCount, List<int> SceneIds, string? FolderPath, List<GalleryFileInfoDto> Files,
+    int ImageCount, int VideoCount, List<int> VideoIds, string? FolderPath, List<GalleryFileInfoDto> Files,
     Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
     string? CoverPath = null, int? CoverImageId = null,
     string? BackCoverPath = null,
@@ -308,10 +308,10 @@ public record GalleryDto(int Id, string? Title, string? Code, string? Date, stri
 public record GalleryFileInfoDto(int Id, string Path, long Size, string ModTime, List<FingerprintDto> Fingerprints);
 
 public record GalleryCreateDto(string? Title, string? Code, string? Date, string? Details, string? Photographer,
-    int? Rating, bool Organized, int? StudioId, List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? SceneIds, Dictionary<string, object>? CustomFields = null);
+    int? Rating, bool Organized, int? StudioId, List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? VideoIds, Dictionary<string, object>? CustomFields = null);
 
 public record GalleryUpdateDto(string? Title, string? Code, string? Date, string? Details, string? Photographer,
-    int? Rating, bool? Organized, int? StudioId, List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? SceneIds, Dictionary<string, object>? CustomFields);
+    int? Rating, bool? Organized, int? StudioId, List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? VideoIds, Dictionary<string, object>? CustomFields);
 
 // ===== IMAGE DTOs =====
 public record ImageDto(int Id, string? Title, string? Code, string? Details, string? Photographer,
@@ -325,11 +325,11 @@ public record ImageFileDto(int Id, string Path, string Basename, string Format, 
 
 public record ImageCreateDto(string? Title, string? Code, string? Details, string? Photographer,
     int? Rating, bool Organized, int? StudioId, string? Date,
-    List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? GalleryIds, List<SceneGroupInputDto>? GroupIds, Dictionary<string, object>? CustomFields = null);
+    List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? GalleryIds, List<VideoGroupInputDto>? GroupIds, Dictionary<string, object>? CustomFields = null);
 
 public record ImageUpdateDto(string? Title, string? Code, string? Details, string? Photographer,
     int? Rating, bool? Organized, int? StudioId, string? Date,
-    List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? GalleryIds, List<SceneGroupInputDto>? GroupIds, Dictionary<string, object>? CustomFields);
+    List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds, List<int>? GalleryIds, List<VideoGroupInputDto>? GroupIds, Dictionary<string, object>? CustomFields);
 
 // ===== AUDIO DTOs =====
 public record AudioDto(
@@ -352,12 +352,12 @@ public record AudioTrackDto(int Id, int OrderIndex, string? Title, double StartS
 public record AudioCreateDto(
     string? Title, string? Code, string? Details, bool Organized, int? StudioId,
     string? Date, List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds,
-    List<SceneGroupInputDto>? GroupIds, Dictionary<string, object>? CustomFields = null);
+    List<VideoGroupInputDto>? GroupIds, Dictionary<string, object>? CustomFields = null);
 
 public record AudioUpdateDto(
     string? Title, string? Code, string? Details, bool? Organized, int? StudioId,
     string? Date, List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds,
-    List<SceneGroupInputDto>? GroupIds, Dictionary<string, object>? CustomFields);
+    List<VideoGroupInputDto>? GroupIds, Dictionary<string, object>? CustomFields);
 
 // ===== TEXT DTOs =====
 public record TextDocumentDto(
@@ -379,17 +379,17 @@ public record TextContentDto(string Format, string RenderMode, string Content);
 public record TextDocumentCreateDto(
     string? Title, string? Code, string? Details, bool Organized, int? StudioId,
     string? Date, List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds,
-    List<SceneGroupInputDto>? GroupIds, Dictionary<string, object>? CustomFields = null);
+    List<VideoGroupInputDto>? GroupIds, Dictionary<string, object>? CustomFields = null);
 
 public record TextDocumentUpdateDto(
     string? Title, string? Code, string? Details, bool? Organized, int? StudioId,
     string? Date, List<string>? Urls, List<int>? TagIds, List<int>? PerformerIds,
-    List<SceneGroupInputDto>? GroupIds, Dictionary<string, object>? CustomFields);
+    List<VideoGroupInputDto>? GroupIds, Dictionary<string, object>? CustomFields);
 
 // ===== GROUP DTOs =====
 public record GroupDto(int Id, string Name, string? Aliases, string? Date,
     int? StudioId, string? StudioName, string? Director, string? Description,
-    List<string> Urls, List<TagDto> Tags, int SceneCount, int ItemCount, bool IsCompilation, int SubGroupCount, int ContainingGroupCount,
+    List<string> Urls, List<TagDto> Tags, int VideoCount, int ItemCount, bool IsCompilation, int SubGroupCount, int ContainingGroupCount,
     Dictionary<string, object>? CustomFields, string CreatedAt, string UpdatedAt,
     string? FrontImagePath, string? BackImagePath,
     GroupKind Kind = GroupKind.Static,
@@ -397,7 +397,7 @@ public record GroupDto(int Id, string Name, string? Aliases, string? Date,
     string? QueryJson = null,
     string? LastResolvedAt = null,
     int? CachedItemCount = null,
-    bool ShowInSceneLists = false,
+    bool ShowInVideoLists = false,
     List<string>? AllowedHostTypes = null,
     int SortOrder = 0,
     int ImageCount = 0,
@@ -411,15 +411,15 @@ public record GroupDto(int Id, string Name, string? Aliases, string? Date,
     int SegmentCount = 0,
     List<FieldProvenanceDto>? FieldProvenance = null);
 
-public record GroupSummaryDto(int Id, string Name, int SceneIndex);
+public record GroupSummaryDto(int Id, string Name, int VideoIndex);
 
 public record GroupItemDto(
     int Id,
     int GroupId,
     int OrderIndex,
     GroupItemKind Kind,
-    int? SceneId,
-    string? SceneTitle,
+    int? VideoId,
+    string? VideoTitle,
     string HostType,
     int HostId,
     int? ImageId,
@@ -440,7 +440,7 @@ public record GroupItemDto(
 public record GroupItemCreateDto(
     int OrderIndex,
     GroupItemKind Kind,
-    int? SceneId,
+    int? VideoId,
     string? HostType,
     int? HostId,
     double? StartSec,
@@ -465,7 +465,7 @@ public record GroupItemsRemoveHostsDto(GroupItemKind Kind, List<int> HostIds);
 
 public record GroupItemSpanInputDto(
     string? SpanKey,
-    int? SceneId,
+    int? VideoId,
     double? StartSec,
     double? EndSec,
     string? Title,
@@ -478,12 +478,12 @@ public record GroupPlaybackManifestItemDto(
     int GroupItemId,
     string HostType,
     int HostId,
-    int? SceneId,
+    int? VideoId,
     int? AudioId,
     int? ImageId,
     int? TextId,
     int? SegmentId,
-    string? SceneTitle,
+    string? VideoTitle,
     string Src,
     double StartSec,
     double? EndSec,
@@ -502,7 +502,7 @@ public record GroupCreateDto(string Name, string? Aliases, string? Date,
     GroupKind? Kind = null,
     string? QuerySourceKey = null,
     string? QueryJson = null,
-    bool? ShowInSceneLists = null,
+    bool? ShowInVideoLists = null,
     List<string>? AllowedHostTypes = null,
     int? SortOrder = null);
 
@@ -512,7 +512,7 @@ public record GroupUpdateDto(string? Name, string? Aliases, string? Date,
     GroupKind? Kind = null,
     string? QuerySourceKey = null,
     string? QueryJson = null,
-    bool? ShowInSceneLists = null,
+    bool? ShowInVideoLists = null,
     List<string>? AllowedHostTypes = null,
     int? SortOrder = null);
 
@@ -551,13 +551,13 @@ public record ResolvedSpanIntervalDto(double StartSec, double EndSec);
 
 public record ResolvedSpanDetailDto(
     ResolvedSpan Span,
-    int SceneId,
-    string? SceneTitle,
+    int VideoId,
+    string? VideoTitle,
     IReadOnlyList<ResolvedSpanIntervalDto> Intervals,
     int ProfileId,
     int ProfileVersion);
 
-public record SceneResolvedSpansDto(
+public record VideoResolvedSpansDto(
     IReadOnlyList<ResolvedSpan> Spans,
     int ProfileId,
     int ProfileVersion);
@@ -603,7 +603,7 @@ public record SegmentDistinctValueDto(
     int Count);
 
 public record SegmentDisplayProfilePreviewRequestDto(
-    int SceneId,
+    int VideoId,
     List<SegmentDisplayRuleCreateDto> Rules);
 
 // ===== Segment Span Search =====
@@ -622,9 +622,9 @@ public record SegmentSpanSearchRequestDto(
     string? Sort,
     string? Direction,
     string? Q,
-    string? SceneTitle,
-    int[]? SceneIds,
-    int[]? ExcludeSceneIds,
+    string? VideoTitle,
+    int[]? VideoIds,
+    int[]? ExcludeVideoIds,
     int[]? TagIds = null,
     string? Kind = null,
     string? SourceKey = null,
@@ -661,9 +661,9 @@ public record SegmentSpanSearchRequestDto(
 
 public record SegmentSpanSearchResultItemDto(
     ResolvedSpan Span,
-    int SceneId,
-    string? SceneTitle,
-    string? SceneUpdatedAt,
+    int VideoId,
+    string? VideoTitle,
+    string? VideoUpdatedAt,
     int ProfileId);
 
 public record SegmentSpanSearchResponseDto(
@@ -674,9 +674,9 @@ public record SegmentSpanSearchResponseDto(
 
 public static class ResolvedSpanKeys
 {
-    public static string Create(int sceneId, int profileId, string? sourceKey, string? kind, int? tagId, double startSec, double endSec)
+    public static string Create(int videoId, int profileId, string? sourceKey, string? kind, int? tagId, double startSec, double endSec)
     {
-        var payload = $"v1|{sceneId}|{profileId}|{sourceKey ?? string.Empty}|{kind ?? string.Empty}|{tagId?.ToString() ?? string.Empty}|{ToMilliseconds(startSec)}|{ToMilliseconds(endSec)}";
+        var payload = $"v1|{videoId}|{profileId}|{sourceKey ?? string.Empty}|{kind ?? string.Empty}|{tagId?.ToString() ?? string.Empty}|{ToMilliseconds(startSec)}|{ToMilliseconds(endSec)}";
         var hashBytes = SHA1.HashData(Encoding.UTF8.GetBytes(payload));
         return Convert.ToHexString(hashBytes[..8]).ToLowerInvariant();
     }
@@ -900,7 +900,7 @@ public record FaceDto(
     bool Ignored,
     int? MergedIntoFaceId,
     int DetectionCount,
-    int SceneCount,
+    int VideoCount,
     int ImageCount,
     string? PrimarySourceKey,
     DateTime CreatedAt,
@@ -951,7 +951,7 @@ public record FaceHostFaceDto(
     string? CoverImageUrl,
     int AppearanceCount,
     int FrameSampleCount,
-    int SceneCount,
+    int VideoCount,
     int ImageCount,
     double? FirstSeenAtSec,
     double? LastSeenAtSec,
@@ -999,7 +999,7 @@ public record FaceSimilarDto(
     bool Ignored,
     int? MergedIntoFaceId,
     int DetectionCount,
-    int SceneCount,
+    int VideoCount,
     int ImageCount,
     string? PrimarySourceKey,
     DateTime CreatedAt,
@@ -1117,7 +1117,7 @@ public record AiDataPurgeResultDto(IReadOnlyDictionary<string, int> RemovedCount
 public record PaginatedResponse<T>(IReadOnlyList<T> Items, int TotalCount, int Page, int PerPage);
 
 public record StatsDto(
-    int SceneCount,
+    int VideoCount,
     int ImageCount,
     int GalleryCount,
     int PerformerCount,
@@ -1133,25 +1133,25 @@ public record StatsDto(
     int DetectionCount,
     int TagApplicationCount,
     int AiRunCount,
-    long SceneFileSize,
+    long VideoFileSize,
     long ImageFileSize,
     long AudioFileSize,
     long TextFileSize,
     long TotalFileSize,
-    double SceneDuration,
+    double VideoDuration,
     double AudioDuration,
     double TotalPlayDuration,
-    long ScenePlayCount,
+    long VideoPlayCount,
     long AudioPlayCount,
     long TextReadCount,
     long ImageViewCount,
     long SegmentViewCount,
-    long SceneCompleteCount,
+    long VideoCompleteCount,
     long AudioCompleteCount,
     long TextCompleteCount,
     long ImageCompleteCount,
     long SegmentCompleteCount,
-    double SceneConsumedSeconds,
+    double VideoConsumedSeconds,
     double AudioConsumedSeconds,
     double TextConsumedSeconds,
     double ImageConsumedSeconds,
@@ -1522,7 +1522,7 @@ public record MetadataServerEntityCandidateDto(
     int? LocalId
 );
 
-public record MetadataServerSceneEntityOverrideDto
+public record MetadataServerVideoEntityOverrideDto
 {
     public string RemoteId { get; init; } = string.Empty;
     public string Name { get; init; } = string.Empty;
@@ -1530,7 +1530,7 @@ public record MetadataServerSceneEntityOverrideDto
     public int? LocalId { get; init; }
 }
 
-public record MetadataServerSceneMatchDto(
+public record MetadataServerVideoMatchDto(
     string Endpoint,
     string MetadataServerName,
     string Id,
@@ -1555,10 +1555,10 @@ public record MetadataServerSceneMatchDto(
 
 public record MetadataServerFingerprintDto(string Algorithm, string Hash, int? Duration);
 
-public record MetadataServerSceneImportRequestDto
+public record MetadataServerVideoImportRequestDto
 {
     public string Endpoint { get; init; } = string.Empty;
-    public string SceneId { get; init; } = string.Empty;
+    public string VideoId { get; init; } = string.Empty;
     public bool SetCoverImage { get; init; } = true;
     public bool SetTags { get; init; } = true;
     public bool SetPerformers { get; init; } = true;
@@ -1569,9 +1569,9 @@ public record MetadataServerSceneImportRequestDto
     public bool MarkOrganized { get; init; }
     public List<string>? ExcludedTagNames { get; init; }
     public List<string>? ExcludedPerformerNames { get; init; }
-    public MetadataServerSceneEntityOverrideDto? StudioOverride { get; init; }
-    public List<MetadataServerSceneEntityOverrideDto>? PerformerOverrides { get; init; }
-    public List<MetadataServerSceneEntityOverrideDto>? TagOverrides { get; init; }
+    public MetadataServerVideoEntityOverrideDto? StudioOverride { get; init; }
+    public List<MetadataServerVideoEntityOverrideDto>? PerformerOverrides { get; init; }
+    public List<MetadataServerVideoEntityOverrideDto>? TagOverrides { get; init; }
     public Dictionary<string, string>? FieldStrategies { get; init; }
     public List<string>? PerformerGenders { get; init; }
     public bool SkipSingleNamePerformers { get; init; }
@@ -1613,7 +1613,7 @@ public record ScrapeAttemptDto(
     string CreatedAt,
     string? AppliedAt);
 
-public record ApplySceneScrapeAttemptDto(
+public record ApplyVideoScrapeAttemptDto(
     List<string>? ReplaceFields,
     Dictionary<string, string>? CollectionModes,
     bool CreateMissingTags = true,
@@ -1627,10 +1627,10 @@ public record ApplySceneScrapeAttemptDto(
 
 public record ScrapeCollectionItemSelectionDto(string? Name, string? Action);
 
-public record BatchSceneScrapeStartRequestDto(
+public record BatchVideoScrapeStartRequestDto(
     string ScraperId,
     string InputKind,
-    List<int> SceneIds,
+    List<int> VideoIds,
     bool AutoApply = true,
     bool CreateMissingTags = true,
     bool CreateMissingPerformers = true,
@@ -1726,14 +1726,14 @@ public record DownloaderBatchItemDto
     public bool CreateMissingStudio { get; init; }
     public bool MarkOrganized { get; init; }
     public List<int>? GalleryIds { get; init; }
-    public List<SceneGroupInputDto>? GroupIds { get; init; }
+    public List<VideoGroupInputDto>? GroupIds { get; init; }
 }
 
 public record DownloaderBatchStartIssueDto(string Kind, string Label, string Reason);
 
 public record DownloaderBatchFollowUpDto
 {
-    public bool ScrapeScenes { get; init; }
+    public bool ScrapeVideos { get; init; }
     public bool AutoApplyMetadata { get; init; }
     public bool AllowDuplicateDownloads { get; init; }
     public bool CreateMissingTags { get; init; }
@@ -1782,7 +1782,7 @@ public record PlaybackIntervalsRequestDto(
 
 public record PlaybackIntervalDto(double StartSec, double EndSec, string RecordedAt);
 
-public record ScenePlaybackSessionDto(
+public record VideoPlaybackSessionDto(
     Guid SessionId,
     string StartedAt,
     string LastSeenAt,
@@ -1797,7 +1797,7 @@ public record ScenePlaybackSessionDto(
 // Non-playback events timeline (pause, seek, search, filter, etc.)
 public record InteractionEventDto(string Kind, string At, JsonElement? Meta = null);
 
-public record SceneRatingDto(int? Value, string Aspect = "overall");
+public record VideoRatingDto(int? Value, string Aspect = "overall");
 
 public record EntityEngagementDto(
     int HostId,
@@ -1832,7 +1832,7 @@ public record EngagementInteractionDto(
     string At,
     JsonElement? Meta = null);
 
-public record SceneHistoryDto(
+public record VideoHistoryDto(
     List<string> PlayHistory,
     List<string> LikeHistory,
     /// <summary>Non-playback engagement events (search, filter, likes, etc.).</summary>
@@ -1842,12 +1842,12 @@ public record SceneHistoryDto(
     /// <summary>Total unique seconds watched across all sessions.</summary>
     double? TotalDistinctWatchedSec = null,
     /// <summary>Per-session playback history.</summary>
-    List<ScenePlaybackSessionDto>? Sessions = null);
+    List<VideoPlaybackSessionDto>? Sessions = null);
 
 // ===== BULK UPDATE DTOs =====
 public enum BulkUpdateMode { Set, Add, Remove }
 
-public record BulkSceneUpdateDto
+public record BulkVideoUpdateDto
 {
     public List<int> Ids { get; init; } = [];
     public List<string>? ClearFields { get; init; }
@@ -1864,7 +1864,7 @@ public record BulkSceneUpdateDto
     public BulkUpdateMode PerformerMode { get; init; } = BulkUpdateMode.Add;
     public List<int>? GalleryIds { get; init; }
     public BulkUpdateMode GalleryMode { get; init; } = BulkUpdateMode.Add;
-    public List<SceneGroupInputDto>? GroupIds { get; init; }
+    public List<VideoGroupInputDto>? GroupIds { get; init; }
     public BulkUpdateMode GroupMode { get; init; } = BulkUpdateMode.Add;
 }
 
@@ -1991,7 +1991,7 @@ public record BulkGroupUpdateDto
 }
 
 // ===== MERGE DTOs =====
-public record SceneMergeDto(int TargetId, List<int> SourceIds);
+public record VideoMergeDto(int TargetId, List<int> SourceIds);
 public record PerformerMergeDto(int TargetId, List<int> SourceIds);
 public record TagMergeDto(int TargetId, List<int> SourceIds);
 public record StudioMergeDto(int TargetId, List<int> SourceIds);
@@ -2008,9 +2008,9 @@ public record MoveFilesDto(List<int> FileIds, string DestinationPath);
 public record DeleteFilesDto(List<int> FileIds, bool DeleteFromDisk);
 public record FileSetFingerprintsDto(int FileId, List<FingerprintEntryDto> Fingerprints);
 public record FingerprintEntryDto(string Type, string Value);
-public record SceneAssignFileDto(int FileId);
+public record VideoAssignFileDto(int FileId);
 public record GallerySetCoverDto(int ImageId);
-public record EntityImageCoverSourceDto(int? ImageId = null, int? SceneId = null);
+public record EntityImageCoverSourceDto(int? ImageId = null, int? VideoId = null);
 
 // ===== GALLERY ADVANCED DTOs =====
 public record GalleryAddImagesDto(List<int> ImageIds);
@@ -2021,7 +2021,7 @@ public record GalleryChapterUpdateDto(string? Title, int? ImageIndex);
 
 // ===== GROUP ADVANCED DTOs =====
 public record GroupSubGroupsDto(List<GroupSubGroupEntryDto> SubGroups);
-public record GroupSubGroupEntryDto(int GroupId, int SceneIndex);
+public record GroupSubGroupEntryDto(int GroupId, int VideoIndex);
 
 // ===== METADATA OPERATION DTOs =====
 public record ScanOptionsDto
@@ -2056,7 +2056,7 @@ public record GenerateOptionsDto
     public bool AudioPhashes { get; init; }
     public bool TextPhashes { get; init; }
     public bool Overwrite { get; init; }
-    public List<int>? SceneIds { get; init; }
+    public List<int>? VideoIds { get; init; }
     public List<int>? ImageIds { get; init; }
     public List<int>? AudioIds { get; init; }
     public List<int>? TextIds { get; init; }
@@ -2078,7 +2078,7 @@ public record CleanOptionsDto
 
 public record ExportOptionsDto
 {
-    public bool IncludeScenes { get; init; } = true;
+    public bool IncludeVideos { get; init; } = true;
     public bool IncludePerformers { get; init; } = true;
     public bool IncludeStudios { get; init; } = true;
     public bool IncludeTags { get; init; } = true;
@@ -2102,7 +2102,7 @@ public record SyncFingerprintsOptionsDto
 public record IdentifyOptionsDto
 {
     public List<string>? Sources { get; init; }
-    public List<int>? SceneIds { get; init; }
+    public List<int>? VideoIds { get; init; }
     public bool SetCoverImage { get; init; } = true;
     public bool SetTags { get; init; } = true;
     public bool SetPerformers { get; init; } = true;
@@ -2135,7 +2135,7 @@ public record DatabaseMigrationResultDto(
 // ===== SCRAPER DTOs =====
 public record ScrapeUrlDto(string Url, string ContentType);
 
-public record ScrapedSceneDto
+public record ScrapedVideoDto
 {
     public string? SourceScraperId { get; init; }
     public string? Title { get; init; }
@@ -2245,9 +2245,9 @@ public record ScrapedGroupDto
     public List<string> TagNames { get; init; } = [];
 }
 
-public record SceneScrapeFingerprint(string Type, string Value, double? Duration = null);
+public record VideoScrapeFingerprint(string Type, string Value, double? Duration = null);
 
-public record SceneScrapeFile
+public record VideoScrapeFile
 {
     public string Path { get; init; } = string.Empty;
     public string? Format { get; init; }
@@ -2259,12 +2259,12 @@ public record SceneScrapeFile
     public double? FrameRate { get; init; }
     public long? BitRate { get; init; }
     public long? SizeBytes { get; init; }
-    public List<SceneScrapeFingerprint> Fingerprints { get; init; } = [];
+    public List<VideoScrapeFingerprint> Fingerprints { get; init; } = [];
 }
 
-public record SceneScrapeInput
+public record VideoScrapeInput
 {
-    public int? LocalSceneId { get; init; }
+    public int? LocalVideoId { get; init; }
     public string? Url { get; init; }
     public List<string> Urls { get; init; } = [];
     public string? Title { get; init; }
@@ -2272,7 +2272,7 @@ public record SceneScrapeInput
     public string? Date { get; init; }
     public string? Details { get; init; }
     public string? Director { get; init; }
-    public List<SceneScrapeFile> Files { get; init; } = [];
+    public List<VideoScrapeFile> Files { get; init; } = [];
 }
 
 public record PerformerScrapeInput
@@ -2372,3 +2372,4 @@ public record DirectoryEntryDto(string Path, bool IsDirectory);
 
 // ===== SAVED FILTER ADVANCED =====
 public record SetDefaultFilterDto(string Mode, int? FilterId);
+

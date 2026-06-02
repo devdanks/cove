@@ -8,7 +8,7 @@ import { CreateModalActions, EditModal, Field, TextInput, TextArea } from "../co
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
 import { FolderOpen, Images as ImagesIcon, Users, Tag, Trash2, Loader2, Edit, Box, Film, Check, Search, Download } from "lucide-react";
-import { GalleryTile, PopoverButton, ScenesPopoverContent, ImagesPopoverContent } from "../components/EntityCards";
+import { GalleryTile, PopoverButton, VideosPopoverContent, ImagesPopoverContent } from "../components/EntityCards";
 import { GALLERY_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, GALLERY_BULK_FIELDS } from "../components/BulkEditDialog";
 import { getDefaultFilter } from "../components/SavedFilterMenu";
@@ -275,7 +275,7 @@ function GalleryWallCard({ gallery, engagement, onClick, selected, onSelect, sel
   const galleryCoverSrc = gallery.coverPath ?? galleries.coverUrl(gallery.id, gallery.updatedAt, 960);
   const itemChips = [
     gallery.imageCount > 0 ? { key: "images", icon: <ImagesIcon className="h-3.5 w-3.5" />, count: gallery.imageCount, label: "Images" } : null,
-    gallery.sceneCount > 0 ? { key: "scenes", icon: <Film className="h-3.5 w-3.5" />, count: gallery.sceneCount, label: "Scenes" } : null,
+    gallery.videoCount > 0 ? { key: "videos", icon: <Film className="h-3.5 w-3.5" />, count: gallery.videoCount, label: "Videos" } : null,
     gallery.performers.length > 0 ? { key: "performers", icon: <Users className="h-3.5 w-3.5" />, count: gallery.performers.length, label: "Performers" } : null,
     gallery.tags.length > 0 ? { key: "tags", icon: <Tag className="h-3.5 w-3.5" />, count: gallery.tags.length, label: "Tags" } : null,
   ].filter((chip) => chip !== null);
@@ -408,3 +408,4 @@ function GalleryCreateModal({ open, onClose, onCreated }: { open: boolean; onClo
     </EditModal>
   );
 }
+

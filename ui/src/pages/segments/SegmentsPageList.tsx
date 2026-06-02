@@ -12,7 +12,7 @@ interface Props {
   rawSegmentIds: number[];
   appliedQuery: AppliedDerivedQuery | null;
   isLoading: boolean;
-  canReadScenes: boolean;
+  canReadVideos: boolean;
   onNavigate: (route: any) => void;
   onViewRawSegments: (segmentIds: number[]) => void;
   selectedIds: Set<string | number>;
@@ -32,7 +32,7 @@ export function SegmentsPageList({
   rawSegmentIds,
   appliedQuery,
   isLoading,
-  canReadScenes,
+  canReadVideos,
   onNavigate,
   onViewRawSegments,
   selectedIds,
@@ -48,9 +48,9 @@ export function SegmentsPageList({
   return (
     <>
       {isRawView ? (
-        <RawSegmentResults displayMode={displayMode} items={rawItems} canReadScenes={canReadScenes} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={onToggle} selecting={selecting} infinitePageSize={infinitePageSize} hasNextPage={hasNextPage} isFetchingNextPage={isFetchingNextPage} loadMore={loadMore} />
+        <RawSegmentResults displayMode={displayMode} items={rawItems} canReadVideos={canReadVideos} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={onToggle} selecting={selecting} infinitePageSize={infinitePageSize} hasNextPage={hasNextPage} isFetchingNextPage={isFetchingNextPage} loadMore={loadMore} />
       ) : (
-        <DerivedSpanResults displayMode={displayMode} items={spanItems} canReadScenes={canReadScenes} onNavigate={onNavigate} onViewRawSegments={onViewRawSegments} selectedIds={selectedIds} onToggle={onToggle} selecting={selecting} infinitePageSize={infinitePageSize} hasNextPage={hasNextPage} isFetchingNextPage={isFetchingNextPage} loadMore={loadMore} />
+        <DerivedSpanResults displayMode={displayMode} items={spanItems} canReadVideos={canReadVideos} onNavigate={onNavigate} onViewRawSegments={onViewRawSegments} selectedIds={selectedIds} onToggle={onToggle} selecting={selecting} infinitePageSize={infinitePageSize} hasNextPage={hasNextPage} isFetchingNextPage={isFetchingNextPage} loadMore={loadMore} />
       )}
 
       {items.length === 0 && !isLoading ? (

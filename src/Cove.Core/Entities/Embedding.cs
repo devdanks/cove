@@ -5,7 +5,7 @@ namespace Cove.Core.Entities;
 
 public enum EmbeddingHostType
 {
-    Scene = 1,
+    Video = 1,
     Image = 2,
     Performer = 3,
     Face = 4,

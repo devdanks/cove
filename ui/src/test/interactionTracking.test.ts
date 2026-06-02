@@ -16,7 +16,7 @@ describe("interactionTracking playback batching", () => {
     const sendBatch = vi.fn(() => Promise.resolve());
     const tracker = createPlaybackTracker({ sendBatch, flushIntervalMs: 5000, maxBatchSize: 20 });
 
-    await tracker.setTarget({ hostType: "scene", hostId: 42, scopeKey: "scene:42" });
+    await tracker.setTarget({ hostType: "video", hostId: 42, scopeKey: "video:42" });
     tracker.recordInterval({ startSec: 0, endSec: 10, mediaDurationSec: 120, currentPositionSec: 10, state: "active" });
     tracker.recordInterval({ startSec: 10, endSec: 18, mediaDurationSec: 120, currentPositionSec: 18, state: "paused" });
 
@@ -27,13 +27,13 @@ describe("interactionTracking playback batching", () => {
     expect(sendBatch).toHaveBeenCalledTimes(1);
     expect(sendBatch).toHaveBeenCalledWith(
       {
-        hostType: "scene",
+        hostType: "video",
         hostId: 42,
         sessionId: tracker.getSessionId(),
         mediaDurationSec: 120,
         currentPositionSec: 18,
         state: "paused",
-        scopeKey: "scene:42",
+        scopeKey: "video:42",
         intervals: [
           { startSec: 0, endSec: 10 },
           { startSec: 10, endSec: 18 },
@@ -83,7 +83,7 @@ describe("interactionTracking playback batching", () => {
       scopeKey: "group:7",
       parentHostType: "group",
       parentHostId: 7,
-      itemHostType: "scene",
+      itemHostType: "video",
       itemHostId: 42,
       groupItemId: 101,
       segmentId: 99,
@@ -107,7 +107,7 @@ describe("interactionTracking playback batching", () => {
         scopeKey: "group:7",
         parentHostType: "group",
         parentHostId: 7,
-        itemHostType: "scene",
+        itemHostType: "video",
         itemHostId: 42,
         groupItemId: 101,
         segmentId: 99,

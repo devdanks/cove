@@ -15,7 +15,7 @@ import {
   formatSegmentDuration,
   formatSegmentRange,
   Pill,
-  SegmentScenePreview,
+  SegmentVideoPreview,
 } from "./segmentDisplayUtils";
 import { useSegmentListDensity, type SegmentListDensity } from "./segmentListDensity";
 import type { DerivedSpanItem } from "./types";
@@ -23,7 +23,7 @@ import type { DerivedSpanItem } from "./types";
 interface Props {
   displayMode: DisplayMode;
   items: DerivedSpanItem[];
-  canReadScenes: boolean;
+  canReadVideos: boolean;
   onNavigate: (route: any) => void;
   onViewRawSegments: (segmentIds: number[]) => void;
   selectedIds: Set<string | number>;
@@ -38,7 +38,7 @@ interface Props {
 export function DerivedSpanResults({
   displayMode,
   items,
-  canReadScenes,
+  canReadVideos,
   onNavigate,
   onViewRawSegments,
   selectedIds,
@@ -111,8 +111,8 @@ export function DerivedSpanResults({
         isFetchingNextPage={isFetchingNextPage}
         loadMore={loadMore}
         renderItem={(item) => {
-          const title = buildSpanTitle(item.span, item.sceneTitle);
-          const route = { page: "scene-span", id: item.sceneId, spanKey: item.span.spanKey, profileId: item.profileId, derivedQueryDescriptor: item.derivedQueryDescriptor };
+          const title = buildSpanTitle(item.span, item.videoTitle);
+          const route = { page: "video-span", id: item.videoId, spanKey: item.span.spanKey, profileId: item.profileId, derivedQueryDescriptor: item.derivedQueryDescriptor };
           const operandSummary = formatDerivedOperandSummary(item, nameMaps);
           const primaryRawSegmentId = item.span.segmentIds[0];
 
@@ -120,16 +120,16 @@ export function DerivedSpanResults({
             <SegmentTile
               segment={{
                 id: primaryRawSegmentId ?? item.id,
-                hostType: "scene",
-                hostId: item.sceneId,
+                hostType: "video",
+                hostId: item.videoId,
                 startSec: item.span.startSec,
                 endSec: item.span.endSec,
                 tagName: item.span.tagName,
                 kind: item.span.kind,
                 sourceKey: item.span.sourceKey,
                 title,
-                updatedAt: item.sceneUpdatedAt,
-                hostTitle: item.sceneTitle,
+                updatedAt: item.videoUpdatedAt,
+                hostTitle: item.videoTitle,
               }}
               route={route}
               label={`Open span ${title}`}
@@ -142,20 +142,20 @@ export function DerivedSpanResults({
                 <div className="space-y-1.5">
                   {operandSummary ? <div className="line-clamp-2 text-foreground">{operandSummary}</div> : null}
                   <div className="flex items-center justify-between gap-2">
-                    <span>Updated {formatDate(item.sceneUpdatedAt)}</span>
+                    <span>Updated {formatDate(item.videoUpdatedAt)}</span>
                   <div className="flex items-center gap-2">
-                    {canReadScenes ? (
+                    {canReadVideos ? (
                       <button
                         type="button"
                         onClick={(event) => {
                           event.preventDefault();
                           event.stopPropagation();
-                          onNavigate({ page: "scene", id: item.sceneId, seekTo: item.span.startSec });
+                          onNavigate({ page: "video", id: item.videoId, seekTo: item.span.startSec });
                         }}
                         className="inline-flex items-center gap-1 text-accent hover:underline"
                       >
                         <FolderOpen className="h-3.5 w-3.5" />
-                        Open scene
+                        Open video
                       </button>
                     ) : null}
                   </div>
@@ -174,7 +174,7 @@ export function DerivedSpanResults({
       <div className="hidden grid-cols-[minmax(0,1.4fr)_140px_minmax(0,1.1fr)_120px_120px] gap-3 border-b border-border bg-surface/70 px-4 py-2 text-[11px] font-medium uppercase tracking-wide text-muted lg:grid">
         <span>Span</span>
         <span>Range</span>
-        <span>Scene</span>
+        <span>Video</span>
         <span>Source</span>
         <span>Updated</span>
       </div>
@@ -183,7 +183,7 @@ export function DerivedSpanResults({
           <DerivedSpanListRow
             key={item.key}
             item={item}
-            canReadScenes={canReadScenes}
+            canReadVideos={canReadVideos}
             onNavigate={onNavigate}
             onViewRawSegments={onViewRawSegments}
             selected={selectedIds.has(item.id)}
@@ -200,7 +200,7 @@ export function DerivedSpanResults({
 
 function DerivedSpanListRow({
   item,
-  canReadScenes,
+  canReadVideos,
   onNavigate,
   onViewRawSegments,
   selected,
@@ -210,7 +210,7 @@ function DerivedSpanListRow({
   density,
 }: {
   item: DerivedSpanItem;
-  canReadScenes: boolean;
+  canReadVideos: boolean;
   onNavigate: (route: any) => void;
   onViewRawSegments: (segmentIds: number[]) => void;
   selected: boolean;
@@ -219,19 +219,19 @@ function DerivedSpanListRow({
   nameMaps?: DerivedOperandNameMaps;
   density: SegmentListDensity;
 }) {
-  const title = buildSpanTitle(item.span, item.sceneTitle);
+  const title = buildSpanTitle(item.span, item.videoTitle);
   const primaryRawSegmentId = item.span.segmentIds[0];
   const operandSummary = formatDerivedOperandSummary(item, nameMaps);
 
   return (
-    <div onClick={selecting ? onToggle : undefined} className={`scene-card group relative cursor-pointer px-4 ${density.rowPaddingClassName} transition-colors ${selected ? "bg-accent/10" : "hover:bg-surface/40"}`}>
-      <RouteCardLinkOverlay route={{ page: "scene-span", id: item.sceneId, spanKey: item.span.spanKey, profileId: item.profileId, derivedQueryDescriptor: item.derivedQueryDescriptor }} onClick={() => onNavigate({ page: "scene-span", id: item.sceneId, spanKey: item.span.spanKey, profileId: item.profileId, derivedQueryDescriptor: item.derivedQueryDescriptor })} label={`Open span ${title}`} disabled={selecting} selectionSafeZone />
+    <div onClick={selecting ? onToggle : undefined} className={`video-card group relative cursor-pointer px-4 ${density.rowPaddingClassName} transition-colors ${selected ? "bg-accent/10" : "hover:bg-surface/40"}`}>
+      <RouteCardLinkOverlay route={{ page: "video-span", id: item.videoId, spanKey: item.span.spanKey, profileId: item.profileId, derivedQueryDescriptor: item.derivedQueryDescriptor }} onClick={() => onNavigate({ page: "video-span", id: item.videoId, spanKey: item.span.spanKey, profileId: item.profileId, derivedQueryDescriptor: item.derivedQueryDescriptor })} label={`Open span ${title}`} disabled={selecting} selectionSafeZone />
       <div className="flex items-start gap-3 lg:grid lg:grid-cols-[minmax(0,1.4fr)_140px_minmax(0,1.1fr)_120px_120px] lg:items-center">
         <div className="relative min-w-0 pl-8">
           <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onToggle} />
           <div className="flex items-start gap-3">
             {density.showPreview ? <div className="hidden shrink-0 overflow-hidden rounded-lg bg-surface sm:block" style={{ height: density.previewHeight, width: density.previewWidth }}>
-              <SegmentScenePreview hostId={item.sceneId} segmentId={primaryRawSegmentId} updatedAt={item.sceneUpdatedAt} startSec={item.span.startSec} endSec={item.span.endSec} title={title} imgClassName="h-full w-full object-cover" />
+              <SegmentVideoPreview hostId={item.videoId} segmentId={primaryRawSegmentId} updatedAt={item.videoUpdatedAt} startSec={item.span.startSec} endSec={item.span.endSec} title={title} imgClassName="h-full w-full object-cover" />
             </div> : null}
             <div className="min-w-0">
               <div className="truncate text-sm font-medium text-foreground">{title}</div>
@@ -247,7 +247,7 @@ function DerivedSpanListRow({
         </div>
         <div className="hidden text-xs text-secondary lg:block">{formatSegmentRange(item.span.startSec, item.span.endSec)}</div>
         <div className="min-w-0 text-xs text-secondary lg:text-sm">
-          <div className="truncate text-foreground">{item.sceneTitle}</div>
+          <div className="truncate text-foreground">{item.videoTitle}</div>
           <div className="mt-1 flex flex-wrap items-center gap-2">
             <button
               type="button"
@@ -274,29 +274,29 @@ function DerivedSpanListRow({
                 Open raw
               </button>
             ) : null}
-            {canReadScenes ? (
+            {canReadVideos ? (
               <button
                 type="button"
                 onClick={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
-                  onNavigate({ page: "scene", id: item.sceneId, seekTo: item.span.startSec });
+                  onNavigate({ page: "video", id: item.videoId, seekTo: item.span.startSec });
                 }}
                 className="relative z-10 mt-1 inline-flex items-center gap-1 text-accent hover:underline"
               >
                 <FolderOpen className="h-3.5 w-3.5" />
-                Open scene
+                Open video
               </button>
             ) : null}
           </div>
         </div>
         <div className="hidden text-xs text-secondary lg:block">{item.span.sourceKey || "Derived"}</div>
-        <div className="hidden text-xs text-secondary lg:block">{formatDate(item.sceneUpdatedAt)}</div>
+        <div className="hidden text-xs text-secondary lg:block">{formatDate(item.videoUpdatedAt)}</div>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-3 pl-8 text-[11px] text-secondary lg:hidden">
         <span>{formatSegmentRange(item.span.startSec, item.span.endSec)}</span>
         <span>{item.span.sourceKey || "Derived"}</span>
-        <span>{formatDate(item.sceneUpdatedAt)}</span>
+        <span>{formatDate(item.videoUpdatedAt)}</span>
       </div>
     </div>
   );

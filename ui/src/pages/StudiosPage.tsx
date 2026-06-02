@@ -26,10 +26,10 @@ import { VirtualizedEntityGrid } from "../components/VirtualizedEntityLayouts";
 const SORT_OPTIONS = [
   { value: "name", label: "Name" },
   { value: "rating", label: "Rating" },
-  { value: "scene_count", label: "Scene Count" },
+  { value: "video_count", label: "Video Count" },
   { value: "gallery_count", label: "Gallery Count" },
   { value: "image_count", label: "Image Count" },
-  { value: "latest_scene_date", label: "Latest Scene Date" },
+  { value: "latest_video_date", label: "Latest Video Date" },
   { value: "total_file_size", label: "Total File Size" },
   { value: "parent_count", label: "Parent Studio Count" },
   { value: "child_count", label: "Substudios Count" },
@@ -47,7 +47,7 @@ export function StudiosPage({ onNavigate }: Props) {
   const defaultState = useMemo(() => {
     const savedFilter = getDefaultFilter("studios");
     return {
-      filter: savedFilter?.findFilter ?? { page: 1, perPage: 40, sort: "latest_scene_date", direction: "desc" },
+      filter: savedFilter?.findFilter ?? { page: 1, perPage: 40, sort: "latest_video_date", direction: "desc" },
       objectFilter: savedFilter?.objectFilter ?? {},
       displayMode: "grid" as DisplayMode,
     };
@@ -193,7 +193,7 @@ function StudioListTable({ studios: items, engagementById, onNavigate, selectedI
           {selectedIds && <th className="w-8 py-2 px-3"></th>}
           <th className="py-2 px-3">Name</th>
           <th className="py-2 px-3">Parent</th>
-          <th className="py-2 px-3 text-right">Scenes</th>
+          <th className="py-2 px-3 text-right">Videos</th>
           <th className="py-2 px-3 text-right">Rating</th>
         </tr>
       </thead>
@@ -207,7 +207,7 @@ function StudioListTable({ studios: items, engagementById, onNavigate, selectedI
             {selectedIds && <td className="py-2 px-3"><input type="checkbox" checked={selectedIds.has(s.id)} onChange={() => onToggle?.(s.id)} onClick={(e) => e.stopPropagation()} className="w-3.5 h-3.5 rounded border-border cursor-pointer accent-accent" /></td>}
             <td className="py-2 px-3 text-foreground">{s.name}</td>
             <td className="py-2 px-3 text-secondary">{s.parentName ?? ""}</td>
-            <td className="py-2 px-3 text-secondary text-right">{s.sceneCount}</td>
+            <td className="py-2 px-3 text-secondary text-right">{s.videoCount}</td>
             <td className="py-2 px-3 text-secondary text-right">{engagementById.get(s.id)?.rating ?? ""}</td>
           </tr>
         ))}
@@ -286,3 +286,4 @@ function StudioCreateModal({ open, onClose, onCreated }: { open: boolean; onClos
     </EditModal>
   );
 }
+

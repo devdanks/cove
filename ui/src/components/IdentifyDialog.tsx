@@ -17,7 +17,7 @@ import {
 interface Props {
   open: boolean;
   onClose: () => void;
-  sceneIds?: number[];
+  videoIds?: number[];
 }
 
 interface IdentifySource {
@@ -80,7 +80,7 @@ function buildIdentifySources(metadataServers: MetadataServer[]): IdentifySource
   return sources;
 }
 
-export function IdentifyDialog({ open, onClose, sceneIds }: Props) {
+export function IdentifyDialog({ open, onClose, videoIds }: Props) {
   const queryClient = useQueryClient();
   const { config } = useAppConfig();
 
@@ -118,7 +118,7 @@ export function IdentifyDialog({ open, onClose, sceneIds }: Props) {
       const enabledSources = sources.filter((s) => s.enabled).map((s) => s.name);
       return metadata.identify({
         sources: enabledSources.length > 0 ? enabledSources : undefined,
-        sceneIds,
+        videoIds,
         setCoverImage,
         markOrganized: setOrganized,
         skipMultipleMatches,
@@ -171,9 +171,9 @@ export function IdentifyDialog({ open, onClose, sceneIds }: Props) {
               Identify
             </h2>
             <p className="text-xs text-secondary mt-0.5">
-              {sceneIds
-                ? `Identifying ${sceneIds.length} scene${sceneIds.length !== 1 ? "s" : ""}`
-                : "Identifying all scenes"}
+              {videoIds
+                ? `Identifying ${videoIds.length} video${videoIds.length !== 1 ? "s" : ""}`
+                : "Identifying all videos"}
             </p>
           </div>
           <button onClick={onClose} className="text-muted hover:text-foreground">
@@ -261,7 +261,7 @@ export function IdentifyDialog({ open, onClose, sceneIds }: Props) {
                     onChange={(e) => setSetOrganized(e.target.checked)}
                     className="h-4 w-4 rounded border-border bg-card text-accent focus:ring-0"
                   />
-                  Mark identified scenes as organized
+                  Mark identified videos as organized
                 </label>
                 <label className="flex items-center gap-2 text-sm text-secondary">
                   <input
@@ -270,7 +270,7 @@ export function IdentifyDialog({ open, onClose, sceneIds }: Props) {
                     onChange={(e) => setSkipMultipleMatches(e.target.checked)}
                     className="h-4 w-4 rounded border-border bg-card text-accent focus:ring-0"
                   />
-                  Skip scenes with multiple matches
+                  Skip videos with multiple matches
                 </label>
                 <label className="flex items-center gap-2 text-sm text-secondary">
                   <input
@@ -391,3 +391,4 @@ export function IdentifyDialog({ open, onClose, sceneIds }: Props) {
     </div>
   );
 }
+

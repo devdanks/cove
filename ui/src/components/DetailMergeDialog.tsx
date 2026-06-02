@@ -12,7 +12,7 @@ export interface DetailMergeCandidate {
 interface Props {
   open: boolean;
   onClose: () => void;
-  entityType: "scene" | "performer" | "tag" | "studio";
+  entityType: "video" | "performer" | "tag" | "studio";
   targetItem: DetailMergeCandidate;
   searchItems: (term: string) => Promise<DetailMergeCandidate[]>;
   onMerge: (targetId: number, sourceIds: number[]) => Promise<unknown>;

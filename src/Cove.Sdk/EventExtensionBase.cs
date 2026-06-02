@@ -22,7 +22,7 @@ public abstract class EventExtensionBase : CoveExtensionBase, IEventExtension
     protected virtual void RegisterHandlers() { }
 
     /// <summary>
-    /// Register a handler for a specific event type (e.g. "scene.created", "performer.updated").
+    /// Register a handler for a specific event type (e.g. "video.created", "performer.updated").
     /// </summary>
     protected void On(string eventType, Func<ExtensionEvent, CancellationToken, Task> handler)
     {
@@ -54,3 +54,4 @@ public abstract class EventExtensionBase : CoveExtensionBase, IEventExtension
             : Task.CompletedTask;
     }
 }
+

@@ -62,7 +62,7 @@ import type {
   UserTrackingPreferences,
 } from "../api/types";
 import { useExtensions } from "../extensions/ExtensionLoader";
-import { getScraperSiteKey } from "../components/sceneScrapeUtils";
+import { getScraperSiteKey } from "../components/videoScrapeUtils";
 import { useAppConfig } from "../state/AppConfigContext";
 import { LOCATION_CHANGE_EVENT, buildCurrentUrl, navigateToUrl } from "../router/location";
 import { DisplayProfilesSettingsPanel } from "./settings/DisplayProfilesSettingsPanel";
@@ -351,10 +351,10 @@ const settingsPathAliases: Partial<Record<string, SettingsTab>> = {
 };
 const tabDescriptions: Partial<Record<BuiltInSettingsTab, string>> = {
   "my-account": "Account details and sign-in controls.",
-  "my-appearance-theme": "Language, title, favicon, rating presentation, and interface preferences.",
+  "my-appearance-theme": "Language, title, favicon, navigation, rating presentation, and interface preferences.",
   "my-theme": "Theme, palette, layout, and visual effect preferences.",
-  "my-playback-viewers": "Scene player, previews, feed, vertical viewer, and lightbox preferences.",
-  "my-lists-wall": "Navigation, list display, wall behavior, and card media fit.",
+  "my-playback-viewers": "Video player, previews, feed, vertical viewer, and lightbox preferences.",
+  "my-lists-wall": "List display, wall behavior, and card media fit.",
   "keyboard-shortcuts": "Shortcut overrides and the full keyboard reference.",
   "my-activity-history": "Activity and engagement preferences for the current account.",
   "library-paths-storage": "Content roots and file extension handling.",
@@ -392,10 +392,10 @@ const tabDescriptions: Partial<Record<BuiltInSettingsTab, string>> = {
 };
 
 const settingsSearchKeywords: Partial<Record<BuiltInSettingsTab, string[]>> = {
-  "my-appearance-theme": ["appearance", "language", "title", "favicon", "ratings", "rating system", "troubleshooting"],
+  "my-appearance-theme": ["appearance", "language", "title", "favicon", "navigation", "menu", "ratings", "rating system", "troubleshooting"],
   "my-theme": ["theme", "palette", "colors", "custom colors", "style", "layout", "visual effects"],
   "my-playback-viewers": ["autoplay", "resume", "preview clip", "feed", "vertical viewer", "lightbox", "slideshow", "ab loop"],
-  "my-lists-wall": ["lists", "cards", "wall", "navigation", "menu", "image fit", "video preview fit", "cover", "contain"],
+  "my-lists-wall": ["lists", "cards", "wall", "image fit", "video preview fit", "cover", "contain"],
   "library-scanning": ["scan", "scanning", "generated assets", "generated path", "cache path", "preview generation", "thumbnails", "md5"],
   "operations-scan-generate": ["scan", "generate", "covers", "thumbnails", "previews", "sprites", "phash", "md5"],
   "operations-downloads": ["download", "download from file", "url file", "batch download", "import urls"],
@@ -715,7 +715,7 @@ const languageOptions = [
 ];
 
 const menuItems = [
-  { value: "scenes", label: "Scenes" },
+  { value: "videos", label: "Videos" },
   { value: "segments", label: "Segments" },
   { value: "images", label: "Images" },
   { value: "faces", label: "Faces" },
@@ -798,7 +798,7 @@ const METADATA_BATCH_EXCLUDE_OPTIONS = [
 ];
 
 const customFieldEntityOptions: { value: CustomFieldEntityType; label: string }[] = [
-  { value: "scene", label: "Scenes" },
+  { value: "video", label: "Videos" },
   { value: "audio", label: "Audios" },
   { value: "text", label: "Texts" },
   { value: "performer", label: "Performers" },
@@ -1654,7 +1654,7 @@ export function SettingsPage() {
         key: "",
         label: "",
         type: "text",
-        entityTypes: ["scene"],
+        entityTypes: ["video"],
         options: [],
         filterable: true,
         sortable: false,
@@ -1862,7 +1862,7 @@ export function SettingsPage() {
                             ),
                           }))
                         }
-                        placeholder="D:\\Media\\Scenes"
+                        placeholder="D:\\Media\\Videos"
                         className="flex-1 rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
                       />
                       <div className="flex flex-wrap items-center gap-4">
@@ -2322,6 +2322,23 @@ export function SettingsPage() {
             </SectionCard>
             )}
 
+            {resolvedActiveTab === "my-appearance-theme" && (
+            <SectionCard title="Navigation" description="Drag to reorder, toggle to show/hide. Changes apply immediately after save.">
+              <div className="space-y-4">
+                <NavReorderList
+                  allItems={menuItems}
+                  enabledItems={draft.interface.menuItems}
+                  onChange={(items) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      interface: { ...current.interface, menuItems: items },
+                    }))
+                  }
+                />
+              </div>
+            </SectionCard>
+            )}
+
             {resolvedActiveTab === "library-custom-fields" && (
             <SectionCard title="Custom Fields" description="Define typed metadata fields for entities that need extra structured values.">
               <div className="space-y-4">
@@ -2429,23 +2446,6 @@ export function SettingsPage() {
             </SectionCard>
             )}
 
-            {resolvedActiveTab === "my-lists-wall" && (
-            <SectionCard title="Navigation" description="Drag to reorder, toggle to show/hide. Changes apply immediately after save.">
-              <div className="space-y-4">
-                <NavReorderList
-                  allItems={menuItems}
-                  enabledItems={draft.interface.menuItems}
-                  onChange={(items) =>
-                    updateDraft((current) => ({
-                      ...current,
-                      interface: { ...current.interface, menuItems: items },
-                    }))
-                  }
-                />
-              </div>
-            </SectionCard>
-            )}
-
             {resolvedActiveTab === "my-appearance-theme" && (
             <SectionCard title="Ratings" description="Stored ratings remain 1-100 internally. This changes how they are displayed and edited in the UI.">
               <div className="grid gap-4 md:grid-cols-2">
@@ -2490,11 +2490,11 @@ export function SettingsPage() {
             )}
 
             {resolvedActiveTab === "my-playback-viewers" && (
-            <SectionCard title="Scene Player" description="Playback behavior for the built-in video player.">
+            <SectionCard title="Video Player" description="Playback behavior for the built-in video player.">
               <div className="space-y-3">
                 <CheckboxLabel
-                  label="Auto-play scenes when opened"
-                  description="Start playback automatically when you open a scene detail page."
+                  label="Auto-play videos when opened"
+                  description="Start playback automatically when you open a video detail page."
                   checked={draft.ui.autostartVideo}
                   onChange={(checked) => updateDraft((d) => ({ ...d, ui: { ...d.ui, autostartVideo: checked } }))}
                 />
@@ -2505,14 +2505,14 @@ export function SettingsPage() {
                   onChange={(checked) => updateDraft((d) => ({ ...d, ui: { ...d.ui, autostartVideoOnPlaySelected: checked } }))}
                 />
                 <CheckboxLabel
-                  label="Auto-play when clicking a scene in a list"
-                  description="Start playback immediately when you click a scene row in a list view."
+                  label="Auto-play when clicking a video in a list"
+                  description="Start playback immediately when you click a video row in a list view."
                   checked={draft.ui.autoplayOnListClick}
                   onChange={(checked) => updateDraft((d) => ({ ...d, ui: { ...d.ui, autoplayOnListClick: checked } }))}
                 />
                 <CheckboxLabel
                   label="Always resume from last position"
-                  description="If you've watched part of a scene, resume from where you left off instead of starting at 0."
+                  description="If you've watched part of a video, resume from where you left off instead of starting at 0."
                   checked={draft.ui.alwaysResumeOnPlayback}
                   onChange={(checked) => updateDraft((d) => ({ ...d, ui: { ...d.ui, alwaysResumeOnPlayback: checked } }))}
                 />
@@ -2533,7 +2533,7 @@ export function SettingsPage() {
                 </div>
                 <CheckboxLabel
                   label="Auto-advance to the next item in a list"
-                  description="When a scene finishes, automatically play the next item in the active list or playlist."
+                  description="When a video finishes, automatically play the next item in the active list or playlist."
                   checked={draft.ui.continuePlaylistDefault}
                   onChange={(checked) => updateDraft((d) => ({ ...d, ui: { ...d.ui, continuePlaylistDefault: checked } }))}
                 />
@@ -2627,7 +2627,7 @@ export function SettingsPage() {
             )}
 
             {resolvedActiveTab === "my-playback-viewers" && (
-            <SectionCard title="Feed & Vertical Viewer" description="Choose what autoplays in the scene feed-style views.">
+            <SectionCard title="Feed & Vertical Viewer" description="Choose what autoplays in the video feed-style views.">
               <div className="space-y-4">
                 <SelectField
                   label="Playback source"
@@ -3523,11 +3523,11 @@ export function SettingsPage() {
                     <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Extension system with theme support</li>
                     <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Real-time job tracking via SignalR</li>
                     <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Custom fields on all entity types</li>
-                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Full MetadataServer integration for scene tagger</li>
+                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Full MetadataServer integration for video tagger</li>
                     <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Video filters (brightness, contrast, saturation)</li>
                     <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Gallery and image management</li>
                     <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Performer, studio, tag, and group management</li>
-                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Scene segments and detections with scrubber integration</li>
+                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Video segments and detections with scrubber integration</li>
                   </ul>
                 </div>
               </div>
@@ -3789,13 +3789,13 @@ function UserSettingsPanel({ activeTab }: { activeTab: SettingsTab }) {
           />
           <div className="grid gap-4 md:grid-cols-2">
             <NumberField
-              label="Minimum scene view seconds"
+              label="Minimum video view seconds"
               value={trackingPreferences.minViewSeconds ?? defaultTrackingPreferences.minViewSeconds}
               min={0}
               onChange={(value) => updateTrackingPreferences({ minViewSeconds: value ?? defaultTrackingPreferences.minViewSeconds })}
             />
             <NumberField
-              label="Scene completion ratio"
+              label="Video completion ratio"
               value={trackingPreferences.viewCompletionRatio ?? defaultTrackingPreferences.viewCompletionRatio}
               min={0.01}
               max={1}
@@ -4186,13 +4186,13 @@ function LibraryTasksSection({ refetchJobs, mode }: { refetchJobs: () => void; m
   const [showDownloadImportOpts, setShowDownloadImportOpts] = useState(false);
   const [showAutoTagConfirm, setShowAutoTagConfirm] = useState(false);
   const [downloadImportEntity, setDownloadImportEntity] = useState<DownloadSelectionEntity>(() => {
-    const stored = loadStoredTaskOptions(TASK_DOWNLOAD_IMPORT_OPTIONS_KEY, { entity: "Scene" as DownloadSelectionEntity });
+    const stored = loadStoredTaskOptions(TASK_DOWNLOAD_IMPORT_OPTIONS_KEY, { entity: "Video" as DownloadSelectionEntity });
     return stored.entity as DownloadSelectionEntity;
   });
   const [downloadImportFile, setDownloadImportFile] = useState<File | null>(null);
   const [downloadImportAutoApplyMetadata, setDownloadImportAutoApplyMetadata] = useState(() => {
-    const stored = loadStoredTaskOptions(TASK_DOWNLOAD_IMPORT_OPTIONS_KEY, { scrapeScenes: false });
-    return !!stored.scrapeScenes;
+    const stored = loadStoredTaskOptions(TASK_DOWNLOAD_IMPORT_OPTIONS_KEY, { scrapeVideos: false });
+    return !!stored.scrapeVideos;
   });
   const [downloadImportAllowDuplicateDownloads, setDownloadImportAllowDuplicateDownloads] = useState(() => {
     const stored = loadStoredTaskOptions(TASK_DOWNLOAD_IMPORT_OPTIONS_KEY, { allowDuplicateDownloads: false });
@@ -4244,7 +4244,7 @@ function LibraryTasksSection({ refetchJobs, mode }: { refetchJobs: () => void; m
   useEffect(() => {
     localStorage.setItem(TASK_DOWNLOAD_IMPORT_OPTIONS_KEY, JSON.stringify({
       entity: downloadImportEntity,
-      scrapeScenes: downloadImportAutoApplyMetadata,
+      scrapeVideos: downloadImportAutoApplyMetadata,
       allowDuplicateDownloads: downloadImportAllowDuplicateDownloads,
       generate: downloadImportGenerateOpts,
     }));
@@ -4348,7 +4348,7 @@ function LibraryTasksSection({ refetchJobs, mode }: { refetchJobs: () => void; m
       }
 
       return queueImportedUrlDownloads(downloadImportEntity, urls, {
-        scrapeScenes: downloadImportAutoApplyMetadata,
+        scrapeVideos: downloadImportAutoApplyMetadata,
         allowDuplicateDownloads: downloadImportAllowDuplicateDownloads,
         generate: downloadImportGenerateOpts,
       });
@@ -4380,7 +4380,7 @@ function LibraryTasksSection({ refetchJobs, mode }: { refetchJobs: () => void; m
     },
     duplicates: {
       title: "Duplicates",
-      description: "Open duplicate detection to compare exact duplicate scene files and choose what to remove.",
+      description: "Open duplicate detection to compare exact duplicate video files and choose what to remove.",
     },
     "auto-tagging": {
       title: "Auto Tagging",
@@ -4417,7 +4417,7 @@ function LibraryTasksSection({ refetchJobs, mode }: { refetchJobs: () => void; m
           onToggleExpand={() => setShowScanOpts(!showScanOpts)}
         >
           <div className="space-y-3 pt-3 border-t border-border/50">
-            <p className="text-xs text-muted font-medium uppercase tracking-wide">Scene options</p>
+            <p className="text-xs text-muted font-medium uppercase tracking-wide">Video options</p>
             <div className="grid gap-2 sm:grid-cols-2">
               <CheckboxLabel label="Thumbnails / screenshots" checked={!!scanOpts.scanGenerateCovers} onChange={(c) => setScanOpts({ ...scanOpts, scanGenerateCovers: c })} />
               <CheckboxLabel label="Video previews" checked={!!scanOpts.scanGeneratePreviews} onChange={(c) => setScanOpts({ ...scanOpts, scanGeneratePreviews: c })} />
@@ -4492,7 +4492,7 @@ function LibraryTasksSection({ refetchJobs, mode }: { refetchJobs: () => void; m
           onToggleExpand={() => setShowGenOpts(!showGenOpts)}
         >
           <div className="space-y-3 pt-3 border-t border-border/50">
-            <p className="text-xs text-muted font-medium uppercase tracking-wide">Scene options</p>
+            <p className="text-xs text-muted font-medium uppercase tracking-wide">Video options</p>
             <div className="grid gap-2 sm:grid-cols-2">
               <CheckboxLabel label="Thumbnails / screenshots" checked={!!genOpts.thumbnails} onChange={(c) => setGenOpts({ ...genOpts, thumbnails: c })} />
               <CheckboxLabel label="Video previews" checked={!!genOpts.previews} onChange={(c) => setGenOpts({ ...genOpts, previews: c })} />
@@ -4584,7 +4584,7 @@ function LibraryTasksSection({ refetchJobs, mode }: { refetchJobs: () => void; m
         {mode === "duplicates" && (
         <TaskCard
           label="Duplicate Finder"
-          description="Find exact duplicate scene files and choose which records or files to remove."
+          description="Find exact duplicate video files and choose which records or files to remove."
           onRun={() => navigateToUrl("/duplicates", { state: { page: "duplicates" } })}
           isPending={false}
           runLabel="Open"
@@ -4612,7 +4612,7 @@ function LibraryTasksSection({ refetchJobs, mode }: { refetchJobs: () => void; m
                 setDownloadImportStatus(null);
               }}
               options={[
-                { value: "Scene", label: "Scenes" },
+                { value: "Video", label: "Videos" },
                 { value: "Image", label: "Images" },
                 { value: "Gallery", label: "Galleries" },
               ]}
@@ -4629,10 +4629,10 @@ function LibraryTasksSection({ refetchJobs, mode }: { refetchJobs: () => void; m
                 className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground file:mr-3 file:rounded-lg file:border-0 file:bg-accent/10 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-accent"
               />
             </label>
-            {downloadImportEntity === "Scene" ? (
+            {downloadImportEntity === "Video" ? (
               <CheckboxLabel
-                label="Auto-apply scene metadata after download"
-                description="After scene downloads are queued, also queue metadata matching for the imported scene URLs."
+                label="Auto-apply video metadata after download"
+                description="After video downloads are queued, also queue metadata matching for the imported video URLs."
                 checked={downloadImportAutoApplyMetadata}
                 onChange={(checked) => {
                   setDownloadImportAutoApplyMetadata(checked);
@@ -4658,7 +4658,7 @@ function LibraryTasksSection({ refetchJobs, mode }: { refetchJobs: () => void; m
                 <CheckboxLabel label="Covers" checked={!!downloadImportGenerateOpts.thumbnails} onChange={(checked) => { setDownloadImportGenerateOpts((current) => ({ ...current, thumbnails: checked })); setDownloadImportStatus(null); }} />
                 <CheckboxLabel label="Previews" checked={!!downloadImportGenerateOpts.previews} onChange={(checked) => { setDownloadImportGenerateOpts((current) => ({ ...current, previews: checked })); setDownloadImportStatus(null); }} />
                 <CheckboxLabel label="Sprites" checked={!!downloadImportGenerateOpts.sprites} onChange={(checked) => { setDownloadImportGenerateOpts((current) => ({ ...current, sprites: checked })); setDownloadImportStatus(null); }} />
-                <CheckboxLabel label="Scene perceptual hashes" checked={!!downloadImportGenerateOpts.phashes} onChange={(checked) => { setDownloadImportGenerateOpts((current) => ({ ...current, phashes: checked })); setDownloadImportStatus(null); }} />
+                <CheckboxLabel label="Video perceptual hashes" checked={!!downloadImportGenerateOpts.phashes} onChange={(checked) => { setDownloadImportGenerateOpts((current) => ({ ...current, phashes: checked })); setDownloadImportStatus(null); }} />
                 <CheckboxLabel label="MD5 checksums" checked={!!downloadImportGenerateOpts.md5} onChange={(checked) => { setDownloadImportGenerateOpts((current) => ({ ...current, md5: checked })); setDownloadImportStatus(null); }} />
                 <CheckboxLabel label="Image thumbnails" checked={!!downloadImportGenerateOpts.imageThumbnails} onChange={(checked) => { setDownloadImportGenerateOpts((current) => ({ ...current, imageThumbnails: checked })); setDownloadImportStatus(null); }} />
                 <CheckboxLabel label="Image perceptual hashes" checked={!!downloadImportGenerateOpts.imagePhashes} onChange={(checked) => { setDownloadImportGenerateOpts((current) => ({ ...current, imagePhashes: checked })); setDownloadImportStatus(null); }} />
@@ -4696,7 +4696,7 @@ function DataManagementSection({ refetchJobs, mode }: { refetchJobs: () => void;
 
   const [showExportOpts, setShowExportOpts] = useState(false);
   const [exportOpts, setExportOpts] = useState<ExportOptions>({
-    includeScenes: true,
+    includeVideos: true,
     includePerformers: true,
     includeStudios: true,
     includeTags: true,
@@ -4865,7 +4865,7 @@ function DataManagementSection({ refetchJobs, mode }: { refetchJobs: () => void;
           onToggleExpand={() => setShowExportOpts(!showExportOpts)}
         >
           <div className="grid gap-2 sm:grid-cols-2 pt-3 border-t border-border/50">
-            <CheckboxLabel label="Scenes" checked={!!exportOpts.includeScenes} onChange={(c) => setExportOpts({ ...exportOpts, includeScenes: c })} />
+            <CheckboxLabel label="Videos" checked={!!exportOpts.includeVideos} onChange={(c) => setExportOpts({ ...exportOpts, includeVideos: c })} />
             <CheckboxLabel label="Performers" checked={!!exportOpts.includePerformers} onChange={(c) => setExportOpts({ ...exportOpts, includePerformers: c })} />
             <CheckboxLabel label="Studios" checked={!!exportOpts.includeStudios} onChange={(c) => setExportOpts({ ...exportOpts, includeStudios: c })} />
             <CheckboxLabel label="Tags" checked={!!exportOpts.includeTags} onChange={(c) => setExportOpts({ ...exportOpts, includeTags: c })} />
@@ -5035,7 +5035,7 @@ function DataManagementSection({ refetchJobs, mode }: { refetchJobs: () => void;
         <div className="border border-red-900/50 rounded-lg p-4 bg-red-950/20">
           <h4 className="text-sm font-semibold text-red-400 mb-1">Danger Zone</h4>
           <p className="text-xs text-secondary mb-3">
-            Permanently deletes all scenes, performers, tags, studios, galleries, and groups from the database <strong>and</strong> resets your saved configuration (cove-config.json) to factory defaults so the setup wizard reappears. A snapshot of both the database and the config is taken first and saved to the backups folder, so you can restore them later from this Backup & Restore page.
+            Permanently deletes all videos, performers, tags, studios, galleries, and groups from the database <strong>and</strong> resets your saved configuration (cove-config.json) to factory defaults so the setup wizard reappears. A snapshot of both the database and the config is taken first and saved to the backups folder, so you can restore them later from this Backup & Restore page.
           </p>
           {lastWipeConfigBackup && (
             <p className="text-xs text-amber-300 mb-3">Last config snapshot from a wipe: {lastWipeConfigBackup}</p>
@@ -5402,7 +5402,7 @@ function ThemeSelector() {
       { key: "carddir", label: "Card Direction", options: [{ value: "diagonal", label: "Diagonal" }, { value: "vertical", label: "Vertical" }, { value: "horizontal", label: "Horizontal" }] },
       { key: "bgdir", label: "Background Direction", options: [{ value: "diagonal", label: "Diagonal" }, { value: "vertical", label: "Vertical" }, { value: "horizontal", label: "Horizontal" }] },
       { key: "surfacedir", label: "Surface Direction", options: [{ value: "diagonal", label: "Diagonal" }, { value: "vertical", label: "Vertical" }, { value: "horizontal", label: "Horizontal" }] },
-      { key: "scenepause", label: "Pause on Scene Player", options: [{ value: "on", label: "On (recommended)" }, { value: "off", label: "Off" }] },
+      { key: "videopause", label: "Pause on Video Player", options: [{ value: "on", label: "On (recommended)" }, { value: "off", label: "Off" }] },
     ],
     glass: [
       { key: "cardblur", label: "Card Blur", type: "range", cssVar: "--sv-card-blur", min: 0, max: 100, defaultValue: 27 },
@@ -7006,5 +7006,6 @@ function ExtBadge({ label }: { label: string }) {
     </span>
   );
 }
+
 
 

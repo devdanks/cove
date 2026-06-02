@@ -3,7 +3,7 @@ import type { TagApplication } from "../api/types";
 import { EntityReferenceMultiSelector, EntityReferenceValue } from "./EntityReferenceSelector";
 import { TagBadge } from "./shared";
 
-export type PerformerContextHostType = "scene" | "image" | "audio" | "text";
+export type PerformerContextHostType = "video" | "image" | "audio" | "text";
 
 interface PerformerContextTagEditorProps {
   performerIds: number[];
@@ -152,3 +152,4 @@ function toTagProvenance(application: TagApplication) {
     hostDurationSec: application.hostDurationSec ?? undefined,
   };
 }
+

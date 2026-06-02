@@ -11,7 +11,9 @@ public class FaceRepository : IFaceRepository
 
     public async Task<IReadOnlyList<Face>> FindFacesAsync(FaceFilter filter, bool tracking = false, CancellationToken ct = default)
     {
-        var query = _db.Faces.AsQueryable();
+        IQueryable<Face> query = filter.IncludePerformer
+            ? _db.Faces.Include(f => f.Performer!).ThenInclude(p => p.RemoteIds)
+            : _db.Faces.AsQueryable();
 
         if (filter.PrimarySourceKeys != null && filter.PrimarySourceKeys.Count > 0)
             query = query.Where(f => f.PrimarySourceKey != null && filter.PrimarySourceKeys.Contains(f.PrimarySourceKey));
@@ -23,6 +25,10 @@ public class FaceRepository : IFaceRepository
                 : query.Where(f => f.PerformerId == null);
         if (filter.Ignored.HasValue)
             query = query.Where(f => f.Ignored == filter.Ignored.Value);
+        if (filter.IsMerged.HasValue)
+            query = filter.IsMerged.Value
+                ? query.Where(f => f.MergedIntoFaceId != null)
+                : query.Where(f => f.MergedIntoFaceId == null);
 
         if (!tracking)
             query = query.AsNoTracking();

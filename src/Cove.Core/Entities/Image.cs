@@ -10,7 +10,7 @@ public class Image : BaseEntity
     public int? StudioId { get; set; }
     public DateOnly? Date { get; set; }
 
-    // Denormalized M2M id sets, GIN-indexed. See Scene.TagIds for rationale.
+    // Denormalized M2M id sets, GIN-indexed. See Video.TagIds for rationale.
     public int[] TagIds { get; set; } = [];
     public int[] PerformerIds { get; set; } = [];
 
@@ -73,3 +73,4 @@ public class ImageGallery
     public Image? Image { get; set; }
     public Gallery? Gallery { get; set; }
 }
+

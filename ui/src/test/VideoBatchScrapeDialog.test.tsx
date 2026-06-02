@@ -2,19 +2,19 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { SceneBatchScrapeDialog } from "../components/SceneBatchScrapeDialog";
-import type { SceneScrapeScene } from "../components/sceneScrapeUtils";
+import { VideoBatchScrapeDialog } from "../components/VideoBatchScrapeDialog";
+import type { VideoScrapeVideo } from "../components/videoScrapeUtils";
 import type { ScraperSummary } from "../api/types";
 
 const mocks = vi.hoisted(() => ({
-  scrapeAttemptsStartSceneBatch: vi.fn(),
+  scrapeAttemptsStartVideoBatch: vi.fn(),
   systemListScrapers: vi.fn(),
   savePreferences: vi.fn(),
 }));
 
 vi.mock("../api/client", () => ({
   scrapeAttempts: {
-    startSceneBatch: mocks.scrapeAttemptsStartSceneBatch,
+    startVideoBatch: mocks.scrapeAttemptsStartVideoBatch,
   },
   system: { listScrapers: mocks.systemListScrapers },
 }));
@@ -29,11 +29,11 @@ vi.mock("../state/AppConfigContext", () => ({
   }),
 }));
 
-vi.mock("../components/sceneScrapeUtils", () => ({
+vi.mock("../components/videoScrapeUtils", () => ({
   findDefaultKind: () => "url",
   findPreferredScraperId: (scrapers: ScraperSummary[]) => scrapers[0]?.id ?? "",
-  getSceneLabel: (scene: SceneScrapeScene) => scene.title,
-  getSceneNameSearchInput: (scene: SceneScrapeScene) => scene.title,
+  getVideoLabel: (video: VideoScrapeVideo) => video.title,
+  getVideoNameSearchInput: (video: VideoScrapeVideo) => video.title,
   loadScrapeApplyPreferences: () => ({
     createMissingStudio: true,
     createMissingTags: true,
@@ -42,11 +42,11 @@ vi.mock("../components/sceneScrapeUtils", () => ({
     hydratePerformers: false,
   }),
   saveScrapeApplyPreferences: mocks.savePreferences,
-  sortScrapersForScene: (scrapers: ScraperSummary[]) => scrapers,
+  sortScrapersForVideo: (scrapers: ScraperSummary[]) => scrapers,
   supportsScrapeKind: () => true,
 }));
 
-function renderDialog(scenes: SceneScrapeScene[]) {
+function renderDialog(videos: VideoScrapeVideo[]) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -57,24 +57,24 @@ function renderDialog(scenes: SceneScrapeScene[]) {
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <SceneBatchScrapeDialog open onClose={vi.fn()} scenes={scenes} />
+      <VideoBatchScrapeDialog open onClose={vi.fn()} videos={videos} />
     </QueryClientProvider>,
   );
 }
 
-describe("SceneBatchScrapeDialog", () => {
+describe("VideoBatchScrapeDialog", () => {
   beforeEach(() => {
     mocks.systemListScrapers.mockResolvedValue([
       {
-        id: "scene-scraper",
-        name: "Scene Scraper",
-        entityType: "scene",
+        id: "video-scraper",
+        name: "Video Scraper",
+        entityType: "video",
         supportedScrapes: ["URL"],
-        urls: ["example.com/scenes/"],
+        urls: ["example.com/videos/"],
         sourcePath: "Example.yml",
       } satisfies ScraperSummary,
     ]);
-    mocks.scrapeAttemptsStartSceneBatch.mockResolvedValue({ jobId: "job-1", queuedCount: 1 });
+    mocks.scrapeAttemptsStartVideoBatch.mockResolvedValue({ jobId: "job-1", queuedCount: 1 });
   });
 
   it("passes performer scraping through the batch apply payload when enabled", async () => {
@@ -82,14 +82,14 @@ describe("SceneBatchScrapeDialog", () => {
     renderDialog([
       {
         id: 4,
-        title: "Scene Title",
+        title: "Video Title",
         code: undefined,
         details: undefined,
         director: undefined,
         date: undefined,
         organized: false,
         studioName: undefined,
-        urls: ["https://example.com/scenes/scene-title"],
+        urls: ["https://example.com/videos/video-title"],
         tags: [],
         performers: [],
         files: [],
@@ -97,16 +97,16 @@ describe("SceneBatchScrapeDialog", () => {
       },
     ]);
 
-    await waitFor(() => expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("scene-scraper"));
+    await waitFor(() => expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("video-scraper"));
 
     await user.click(screen.getByRole("checkbox", { name: "Scrape matched performers from performer URLs" }));
     await user.click(screen.getByRole("button", { name: "Queue Scrape And Apply" }));
 
     await waitFor(() => {
-      expect(mocks.scrapeAttemptsStartSceneBatch).toHaveBeenCalledWith(expect.objectContaining({
+      expect(mocks.scrapeAttemptsStartVideoBatch).toHaveBeenCalledWith(expect.objectContaining({
         hydratePerformers: true,
         autoApply: true,
-        sceneIds: [4],
+        videoIds: [4],
       }));
     });
   });

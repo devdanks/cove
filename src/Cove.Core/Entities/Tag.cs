@@ -22,8 +22,8 @@ public class Tag : BaseEntity
     public string? ImageOverrideBlobId { get; set; }
 
     // Denormalized usage counters for hot list/detail reads.
-    public int SceneCount { get; set; }
-    public int SceneMarkerCount { get; set; }
+    public int VideoCount { get; set; }
+    public int VideoMarkerCount { get; set; }
     public int ImageCount { get; set; }
     public int GalleryCount { get; set; }
     public int GroupCount { get; set; }
@@ -38,7 +38,7 @@ public class Tag : BaseEntity
     public TagGroup? TagGroup { get; set; }
 
     // Reverse nav for many-to-many
-    public ICollection<SceneTag> SceneTags { get; set; } = [];
+    public ICollection<VideoTag> VideoTags { get; set; } = [];
     public ICollection<PerformerTag> PerformerTags { get; set; } = [];
     public ICollection<ImageTag> ImageTags { get; set; } = [];
     public ICollection<GalleryTag> GalleryTags { get; set; } = [];
@@ -80,3 +80,4 @@ public class TagRemoteId
     public string RemoteId { get; set; } = string.Empty;
     public Tag? Tag { get; set; }
 }
+

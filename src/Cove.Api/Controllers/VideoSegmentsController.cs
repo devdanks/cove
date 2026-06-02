@@ -11,19 +11,19 @@ using Microsoft.EntityFrameworkCore;
 namespace Cove.Api.Controllers;
 
 [ApiController]
-[Route("api/scenes/{sceneId:int}/segments")]
+[Route("api/videos/{videoId:int}/segments")]
 [RequiresPermission(Permissions.SegmentsRead)]
-public class SceneSegmentsController(CoveContext db, SegmentSpanResolver spanResolver, IBlobService blobService, IFieldProvenanceService? fieldProvenanceService = null) : ControllerBase
+public class VideoSegmentsController(CoveContext db, SegmentSpanResolver spanResolver, IBlobService blobService, IFieldProvenanceService? fieldProvenanceService = null) : ControllerBase
 {
     [HttpGet]
-    public async Task<ActionResult<IReadOnlyList<SegmentDto>>> GetByScene(int sceneId, CancellationToken ct)
+    public async Task<ActionResult<IReadOnlyList<SegmentDto>>> GetByVideo(int videoId, CancellationToken ct)
     {
-        if (!await SceneExistsAsync(sceneId, ct)) return NotFound();
+        if (!await VideoExistsAsync(videoId, ct)) return NotFound();
 
             var segments = await db.VisibleSegments()
             .AsNoTracking()
             .Include(segment => segment.Tag)
-            .Where(segment => segment.HostType == SegmentHostType.Scene && segment.HostId == sceneId)
+            .Where(segment => segment.HostType == SegmentHostType.Video && segment.HostId == videoId)
             .OrderBy(segment => segment.StartSec)
             .ThenBy(segment => segment.Id)
             .ToListAsync(ct);
@@ -32,14 +32,14 @@ public class SceneSegmentsController(CoveContext db, SegmentSpanResolver spanRes
     }
 
     [HttpGet("spans")]
-    public async Task<ActionResult<SceneResolvedSpansDto>> GetSpans(int sceneId, [FromQuery] int? profile = null, CancellationToken ct = default)
+    public async Task<ActionResult<VideoResolvedSpansDto>> GetSpans(int videoId, [FromQuery] int? profile = null, CancellationToken ct = default)
     {
-        if (!await SceneExistsAsync(sceneId, ct))
+        if (!await VideoExistsAsync(videoId, ct))
             return NotFound();
 
         try
         {
-            return Ok(await spanResolver.ResolveSceneAsync(sceneId, profile, ct));
+            return Ok(await spanResolver.ResolveVideoAsync(videoId, profile, ct));
         }
         catch (InvalidOperationException ex)
         {
@@ -48,14 +48,14 @@ public class SceneSegmentsController(CoveContext db, SegmentSpanResolver spanRes
     }
 
     [HttpPost("spans/query")]
-    public async Task<ActionResult<ResolvedSpanListDto>> QuerySpans(int sceneId, [FromBody] SegmentSpanQueryRequestDto request, CancellationToken ct)
+    public async Task<ActionResult<ResolvedSpanListDto>> QuerySpans(int videoId, [FromBody] SegmentSpanQueryRequestDto request, CancellationToken ct)
     {
-        if (!await SceneExistsAsync(sceneId, ct))
+        if (!await VideoExistsAsync(videoId, ct))
             return NotFound();
 
         try
         {
-            var spans = await spanResolver.QuerySceneAsync(sceneId, request, ct);
+            var spans = await spanResolver.QueryVideoAsync(videoId, request, ct);
             return Ok(new ResolvedSpanListDto(spans));
         }
         catch (InvalidOperationException ex)
@@ -64,15 +64,15 @@ public class SceneSegmentsController(CoveContext db, SegmentSpanResolver spanRes
         }
     }
 
-    [HttpGet("/api/scenes/{sceneId:int}/spans/{spanKey}")]
-    public async Task<ActionResult<ResolvedSpanDetailDto>> GetSpanDetail(int sceneId, string spanKey, [FromQuery] int? profile = null, CancellationToken ct = default)
+    [HttpGet("/api/videos/{videoId:int}/spans/{spanKey}")]
+    public async Task<ActionResult<ResolvedSpanDetailDto>> GetSpanDetail(int videoId, string spanKey, [FromQuery] int? profile = null, CancellationToken ct = default)
     {
-        if (!await SceneExistsAsync(sceneId, ct))
+        if (!await VideoExistsAsync(videoId, ct))
             return NotFound();
 
         try
         {
-            var detail = await spanResolver.GetSpanDetailAsync(sceneId, spanKey, profile, ct);
+            var detail = await spanResolver.GetSpanDetailAsync(videoId, spanKey, profile, ct);
             return detail is null ? NotFound() : Ok(detail);
         }
         catch (InvalidOperationException ex)
@@ -82,12 +82,12 @@ public class SceneSegmentsController(CoveContext db, SegmentSpanResolver spanRes
     }
 
     [HttpGet("{id:int}")]
-    public async Task<ActionResult<SegmentDto>> GetById(int sceneId, int id, CancellationToken ct)
+    public async Task<ActionResult<SegmentDto>> GetById(int videoId, int id, CancellationToken ct)
     {
         var segment = await db.VisibleSegments()
             .AsNoTracking()
             .Include(item => item.Tag)
-            .FirstOrDefaultAsync(item => item.Id == id && item.HostType == SegmentHostType.Scene && item.HostId == sceneId, ct);
+            .FirstOrDefaultAsync(item => item.Id == id && item.HostType == SegmentHostType.Video && item.HostId == videoId, ct);
 
         if (segment is null)
             return NotFound();
@@ -97,17 +97,17 @@ public class SceneSegmentsController(CoveContext db, SegmentSpanResolver spanRes
 
     [HttpPost]
     [RequiresPermission(Permissions.SegmentsWrite)]
-    [RequiresEntityAccess(EntityKinds.Scene, Permissions.SegmentsWrite, RouteValueName = "sceneId")]
-    public async Task<ActionResult<SegmentDto>> Create(int sceneId, [FromBody] SegmentCreateDto dto, CancellationToken ct)
+    [RequiresEntityAccess(EntityKinds.Video, Permissions.SegmentsWrite, RouteValueName = "videoId")]
+    public async Task<ActionResult<SegmentDto>> Create(int videoId, [FromBody] SegmentCreateDto dto, CancellationToken ct)
     {
-        if (!await SceneExistsAsync(sceneId, ct)) return NotFound();
+        if (!await VideoExistsAsync(videoId, ct)) return NotFound();
         if (dto.EndSec.HasValue && dto.EndSec.Value < dto.StartSec)
             return BadRequest("Segment end must be greater than or equal to the start.");
 
         var segment = new Segment
         {
-            HostType = SegmentHostType.Scene,
-            HostId = sceneId,
+            HostType = SegmentHostType.Video,
+            HostId = videoId,
             StartSec = dto.StartSec,
             EndSec = dto.EndSec,
             TagId = dto.TagId,
@@ -124,23 +124,23 @@ public class SceneSegmentsController(CoveContext db, SegmentSpanResolver spanRes
         db.Segments.Add(segment);
         await RecordManualSegmentFieldProvenanceAsync(segment, ct);
         await db.SaveChangesAsync(ct);
-        spanResolver.EvictScene(sceneId);
+        spanResolver.EvictVideo(videoId);
         await LoadTagAsync(segment, ct);
 
-        return CreatedAtAction(nameof(GetById), new { sceneId, id = segment.Id }, MapToDto(segment));
+        return CreatedAtAction(nameof(GetById), new { videoId, id = segment.Id }, MapToDto(segment));
     }
 
     [HttpPut("{id:int}")]
     [RequiresPermission(Permissions.SegmentsWrite)]
-    [RequiresEntityAccess(EntityKinds.Scene, Permissions.SegmentsWrite, RouteValueName = "sceneId")]
-    public async Task<ActionResult<SegmentDto>> Update(int sceneId, int id, [FromBody] SegmentUpdateDto dto, CancellationToken ct)
+    [RequiresEntityAccess(EntityKinds.Video, Permissions.SegmentsWrite, RouteValueName = "videoId")]
+    public async Task<ActionResult<SegmentDto>> Update(int videoId, int id, [FromBody] SegmentUpdateDto dto, CancellationToken ct)
     {
         if (dto.EndSec.HasValue && dto.EndSec.Value < dto.StartSec)
             return BadRequest("Segment end must be greater than or equal to the start.");
 
         var segment = await db.Segments
             .Include(item => item.Tag)
-            .FirstOrDefaultAsync(item => item.Id == id && item.HostType == SegmentHostType.Scene && item.HostId == sceneId, ct);
+            .FirstOrDefaultAsync(item => item.Id == id && item.HostType == SegmentHostType.Video && item.HostId == videoId, ct);
         if (segment is null) return NotFound();
 
         var originalStartSec = segment.StartSec;
@@ -184,20 +184,20 @@ public class SceneSegmentsController(CoveContext db, SegmentSpanResolver spanRes
         await RecordManualSegmentFieldProvenanceAsync(segment.Id, manualFields, ct);
 
         await db.SaveChangesAsync(ct);
-        spanResolver.EvictScene(sceneId);
+        spanResolver.EvictVideo(videoId);
         await LoadTagAsync(segment, ct);
         return Ok(MapToDto(segment, await LoadSegmentFieldProvenanceAsync(segment.Id, ct)));
     }
 
     [HttpDelete("{id:int}")]
     [RequiresPermission(Permissions.SegmentsDelete)]
-    [RequiresEntityAccess(EntityKinds.Scene, Permissions.SegmentsDelete, RouteValueName = "sceneId")]
-    public async Task<IActionResult> Delete(int sceneId, int id, CancellationToken ct)
+    [RequiresEntityAccess(EntityKinds.Video, Permissions.SegmentsDelete, RouteValueName = "videoId")]
+    public async Task<IActionResult> Delete(int videoId, int id, CancellationToken ct)
     {
-        // SceneSegmentsController.Delete only deletes persisted raw Segment rows.
+        // VideoSegmentsController.Delete only deletes persisted raw Segment rows.
         // Derived spans are computed by SegmentSpanResolver and never reach this endpoint.
         var segment = await db.Segments
-            .FirstOrDefaultAsync(item => item.Id == id && item.HostType == SegmentHostType.Scene && item.HostId == sceneId, ct);
+            .FirstOrDefaultAsync(item => item.Id == id && item.HostType == SegmentHostType.Video && item.HostId == videoId, ct);
         if (segment is null) return NotFound();
 
         if (!string.IsNullOrWhiteSpace(segment.ImageBlobId))
@@ -205,12 +205,12 @@ public class SceneSegmentsController(CoveContext db, SegmentSpanResolver spanRes
 
         db.Segments.Remove(segment);
         await db.SaveChangesAsync(ct);
-        spanResolver.EvictScene(sceneId);
+        spanResolver.EvictVideo(videoId);
         return NoContent();
     }
 
-    private Task<bool> SceneExistsAsync(int sceneId, CancellationToken ct) =>
-        db.Scenes.AsNoTracking().AnyAsync(scene => scene.Id == sceneId, ct);
+    private Task<bool> VideoExistsAsync(int videoId, CancellationToken ct) =>
+        db.Videos.AsNoTracking().AnyAsync(video => video.Id == videoId, ct);
 
     private async Task LoadTagAsync(Segment segment, CancellationToken ct)
     {

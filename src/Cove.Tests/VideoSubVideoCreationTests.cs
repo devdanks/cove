@@ -12,10 +12,10 @@ using Microsoft.Extensions.Caching.Memory;
 
 namespace Cove.Tests;
 
-public class SceneSubSceneCreationTests
+public class VideoSubVideoCreationTests
 {
     [Fact]
-    public async Task ScenesController_Create_AllowsNestedSubScenesUsingRelativeClipOffsets()
+    public async Task VideosController_Create_AllowsNestedSubVideosUsingRelativeClipOffsets()
     {
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
@@ -37,25 +37,25 @@ public class SceneSubSceneCreationTests
         await using var context = new CoveContext(options, principalAccessor);
         await context.Database.EnsureCreatedAsync();
 
-        var sourceScene = new Scene
+        var sourceVideo = new Video
         {
-            Title = "Source Scene",
+            Title = "Source Video",
             MaxDuration = 120,
         };
-        var childScene = new Scene
+        var childVideo = new Video
         {
-            Title = "Child Scene",
-            ParentScene = sourceScene,
+            Title = "Child Video",
+            ParentVideo = sourceVideo,
             ClipStartSec = 30,
             ClipEndSec = 60,
             MaxDuration = 30,
         };
 
-        context.Scenes.AddRange(sourceScene, childScene);
+        context.Videos.AddRange(sourceVideo, childVideo);
         await context.SaveChangesAsync();
 
-        var controller = new ScenesController(
-            new SceneRepository(context),
+        var controller = new VideosController(
+            new VideoRepository(context),
             context,
             null!,
             null!,
@@ -69,8 +69,8 @@ public class SceneSubSceneCreationTests
             null,
             principalAccessor);
 
-        var createResult = await controller.Create(new SceneCreateDto(
-            Title: "Nested Scene",
+        var createResult = await controller.Create(new VideoCreateDto(
+            Title: "Nested Video",
             Code: null,
             Details: null,
             Director: null,
@@ -86,20 +86,20 @@ public class SceneSubSceneCreationTests
             GalleryIds: null,
             Groups: null,
             CustomFields: null,
-            ParentSceneId: childScene.Id,
+            ParentVideoId: childVideo.Id,
             ClipStartSec: 5,
             ClipEndSec: 10), CancellationToken.None);
 
         var created = Assert.IsType<CreatedAtActionResult>(createResult.Result);
-        var createdDto = Assert.IsType<SceneDto>(created.Value);
+        var createdDto = Assert.IsType<VideoDto>(created.Value);
 
-        Assert.Equal(sourceScene.Id, createdDto.ParentSceneId);
+        Assert.Equal(sourceVideo.Id, createdDto.ParentVideoId);
         Assert.Equal(35, createdDto.ClipStartSec);
         Assert.Equal(40, createdDto.ClipEndSec);
 
-        var storedScene = await context.Scenes.SingleAsync(scene => scene.Id == createdDto.Id);
-        Assert.Equal(sourceScene.Id, storedScene.ParentSceneId);
-        Assert.Equal(35, storedScene.ClipStartSec);
-        Assert.Equal(40, storedScene.ClipEndSec);
+        var storedVideo = await context.Videos.SingleAsync(video => video.Id == createdDto.Id);
+        Assert.Equal(sourceVideo.Id, storedVideo.ParentVideoId);
+        Assert.Equal(35, storedVideo.ClipStartSec);
+        Assert.Equal(40, storedVideo.ClipEndSec);
     }
 }

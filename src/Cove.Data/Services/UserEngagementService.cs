@@ -78,8 +78,8 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
             : EmptySnapshot);
     }
 
-    public Task<Dictionary<int, UserEngagementSnapshot>> GetSceneSnapshotsAsync(IEnumerable<int> sceneIds, CancellationToken cancellationToken = default)
-        => GetSnapshotsAsync(AffinityHostType.Scene, sceneIds, cancellationToken);
+    public Task<Dictionary<int, UserEngagementSnapshot>> GetVideoSnapshotsAsync(IEnumerable<int> videoIds, CancellationToken cancellationToken = default)
+        => GetSnapshotsAsync(AffinityHostType.Video, videoIds, cancellationToken);
 
     public async Task<UserEngagementSnapshot?> SetFavoriteAsync(AffinityHostType hostType, int hostId, bool isFavorite, CancellationToken cancellationToken = default)
     {
@@ -100,8 +100,8 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
 
     public async Task<UserEngagementSnapshot?> SetRatingAsync(AffinityHostType hostType, int hostId, int? value, string aspect = "overall", CancellationToken cancellationToken = default)
     {
-        if (hostType == AffinityHostType.Scene)
-            return await SetSceneRatingAsync(hostId, value, aspect, cancellationToken);
+        if (hostType == AffinityHostType.Video)
+            return await SetVideoRatingAsync(hostId, value, aspect, cancellationToken);
 
         if (!await EntityExistsAsync(hostType, hostId, cancellationToken))
             return null;
@@ -203,71 +203,71 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
             .ToListAsync(cancellationToken);
     }
 
-    public async Task<UserEngagementSnapshot?> RecordScenePlayAsync(int sceneId, CancellationToken cancellationToken = default)
+    public async Task<UserEngagementSnapshot?> RecordVideoPlayAsync(int videoId, CancellationToken cancellationToken = default)
     {
-        var scene = await db.Scenes.FirstOrDefaultAsync(item => item.Id == sceneId, cancellationToken);
-        if (scene is null)
+        var video = await db.Videos.FirstOrDefaultAsync(item => item.Id == videoId, cancellationToken);
+        if (video is null)
             return null;
 
         var now = DateTime.UtcNow;
-        var affinity = await GetOrCreateSceneAffinityAsync(sceneId, cancellationToken);
+        var affinity = await GetOrCreateVideoAffinityAsync(videoId, cancellationToken);
         if (affinity != null)
         {
             affinity.ViewCount++;
             affinity.LastConsumedAt = now;
         }
 
-        db.Set<ScenePlayHistory>().Add(new ScenePlayHistory { SceneId = sceneId, PlayedAt = now });
+        db.Set<VideoPlayHistory>().Add(new VideoPlayHistory { VideoId = videoId, PlayedAt = now });
         await db.SaveChangesAsync(cancellationToken);
 
-        return await BuildSceneSnapshotAsync(sceneId, scene, affinity, cancellationToken);
+        return await BuildVideoSnapshotAsync(videoId, video, affinity, cancellationToken);
     }
 
-    public async Task<UserEngagementSnapshot?> DeleteScenePlayAsync(int sceneId, CancellationToken cancellationToken = default)
+    public async Task<UserEngagementSnapshot?> DeleteVideoPlayAsync(int videoId, CancellationToken cancellationToken = default)
     {
-        var scene = await db.Scenes.FirstOrDefaultAsync(item => item.Id == sceneId, cancellationToken);
-        if (scene is null)
+        var video = await db.Videos.FirstOrDefaultAsync(item => item.Id == videoId, cancellationToken);
+        if (video is null)
             return null;
 
-        var affinity = await GetOrCreateSceneAffinityAsync(sceneId, cancellationToken, createIfMissing: false);
+        var affinity = await GetOrCreateVideoAffinityAsync(videoId, cancellationToken, createIfMissing: false);
         if (affinity != null)
         {
             affinity.ViewCount = Math.Max(0, affinity.ViewCount - 1);
 
-            // Remove the most recent playback session for this user+scene
+            // Remove the most recent playback session for this user+video
             var lastPlaybackSession = await db.PlaybackSessions
-                .Where(session => session.UserId == affinity.UserId && session.HostType == InteractionHostType.Scene && session.HostId == sceneId)
+                .Where(session => session.UserId == affinity.UserId && session.HostType == InteractionHostType.Video && session.HostId == videoId)
                 .OrderByDescending(session => session.StartedAt)
                 .FirstOrDefaultAsync(cancellationToken);
             if (lastPlaybackSession != null)
                 db.PlaybackSessions.Remove(lastPlaybackSession);
 
             affinity.LastConsumedAt = await db.PlaybackSessions
-                .Where(session => session.UserId == affinity.UserId && session.HostType == InteractionHostType.Scene && session.HostId == sceneId)
+                .Where(session => session.UserId == affinity.UserId && session.HostType == InteractionHostType.Video && session.HostId == videoId)
                 .OrderByDescending(session => session.StartedAt)
                 .Select(session => (DateTime?)session.StartedAt)
                 .FirstOrDefaultAsync(cancellationToken);
         }
 
-        // Remove the most recent global play history entry for this scene
-        var lastPlayHistory = await db.Set<ScenePlayHistory>()
-            .Where(h => h.SceneId == sceneId)
+        // Remove the most recent global play history entry for this video
+        var lastPlayHistory = await db.Set<VideoPlayHistory>()
+            .Where(h => h.VideoId == videoId)
             .OrderByDescending(h => h.PlayedAt)
             .FirstOrDefaultAsync(cancellationToken);
         if (lastPlayHistory != null)
-            db.Set<ScenePlayHistory>().Remove(lastPlayHistory);
+            db.Set<VideoPlayHistory>().Remove(lastPlayHistory);
         await db.SaveChangesAsync(cancellationToken);
 
-        return await BuildSceneSnapshotAsync(sceneId, scene, affinity, cancellationToken);
+        return await BuildVideoSnapshotAsync(videoId, video, affinity, cancellationToken);
     }
 
-    public async Task<UserEngagementSnapshot?> ResetScenePlayAsync(int sceneId, CancellationToken cancellationToken = default)
+    public async Task<UserEngagementSnapshot?> ResetVideoPlayAsync(int videoId, CancellationToken cancellationToken = default)
     {
-        var scene = await db.Scenes.FirstOrDefaultAsync(item => item.Id == sceneId, cancellationToken);
-        if (scene is null)
+        var video = await db.Videos.FirstOrDefaultAsync(item => item.Id == videoId, cancellationToken);
+        if (video is null)
             return null;
 
-        var affinity = await GetOrCreateSceneAffinityAsync(sceneId, cancellationToken);
+        var affinity = await GetOrCreateVideoAffinityAsync(videoId, cancellationToken);
         if (affinity != null)
         {
             affinity.ViewCount = 0;
@@ -277,28 +277,28 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
             affinity.LastConsumedAt = null;
 
             var playbackSessions = await db.PlaybackSessions
-                .Where(session => session.UserId == affinity.UserId && session.HostType == InteractionHostType.Scene && session.HostId == sceneId)
+                .Where(session => session.UserId == affinity.UserId && session.HostType == InteractionHostType.Video && session.HostId == videoId)
                 .ToListAsync(cancellationToken);
             db.PlaybackSessions.RemoveRange(playbackSessions);
         }
 
-        var allPlayHistory = await db.Set<ScenePlayHistory>()
-            .Where(h => h.SceneId == sceneId)
+        var allPlayHistory = await db.Set<VideoPlayHistory>()
+            .Where(h => h.VideoId == videoId)
             .ToListAsync(cancellationToken);
-        db.Set<ScenePlayHistory>().RemoveRange(allPlayHistory);
+        db.Set<VideoPlayHistory>().RemoveRange(allPlayHistory);
         await db.SaveChangesAsync(cancellationToken);
 
-        return await BuildSceneSnapshotAsync(sceneId, scene, affinity, cancellationToken);
+        return await BuildVideoSnapshotAsync(videoId, video, affinity, cancellationToken);
     }
 
-    public Task<UserEngagementSnapshot?> IncrementSceneLikeAsync(int sceneId, CancellationToken cancellationToken = default)
-        => IncrementLikeAsync(AffinityHostType.Scene, sceneId, cancellationToken);
+    public Task<UserEngagementSnapshot?> IncrementVideoLikeAsync(int videoId, CancellationToken cancellationToken = default)
+        => IncrementLikeAsync(AffinityHostType.Video, videoId, cancellationToken);
 
-    public Task<UserEngagementSnapshot?> DecrementSceneLikeAsync(int sceneId, CancellationToken cancellationToken = default)
-        => DecrementLikeAsync(AffinityHostType.Scene, sceneId, cancellationToken);
+    public Task<UserEngagementSnapshot?> DecrementVideoLikeAsync(int videoId, CancellationToken cancellationToken = default)
+        => DecrementLikeAsync(AffinityHostType.Video, videoId, cancellationToken);
 
-    public Task<UserEngagementSnapshot?> ResetSceneLikeAsync(int sceneId, CancellationToken cancellationToken = default)
-        => ResetLikeAsync(AffinityHostType.Scene, sceneId, cancellationToken);
+    public Task<UserEngagementSnapshot?> ResetVideoLikeAsync(int videoId, CancellationToken cancellationToken = default)
+        => ResetLikeAsync(AffinityHostType.Video, videoId, cancellationToken);
 
     public Task<UserEngagementSnapshot?> IncrementImageLikeAsync(int imageId, CancellationToken cancellationToken = default)
         => IncrementLikeAsync(AffinityHostType.Image, imageId, cancellationToken);
@@ -497,7 +497,7 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
             ? dto.ClipEndSec.Value - dto.ClipStartSec.Value
             : (double?)null;
         var completedByPosition = isFinalState
-            && ((hostType == InteractionHostType.Scene || hostType == InteractionHostType.Audio)
+            && ((hostType == InteractionHostType.Video || hostType == InteractionHostType.Audio)
                 && mediaDuration > 0
                 && dto.CurrentPositionSec >= mediaDuration * tracking.ViewCompletionRatio
                 || hostType == InteractionHostType.Segment
@@ -517,7 +517,7 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         {
             InteractionHostType.Image => session.TotalWatchedSec >= tracking.MinImageDetailViewSeconds,
             InteractionHostType.Text => session.TotalWatchedSec >= tracking.MinImageDetailViewSeconds,
-            InteractionHostType.Scene => session.TotalWatchedSec >= tracking.MinViewSeconds || completedByPosition,
+            InteractionHostType.Video => session.TotalWatchedSec >= tracking.MinViewSeconds || completedByPosition,
             InteractionHostType.Audio => session.TotalWatchedSec >= tracking.MinViewSeconds || completedByPosition,
             InteractionHostType.Segment => session.TotalWatchedSec >= tracking.MinViewSeconds || completedByPosition,
             _ => false,
@@ -538,7 +538,7 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
                 if (delta > 0d)
                     affinity.TotalConsumedSec = Math.Max(0d, affinity.TotalConsumedSec + delta);
 
-                if ((hostType == InteractionHostType.Scene || hostType == InteractionHostType.Audio) && dto.CurrentPositionSec >= 0)
+                if ((hostType == InteractionHostType.Video || hostType == InteractionHostType.Audio) && dto.CurrentPositionSec >= 0)
                     affinity.LastPositionSec = dto.CurrentPositionSec;
                 else if (hostType == InteractionHostType.Segment && dto.CurrentPositionSec >= 0)
                     affinity.LastPositionSec = Math.Max(0d, dto.CurrentPositionSec - (dto.ClipStartSec ?? 0d));
@@ -552,11 +552,11 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
                 if (!wasCountsAsView && session.CountsAsView)
                     affinity.ViewCount++;
 
-                // Update scene-level resume/duration cache
-                if (hostType == InteractionHostType.Scene)
+                // Update video-level resume/duration cache
+                if (hostType == InteractionHostType.Video)
                 {
-                    var scene = await db.Scenes.FirstOrDefaultAsync(sc => sc.Id == dto.HostId, cancellationToken);
-                    if (scene != null)
+                    var video = await db.Videos.FirstOrDefaultAsync(sc => sc.Id == dto.HostId, cancellationToken);
+                    if (video != null)
                     {
                     }
                 }
@@ -670,8 +670,8 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         static bool Assign(PlaybackSessionState val, out PlaybackSessionState p) { p = val; return true; }
     }
 
-    public async Task<UserEngagementSnapshot?> ResetSceneActivityAsync(int sceneId, CancellationToken cancellationToken = default)
-        => await ResetActivityAsync(AffinityHostType.Scene, sceneId, cancellationToken);
+    public async Task<UserEngagementSnapshot?> ResetVideoActivityAsync(int videoId, CancellationToken cancellationToken = default)
+        => await ResetActivityAsync(AffinityHostType.Video, videoId, cancellationToken);
 
     public async Task<UserEngagementSnapshot?> ResetActivityAsync(AffinityHostType hostType, int hostId, CancellationToken cancellationToken = default)
     {
@@ -696,10 +696,10 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         return (await GetSnapshotsAsync(hostType, [hostId], cancellationToken)).GetValueOrDefault(hostId) ?? EmptySnapshot;
     }
 
-    public async Task<UserEngagementSnapshot?> SetSceneRatingAsync(int sceneId, int? value, string aspect = "overall", CancellationToken cancellationToken = default)
+    public async Task<UserEngagementSnapshot?> SetVideoRatingAsync(int videoId, int? value, string aspect = "overall", CancellationToken cancellationToken = default)
     {
-        var scene = await db.Scenes.FirstOrDefaultAsync(item => item.Id == sceneId, cancellationToken);
-        if (scene is null)
+        var video = await db.Videos.FirstOrDefaultAsync(item => item.Id == videoId, cancellationToken);
+        if (video is null)
             return null;
 
         var normalizedAspect = NormalizeAspect(aspect);
@@ -708,7 +708,7 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         if (userId.HasValue)
         {
             var existing = await db.Ratings.FirstOrDefaultAsync(
-                rating => rating.UserId == userId.Value && rating.HostType == RatingHostType.Scene && rating.HostId == sceneId && rating.Aspect == normalizedAspect,
+                rating => rating.UserId == userId.Value && rating.HostType == RatingHostType.Video && rating.HostId == videoId && rating.Aspect == normalizedAspect,
                 cancellationToken);
 
             if (!value.HasValue)
@@ -721,8 +721,8 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
                 db.Ratings.Add(new Rating
                 {
                     UserId = userId.Value,
-                    HostType = RatingHostType.Scene,
-                    HostId = sceneId,
+                    HostType = RatingHostType.Video,
+                    HostId = videoId,
                     Aspect = normalizedAspect,
                     Value = Math.Clamp(value.Value, 0, 100),
                 });
@@ -734,13 +734,13 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         }
         await db.SaveChangesAsync(cancellationToken);
 
-        return await BuildSceneSnapshotAsync(sceneId, scene, null, cancellationToken);
+        return await BuildVideoSnapshotAsync(videoId, video, null, cancellationToken);
     }
 
-    public async Task<SceneHistoryDto?> GetSceneHistoryAsync(int sceneId, CancellationToken cancellationToken = default)
-        => await GetHistoryAsync(AffinityHostType.Scene, sceneId, cancellationToken);
+    public async Task<VideoHistoryDto?> GetVideoHistoryAsync(int videoId, CancellationToken cancellationToken = default)
+        => await GetHistoryAsync(AffinityHostType.Video, videoId, cancellationToken);
 
-    public async Task<SceneHistoryDto?> GetHistoryAsync(AffinityHostType hostType, int hostId, CancellationToken cancellationToken = default)
+    public async Task<VideoHistoryDto?> GetHistoryAsync(AffinityHostType hostType, int hostId, CancellationToken cancellationToken = default)
     {
         if (!await EntityExistsAsync(hostType, hostId, cancellationToken))
             return null;
@@ -750,16 +750,16 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         var userId = principalAccessor.Current?.UserId;
         if (!userId.HasValue)
         {
-            var playHistory = hostType == AffinityHostType.Scene
-                ? await db.Set<ScenePlayHistory>()
-                    .Where(history => history.SceneId == hostId)
+            var playHistory = hostType == AffinityHostType.Video
+                ? await db.Set<VideoPlayHistory>()
+                    .Where(history => history.VideoId == hostId)
                     .OrderByDescending(history => history.PlayedAt)
                     .Select(history => history.PlayedAt.ToString("o"))
                     .ToListAsync(cancellationToken)
                 : new List<string>();
-            var likeHistory = hostType == AffinityHostType.Scene
-                ? await db.Set<SceneLikeHistory>()
-                    .Where(history => history.SceneId == hostId)
+            var likeHistory = hostType == AffinityHostType.Video
+                ? await db.Set<VideoLikeHistory>()
+                    .Where(history => history.VideoId == hostId)
                     .OrderByDescending(history => history.OccurredAt)
                     .Select(history => history.OccurredAt.ToString("o"))
                     .ToListAsync(cancellationToken)
@@ -770,7 +770,7 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
                 .OrderByDescending(item => item.At, StringComparer.Ordinal)
                 .Select(item => item.Event)
                 .ToList();
-            return new SceneHistoryDto(playHistory, likeHistory, events);
+            return new VideoHistoryDto(playHistory, likeHistory, events);
         }
 
         var interactions = await db.Interactions
@@ -783,9 +783,9 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
             .OrderByDescending(session => session.StartedAt)
             .ToListAsync(cancellationToken);
 
-        var playHistoryForUser = hostType == AffinityHostType.Scene
-            ? await db.Set<ScenePlayHistory>()
-                .Where(history => history.SceneId == hostId)
+        var playHistoryForUser = hostType == AffinityHostType.Video
+            ? await db.Set<VideoPlayHistory>()
+                .Where(history => history.VideoId == hostId)
                 .OrderByDescending(history => history.PlayedAt)
                 .Select(history => history.PlayedAt.ToString("o"))
                 .ToListAsync(cancellationToken)
@@ -806,13 +806,13 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
             .ToList();
         var totalDistinctWatchedSec = ComputeMergedWatchedSec(allIntervals);
         var sessionsForUser = playbackSessions
-            .Select(ToScenePlaybackSessionDto)
+            .Select(ToVideoPlaybackSessionDto)
             .ToList();
-        return new SceneHistoryDto(playHistoryForUser, likeHistoryForUser, eventsForUser, allTimeWatchedIntervals, totalDistinctWatchedSec, sessionsForUser);
+        return new VideoHistoryDto(playHistoryForUser, likeHistoryForUser, eventsForUser, allTimeWatchedIntervals, totalDistinctWatchedSec, sessionsForUser);
     }
 
-    private Task<UserEntityAffinity?> GetOrCreateSceneAffinityAsync(int sceneId, CancellationToken cancellationToken, bool createIfMissing = true)
-        => GetOrCreateAffinityAsync(AffinityHostType.Scene, sceneId, cancellationToken, createIfMissing);
+    private Task<UserEntityAffinity?> GetOrCreateVideoAffinityAsync(int videoId, CancellationToken cancellationToken, bool createIfMissing = true)
+        => GetOrCreateAffinityAsync(AffinityHostType.Video, videoId, cancellationToken, createIfMissing);
 
     private async Task<UserEntityAffinity?> GetOrCreateAffinityAsync(AffinityHostType hostType, int hostId, CancellationToken cancellationToken, bool createIfMissing = true)
     {
@@ -887,7 +887,7 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
     {
         affinityHostType = hostType switch
         {
-            InteractionHostType.Scene => AffinityHostType.Scene,
+            InteractionHostType.Video => AffinityHostType.Video,
             InteractionHostType.Image => AffinityHostType.Image,
             InteractionHostType.Audio => AffinityHostType.Audio,
             InteractionHostType.Text => AffinityHostType.Text,
@@ -956,7 +956,7 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
 
     private static InteractionHostType ToInteractionHostType(AffinityHostType hostType) => hostType switch
     {
-        AffinityHostType.Scene => InteractionHostType.Scene,
+        AffinityHostType.Video => InteractionHostType.Video,
         AffinityHostType.Image => InteractionHostType.Image,
         AffinityHostType.Audio => InteractionHostType.Audio,
         AffinityHostType.Text => InteractionHostType.Text,
@@ -969,25 +969,25 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
         AffinityHostType.Group => InteractionHostType.Group,
         _ => throw new ArgumentOutOfRangeException(nameof(hostType), hostType, null),
     };
-    private async Task<UserEngagementSnapshot> BuildSceneSnapshotAsync(int sceneId, Scene scene, UserEntityAffinity? affinity, CancellationToken cancellationToken)
+    private async Task<UserEngagementSnapshot> BuildVideoSnapshotAsync(int videoId, Video video, UserEntityAffinity? affinity, CancellationToken cancellationToken)
     {
         var userId = principalAccessor.Current?.UserId;
         Rating? rating = null;
         if (userId.HasValue)
         {
             rating = await db.Ratings.FirstOrDefaultAsync(
-                item => item.UserId == userId.Value && item.HostType == RatingHostType.Scene && item.HostId == sceneId && item.Aspect == "overall",
+                item => item.UserId == userId.Value && item.HostType == RatingHostType.Video && item.HostId == videoId && item.Aspect == "overall",
                 cancellationToken);
         }
 
-        affinity ??= await GetOrCreateSceneAffinityAsync(sceneId, cancellationToken, createIfMissing: false);
+        affinity ??= await GetOrCreateVideoAffinityAsync(videoId, cancellationToken, createIfMissing: false);
         return ToSnapshot(affinity, rating);
     }
 
     private async Task<bool> EntityExistsAsync(AffinityHostType hostType, int hostId, CancellationToken cancellationToken)
         => hostType switch
         {
-            AffinityHostType.Scene => await db.Scenes.AnyAsync(scene => scene.Id == hostId, cancellationToken),
+            AffinityHostType.Video => await db.Videos.AnyAsync(video => video.Id == hostId, cancellationToken),
             AffinityHostType.Image => await db.Images.AnyAsync(image => image.Id == hostId, cancellationToken),
             AffinityHostType.Audio => await db.Audios.AnyAsync(audio => audio.Id == hostId, cancellationToken),
             AffinityHostType.Text => await db.TextDocuments.AnyAsync(text => text.Id == hostId, cancellationToken),
@@ -1004,7 +1004,7 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
     private async Task<int[]> GetVisibleEntityIdsAsync(AffinityHostType hostType, int[] hostIds, CancellationToken cancellationToken)
         => hostType switch
         {
-            AffinityHostType.Scene => await db.Scenes.Where(scene => hostIds.Contains(scene.Id)).Select(scene => scene.Id).ToArrayAsync(cancellationToken),
+            AffinityHostType.Video => await db.Videos.Where(video => hostIds.Contains(video.Id)).Select(video => video.Id).ToArrayAsync(cancellationToken),
             AffinityHostType.Image => await db.Images.Where(image => hostIds.Contains(image.Id)).Select(image => image.Id).ToArrayAsync(cancellationToken),
             AffinityHostType.Audio => await db.Audios.Where(audio => hostIds.Contains(audio.Id)).Select(audio => audio.Id).ToArrayAsync(cancellationToken),
             AffinityHostType.Text => await db.TextDocuments.Where(text => hostIds.Contains(text.Id)).Select(text => text.Id).ToArrayAsync(cancellationToken),
@@ -1021,7 +1021,7 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
     private async Task<bool> InteractionHostExistsAsync(InteractionHostType hostType, int hostId, CancellationToken cancellationToken)
         => hostType switch
         {
-            InteractionHostType.Scene => await db.Scenes.AnyAsync(scene => scene.Id == hostId, cancellationToken),
+            InteractionHostType.Video => await db.Videos.AnyAsync(video => video.Id == hostId, cancellationToken),
             InteractionHostType.Image => await db.Images.AnyAsync(image => image.Id == hostId, cancellationToken),
             InteractionHostType.Audio => await db.Audios.AnyAsync(audio => audio.Id == hostId, cancellationToken),
             InteractionHostType.Text => await db.TextDocuments.AnyAsync(text => text.Id == hostId, cancellationToken),
@@ -1057,7 +1057,7 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
     }
     private static RatingHostType ToRatingHostType(AffinityHostType hostType) => hostType switch
     {
-        AffinityHostType.Scene => RatingHostType.Scene,
+        AffinityHostType.Video => RatingHostType.Video,
         AffinityHostType.Image => RatingHostType.Image,
         AffinityHostType.Audio => RatingHostType.Audio,
         AffinityHostType.Text => RatingHostType.Text,
@@ -1095,7 +1095,7 @@ public sealed class UserEngagementService(CoveContext db, ICurrentPrincipalAcces
             interaction.At.ToString("o"),
             interaction.Meta == null ? null : interaction.Meta.RootElement.Clone());
 
-    private static ScenePlaybackSessionDto ToScenePlaybackSessionDto(PlaybackSession session)
+    private static VideoPlaybackSessionDto ToVideoPlaybackSessionDto(PlaybackSession session)
         => new(
             session.SessionId,
             session.StartedAt.ToString("o"),

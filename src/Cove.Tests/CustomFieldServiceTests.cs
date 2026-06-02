@@ -18,7 +18,7 @@ public class CustomFieldServiceTests
                 Key = "legacy_code",
                 Label = "Legacy Code",
                 Type = CustomFieldTypes.Text,
-                EntityTypes = [CustomFieldEntityTypes.Scene],
+                EntityTypes = [CustomFieldEntityTypes.Video],
                 DisplayOrder = 0,
             },
             new CustomFieldDefinition

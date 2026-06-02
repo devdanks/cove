@@ -15,7 +15,7 @@ namespace Cove.Api.Services;
 
 public class MetadataServerService
 {
-    private static readonly Regex LeadingSceneIndexRegex = new(@"^\s*(?:scene\s+)?(?:\[\s*\d+\s*\]|\(\s*\d+\s*\)|\d+)\s*(?:[-â€“â€”:._)\]]\s*)+", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex LeadingVideoIndexRegex = new(@"^\s*(?:video\s+)?(?:\[\s*\d+\s*\]|\(\s*\d+\s*\)|\d+)\s*(?:[-â€“â€”:._)\]]\s*)+", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     private static readonly Regex WhitespaceRegex = new(@"\s+", RegexOptions.Compiled);
 
     /// <summary>
@@ -142,8 +142,8 @@ fragment FingerprintFields on Fingerprint {
 }
 """;
 
-        private const string SceneFragment = """
-fragment SceneFields on Scene {
+        private const string VideoFragment = """
+fragment VideoFields on Scene {
     id
     title
     code
@@ -174,29 +174,29 @@ fragment SceneFields on Scene {
 }
 """ + StudioFragment + TagFragment + FingerprintFragment + PerformerFragment;
 
-        private const string SearchSceneQuery = """
-query SearchScene($term: String!) {
-    searchScene(term: $term) {
-        ... SceneFields
+        private const string SearchVideoQuery = """
+query SearchVideo($term: String!) {
+    searchVideo: searchScene(term: $term) {
+        ... VideoFields
     }
 }
-""" + SceneFragment;
+""" + VideoFragment;
 
-        private const string FindSceneByIdQuery = """
-query FindSceneByID($id: ID!) {
-    findScene(id: $id) {
-        ... SceneFields
+        private const string FindVideoByIdQuery = """
+query FindVideoByID($id: ID!) {
+    findVideo: findScene(id: $id) {
+        ... VideoFields
     }
 }
-""" + SceneFragment;
+""" + VideoFragment;
 
-        private const string FindScenesByFingerprintsQuery = """
-query FindScenesBySceneFingerprints($fingerprints: [[FingerprintQueryInput!]!]!) {
-    findScenesBySceneFingerprints(fingerprints: $fingerprints) {
-        ... SceneFields
+        private const string FindVideosByFingerprintsQuery = """
+query FindVideosByVideoFingerprints($fingerprints: [[FingerprintQueryInput!]!]!) {
+    findVideosByVideoFingerprints: findScenesBySceneFingerprints(fingerprints: $fingerprints) {
+        ... VideoFields
     }
 }
-""" + SceneFragment;
+""" + VideoFragment;
 
     private const string MeQuery = """
 query Me {
@@ -210,7 +210,7 @@ query Me {
     private readonly CoveConfiguration _config;
     private readonly CoveContext _db;
     private readonly IBlobService _blobService;
-    private readonly ISceneCoverService _sceneCoverService;
+    private readonly IVideoCoverService _videoCoverService;
     private readonly ITagProvenanceService _tagProvenanceService;
     private readonly IFieldProvenanceService? _fieldProvenanceService;
     private readonly ILogger<MetadataServerService> _logger;
@@ -220,13 +220,13 @@ query Me {
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
-    public MetadataServerService(HttpClient httpClient, CoveConfiguration config, CoveContext db, IBlobService blobService, ISceneCoverService sceneCoverService, ITagProvenanceService tagProvenanceService, ILogger<MetadataServerService> logger, IFieldProvenanceService? fieldProvenanceService = null)
+    public MetadataServerService(HttpClient httpClient, CoveConfiguration config, CoveContext db, IBlobService blobService, IVideoCoverService videoCoverService, ITagProvenanceService tagProvenanceService, ILogger<MetadataServerService> logger, IFieldProvenanceService? fieldProvenanceService = null)
     {
         _httpClient = httpClient;
         _config = config;
         _db = db;
         _blobService = blobService;
-        _sceneCoverService = sceneCoverService;
+        _videoCoverService = videoCoverService;
         _tagProvenanceService = tagProvenanceService;
         _fieldProvenanceService = fieldProvenanceService;
         _logger = logger;
@@ -1000,15 +1000,15 @@ query Me {
         List<string> Aliases
     );
 
-    public async Task<IReadOnlyList<MetadataServerSceneMatchDto>> SearchScenesAsync(Scene scene, string? term, string? endpoint, CancellationToken ct)
+    public async Task<IReadOnlyList<MetadataServerVideoMatchDto>> SearchVideosAsync(Video video, string? term, string? endpoint, CancellationToken ct)
     {
         var boxes = ResolveBoxes(endpoint);
         var strictEndpoint = !string.IsNullOrWhiteSpace(endpoint);
-        var results = new List<MetadataServerSceneMatchDto>();
-        var sceneTitle = term ?? scene.Title;
-        var sceneDuration = GetSceneDurationSeconds(scene);
-        var localFingerprints = scene.Files.SelectMany(f => f.Fingerprints).ToList();
-        var searchTerms = BuildSceneSearchTerms(string.IsNullOrWhiteSpace(term) ? scene.Title : term);
+        var results = new List<MetadataServerVideoMatchDto>();
+        var videoTitle = term ?? video.Title;
+        var videoDuration = GetVideoDurationSeconds(video);
+        var localFingerprints = video.Files.SelectMany(f => f.Fingerprints).ToList();
+        var searchTerms = BuildVideoSearchTerms(string.IsNullOrWhiteSpace(term) ? video.Title : term);
 
         foreach (var box in boxes)
         {
@@ -1016,11 +1016,11 @@ query Me {
             {
                 if (string.IsNullOrWhiteSpace(term))
                 {
-                    var existingRemoteId = scene.RemoteIds.FirstOrDefault(remoteId => string.Equals(remoteId.Endpoint, box.Endpoint, StringComparison.OrdinalIgnoreCase));
+                    var existingRemoteId = video.RemoteIds.FirstOrDefault(remoteId => string.Equals(remoteId.Endpoint, box.Endpoint, StringComparison.OrdinalIgnoreCase));
                     var existingMatchAdded = false;
                     if (existingRemoteId != null)
                     {
-                        var existing = await GetSceneMatchAsync(box.Endpoint, existingRemoteId.RemoteId, localFingerprints, ct);
+                        var existing = await GetVideoMatchAsync(box.Endpoint, existingRemoteId.RemoteId, localFingerprints, ct);
                         if (existing != null)
                         {
                             results.Add(existing);
@@ -1028,29 +1028,29 @@ query Me {
                         }
                     }
 
-                    var fingerprintQueries = BuildFingerprintQueries(scene);
+                    var fingerprintQueries = BuildFingerprintQueries(video);
                     if (fingerprintQueries.Count > 0)
                     {
                         var fingerprintCount = fingerprintQueries.Sum(batch => batch.Count);
-                        _logger.LogDebug("Querying metadata-server {Endpoint} with {BatchCount} fingerprint batches ({FingerprintCount} fingerprints) for scene {SceneId}",
-                            box.Endpoint, fingerprintQueries.Count, fingerprintCount, scene.Id);
+                        _logger.LogDebug("Querying metadata-server {Endpoint} with {BatchCount} fingerprint batches ({FingerprintCount} fingerprints) for video {VideoId}",
+                            box.Endpoint, fingerprintQueries.Count, fingerprintCount, video.Id);
 
-                        var fingerprintResponse = await SendQueryAsync<MetadataServerFindScenesByFingerprintsResponse>(
+                        var fingerprintResponse = await SendQueryAsync<MetadataServerFindVideosByFingerprintsResponse>(
                             box,
-                            FindScenesByFingerprintsQuery,
+                            FindVideosByFingerprintsQuery,
                             new { fingerprints = fingerprintQueries },
                             ct);
 
-                        var remoteMatches = fingerprintResponse.FindScenesBySceneFingerprints
+                        var remoteMatches = fingerprintResponse.FindVideosByVideoFingerprints
                             .SelectMany(batch => batch)
                             .GroupBy(remote => remote.Id, StringComparer.OrdinalIgnoreCase)
                             .Select(group => group.First())
                             .ToList();
-                        _logger.LogDebug("Metadata server returned {Count} unique fingerprint matches for scene {SceneId}", remoteMatches.Count, scene.Id);
+                        _logger.LogDebug("Metadata server returned {Count} unique fingerprint matches for video {VideoId}", remoteMatches.Count, video.Id);
 
                         foreach (var remote in remoteMatches)
                         {
-                            results.Add(await ToSceneMatchDtoAsync(box, remote, localFingerprints, ct));
+                            results.Add(await ToVideoMatchDtoAsync(box, remote, localFingerprints, ct));
                         }
                         if (remoteMatches.Count > 0)
                             continue;
@@ -1065,50 +1065,50 @@ query Me {
 
                 foreach (var searchTerm in searchTerms)
                 {
-                    var searchResponse = await SendQueryAsync<MetadataServerSearchSceneResponse>(box, SearchSceneQuery, new { term = searchTerm }, ct);
-                    foreach (var remote in searchResponse.SearchScene)
+                    var searchResponse = await SendQueryAsync<MetadataServerSearchVideoResponse>(box, SearchVideoQuery, new { term = searchTerm }, ct);
+                    foreach (var remote in searchResponse.SearchVideo)
                     {
-                        results.Add(await ToSceneMatchDtoAsync(box, remote, localFingerprints, ct));
+                        results.Add(await ToVideoMatchDtoAsync(box, remote, localFingerprints, ct));
                     }
 
-                    if (searchResponse.SearchScene.Count > 0)
+                    if (searchResponse.SearchVideo.Count > 0)
                         break;
                 }
             }
             catch (Exception ex) when (!strictEndpoint)
             {
-                _logger.LogWarning(ex, "Skipping metadata-server scene search for {Endpoint}", box.Endpoint);
+                _logger.LogWarning(ex, "Skipping metadata-server video search for {Endpoint}", box.Endpoint);
             }
         }
 
         return results
             .GroupBy(match => $"{match.Endpoint}::{match.Id}", StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
-            .OrderByDescending(match => string.Equals(match.Title, sceneTitle, StringComparison.OrdinalIgnoreCase))
-            .ThenBy(match => GetDurationDifference(sceneDuration, match.Duration))
+            .OrderByDescending(match => string.Equals(match.Title, videoTitle, StringComparison.OrdinalIgnoreCase))
+            .ThenBy(match => GetDurationDifference(videoDuration, match.Duration))
             .ThenBy(match => match.Title ?? string.Empty, StringComparer.OrdinalIgnoreCase)
             .ThenBy(match => match.MetadataServerName, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
 
-    public async Task<MetadataServerSceneMatchDto?> GetSceneMatchAsync(string endpoint, string sceneId, CancellationToken ct)
-        => await GetSceneMatchAsync(endpoint, sceneId, null, ct);
+    public async Task<MetadataServerVideoMatchDto?> GetVideoMatchAsync(string endpoint, string videoId, CancellationToken ct)
+        => await GetVideoMatchAsync(endpoint, videoId, null, ct);
 
-    private async Task<MetadataServerSceneMatchDto?> GetSceneMatchAsync(string endpoint, string sceneId, IReadOnlyCollection<FileFingerprint>? localFingerprints, CancellationToken ct)
+    private async Task<MetadataServerVideoMatchDto?> GetVideoMatchAsync(string endpoint, string videoId, IReadOnlyCollection<FileFingerprint>? localFingerprints, CancellationToken ct)
     {
         var box = ResolveBox(endpoint);
-        var scene = await GetRemoteSceneAsync(box, sceneId, ct);
-        return scene == null ? null : await ToSceneMatchDtoAsync(box, scene, localFingerprints, ct);
+        var video = await GetRemoteVideoAsync(box, videoId, ct);
+        return video == null ? null : await ToVideoMatchDtoAsync(box, video, localFingerprints, ct);
     }
 
-    public async Task<bool> MergeSceneAsync(Scene scene, string endpoint, string sceneId, MetadataServerSceneImportRequestDto? importConfig, CancellationToken ct)
+    public async Task<bool> MergeVideoAsync(Video video, string endpoint, string videoId, MetadataServerVideoImportRequestDto? importConfig, CancellationToken ct)
     {
         var box = ResolveBox(endpoint);
-        var remote = await GetRemoteSceneAsync(box, sceneId, ct);
+        var remote = await GetRemoteVideoAsync(box, videoId, ct);
         if (remote == null)
             return false;
 
-        await ApplyRemoteSceneAsync(scene, box.Endpoint, remote, importConfig, ct);
+        await ApplyRemoteVideoAsync(video, box.Endpoint, remote, importConfig, ct);
         return true;
     }
 
@@ -1118,13 +1118,13 @@ query Me {
         return response.FindPerformer;
     }
 
-    private async Task<MetadataServerRemoteScene?> GetRemoteSceneAsync(MetadataServerInstance box, string sceneId, CancellationToken ct)
+    private async Task<MetadataServerRemoteVideo?> GetRemoteVideoAsync(MetadataServerInstance box, string videoId, CancellationToken ct)
     {
-        var response = await SendQueryAsync<MetadataServerFindSceneResponse>(box, FindSceneByIdQuery, new { id = sceneId }, ct);
-        return response.FindScene;
+        var response = await SendQueryAsync<MetadataServerFindVideoResponse>(box, FindVideoByIdQuery, new { id = videoId }, ct);
+        return response.FindVideo;
     }
 
-    private async Task ApplyRemoteSceneAsync(Scene scene, string endpoint, MetadataServerRemoteScene remote, MetadataServerSceneImportRequestDto? importConfig, CancellationToken ct)
+    private async Task ApplyRemoteVideoAsync(Video video, string endpoint, MetadataServerRemoteVideo remote, MetadataServerVideoImportRequestDto? importConfig, CancellationToken ct)
     {
         var setCoverImage = importConfig?.SetCoverImage ?? true;
         var setTags = importConfig?.SetTags ?? true;
@@ -1136,7 +1136,7 @@ query Me {
         var markOrganized = importConfig?.MarkOrganized ?? false;
         var excludedTagNames = importConfig?.ExcludedTagNames?.ToHashSet(StringComparer.OrdinalIgnoreCase);
         var excludedPerformerNames = importConfig?.ExcludedPerformerNames?.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var studioOverride = MatchSceneEntityOverride(importConfig?.StudioOverride, remote.Studio?.Id, remote.Studio?.Name);
+        var studioOverride = MatchVideoEntityOverride(importConfig?.StudioOverride, remote.Studio?.Id, remote.Studio?.Name);
         var performerOverrides = importConfig?.PerformerOverrides;
         var tagOverrides = importConfig?.TagOverrides;
         var fieldStrategies = importConfig?.FieldStrategies;
@@ -1146,40 +1146,40 @@ query Me {
         var fieldProvenance = new Dictionary<string, object?>();
         var sourceKey = BuildMetadataSourceKey(endpoint);
 
-        ApplyMetadataStringField(fieldProvenance, "title", remote.Title, GetMetadataFieldStrategy(fieldStrategies, "title", defaultScalarStrategy), value => scene.Title = value, scene.Title);
-        ApplyMetadataStringField(fieldProvenance, "code", remote.Code, GetMetadataFieldStrategy(fieldStrategies, "code", defaultScalarStrategy), value => scene.Code = value, scene.Code);
-        ApplyMetadataStringField(fieldProvenance, "details", remote.Details, GetMetadataFieldStrategy(fieldStrategies, "details", defaultScalarStrategy), value => scene.Details = value, scene.Details);
-        ApplyMetadataStringField(fieldProvenance, "director", remote.Director, GetMetadataFieldStrategy(fieldStrategies, "director", defaultScalarStrategy), value => scene.Director = value, scene.Director);
+        ApplyMetadataStringField(fieldProvenance, "title", remote.Title, GetMetadataFieldStrategy(fieldStrategies, "title", defaultScalarStrategy), value => video.Title = value, video.Title);
+        ApplyMetadataStringField(fieldProvenance, "code", remote.Code, GetMetadataFieldStrategy(fieldStrategies, "code", defaultScalarStrategy), value => video.Code = value, video.Code);
+        ApplyMetadataStringField(fieldProvenance, "details", remote.Details, GetMetadataFieldStrategy(fieldStrategies, "details", defaultScalarStrategy), value => video.Details = value, video.Details);
+        ApplyMetadataStringField(fieldProvenance, "director", remote.Director, GetMetadataFieldStrategy(fieldStrategies, "director", defaultScalarStrategy), value => video.Director = value, video.Director);
         var parsedRemoteDate = ParseDate(remote.Date);
         var dateStrategy = GetMetadataFieldStrategy(fieldStrategies, "date", defaultScalarStrategy);
-        var mergedDate = MergeDateField(scene.Date, parsedRemoteDate, dateStrategy);
+        var mergedDate = MergeDateField(video.Date, parsedRemoteDate, dateStrategy);
         if (mergedDate.HasValue)
         {
-            scene.Date = mergedDate;
+            video.Date = mergedDate;
             if (parsedRemoteDate.HasValue && dateStrategy != MetadataFieldStrategy.Ignore)
                 fieldProvenance["date"] = mergedDate.Value.ToString("yyyy-MM-dd");
         }
-        if (markOrganized) scene.Organized = true;
+        if (markOrganized) video.Organized = true;
 
         var urlsStrategy = GetMetadataFieldStrategy(fieldStrategies, "urls", MetadataFieldStrategy.Merge);
         if (urlsStrategy != MetadataFieldStrategy.Ignore)
         {
             if (urlsStrategy == MetadataFieldStrategy.Overwrite)
-                scene.Urls.Clear();
+                video.Urls.Clear();
             var remoteUrls = remote.Urls.Select(url => url.Url).Where(url => !string.IsNullOrWhiteSpace(url)).Select(url => url.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            MergeSceneUrls(scene, remoteUrls);
+            MergeVideoUrls(video, remoteUrls);
             if (remoteUrls.Count > 0)
                 fieldProvenance["urls"] = remoteUrls;
         }
 
         var studioStrategy = GetMetadataFieldStrategy(fieldStrategies, "studio", fieldStrategies == null ? MetadataFieldStrategy.Overwrite : MetadataFieldStrategy.Merge);
-        if (setStudio && studioStrategy != MetadataFieldStrategy.Ignore && remote.Studio != null && (studioStrategy == MetadataFieldStrategy.Overwrite || scene.StudioId == null))
+        if (setStudio && studioStrategy != MetadataFieldStrategy.Ignore && remote.Studio != null && (studioStrategy == MetadataFieldStrategy.Overwrite || video.StudioId == null))
         {
-            var studio = await ResolveSceneStudioAsync(remote.Studio, endpoint, studioOverride, ct, allowCreate: !onlyExistingStudio);
+            var studio = await ResolveVideoStudioAsync(remote.Studio, endpoint, studioOverride, ct, allowCreate: !onlyExistingStudio);
             if (studio != null)
             {
-                scene.Studio = studio;
-                scene.StudioId = studio.Id == 0 ? null : studio.Id;
+                video.Studio = studio;
+                video.StudioId = studio.Id == 0 ? null : studio.Id;
                 fieldProvenance["studio"] = studio.Name;
             }
         }
@@ -1188,30 +1188,30 @@ query Me {
         if (setTags && tagsStrategy != MetadataFieldStrategy.Ignore)
         {
             if (tagsStrategy == MetadataFieldStrategy.Overwrite)
-                scene.SceneTags.Clear();
+                video.VideoTags.Clear();
 
             var appliedTagNames = new List<string>();
 
             foreach (var remoteTag in remote.Tags)
             {
-                var tagOverride = MatchSceneEntityOverride(tagOverrides, remoteTag.Id, remoteTag.Name);
-                if (GetSceneEntityOverrideAction(tagOverride) == SceneEntityOverrideAction.Skip)
+                var tagOverride = MatchVideoEntityOverride(tagOverrides, remoteTag.Id, remoteTag.Name);
+                if (GetVideoEntityOverrideAction(tagOverride) == VideoEntityOverrideAction.Skip)
                     continue;
                 if (tagOverride == null && excludedTagNames != null && excludedTagNames.Contains(remoteTag.Name))
                     continue;
-                var tag = await ResolveSceneTagAsync(remoteTag, endpoint, tagOverride, ct, allowCreate: !onlyExistingTags);
+                var tag = await ResolveVideoTagAsync(remoteTag, endpoint, tagOverride, ct, allowCreate: !onlyExistingTags);
                 if (tag == null)
                     continue;
                 appliedTagNames.Add(tag.Name);
                 var alreadyLinkedTag = tag.Id == 0
-                    ? scene.SceneTags.Any(link => ReferenceEquals(link.Tag, tag))
-                    : scene.SceneTags.Any(link => link.TagId == tag.Id);
+                    ? video.VideoTags.Any(link => ReferenceEquals(link.Tag, tag))
+                    : video.VideoTags.Any(link => link.TagId == tag.Id);
                 if (!alreadyLinkedTag)
                 {
-                    scene.SceneTags.Add(new SceneTag { SceneId = scene.Id, Tag = tag });
+                    video.VideoTags.Add(new VideoTag { VideoId = video.Id, Tag = tag });
                 }
 
-                await _tagProvenanceService.RecordAsync(AffinityHostType.Scene, scene.Id, tag, sourceKey, sourceRunId: endpoint, cancellationToken: ct);
+                await _tagProvenanceService.RecordAsync(AffinityHostType.Video, video.Id, tag, sourceKey, sourceRunId: endpoint, cancellationToken: ct);
             }
 
             if (appliedTagNames.Count > 0)
@@ -1222,7 +1222,7 @@ query Me {
         if (setPerformers && performersStrategy != MetadataFieldStrategy.Ignore)
         {
             if (performersStrategy == MetadataFieldStrategy.Overwrite)
-                scene.ScenePerformers.Clear();
+                video.VideoPerformers.Clear();
 
             var appliedPerformerNames = new List<string>();
 
@@ -1233,21 +1233,21 @@ query Me {
                 if (!IsPerformerGenderAllowed(remotePerformer.Gender, allowedPerformerGenders))
                     continue;
 
-                var performerOverride = MatchSceneEntityOverride(performerOverrides, remotePerformer.Id, remotePerformer.Name);
-                if (GetSceneEntityOverrideAction(performerOverride) == SceneEntityOverrideAction.Skip)
+                var performerOverride = MatchVideoEntityOverride(performerOverrides, remotePerformer.Id, remotePerformer.Name);
+                if (GetVideoEntityOverrideAction(performerOverride) == VideoEntityOverrideAction.Skip)
                     continue;
                 if (performerOverride == null && excludedPerformerNames != null && remotePerformer.Name != null && excludedPerformerNames.Contains(remotePerformer.Name))
                     continue;
-                var performer = await ResolveScenePerformerAsync(remotePerformer, endpoint, performerOverride, ct, allowCreate: !onlyExistingPerformers);
+                var performer = await ResolveVideoPerformerAsync(remotePerformer, endpoint, performerOverride, ct, allowCreate: !onlyExistingPerformers);
                 if (performer == null)
                     continue;
                 appliedPerformerNames.Add(performer.Name);
                 var alreadyLinkedPerformer = performer.Id == 0
-                    ? scene.ScenePerformers.Any(link => ReferenceEquals(link.Performer, performer))
-                    : scene.ScenePerformers.Any(link => link.PerformerId == performer.Id);
+                    ? video.VideoPerformers.Any(link => ReferenceEquals(link.Performer, performer))
+                    : video.VideoPerformers.Any(link => link.PerformerId == performer.Id);
                 if (!alreadyLinkedPerformer)
                 {
-                    scene.ScenePerformers.Add(new ScenePerformer { SceneId = scene.Id, Performer = performer });
+                    video.VideoPerformers.Add(new VideoPerformer { VideoId = video.Id, Performer = performer });
                 }
             }
 
@@ -1255,17 +1255,17 @@ query Me {
                 fieldProvenance["performers"] = appliedPerformerNames.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         }
 
-        // Download scene cover image
+        // Download video cover image
         if (setCoverImage && remote.Images.Count > 0)
         {
-            await _sceneCoverService.TryApplyRemoteCoverAsync(scene, remote.Images[0].Url, ct);
+            await _videoCoverService.TryApplyRemoteCoverAsync(video, remote.Images[0].Url, ct);
             fieldProvenance["image_url"] = remote.Images[0].Url;
         }
 
-        var remoteId = scene.RemoteIds.FirstOrDefault(id => string.Equals(id.Endpoint, endpoint, StringComparison.OrdinalIgnoreCase));
+        var remoteId = video.RemoteIds.FirstOrDefault(id => string.Equals(id.Endpoint, endpoint, StringComparison.OrdinalIgnoreCase));
         if (remoteId == null)
         {
-            scene.RemoteIds.Add(new SceneRemoteId { Endpoint = endpoint, RemoteId = remote.Id, SceneId = scene.Id });
+            video.RemoteIds.Add(new VideoRemoteId { Endpoint = endpoint, RemoteId = remote.Id, VideoId = video.Id });
         }
         else
         {
@@ -1274,7 +1274,7 @@ query Me {
         fieldProvenance["remote_ids"] = new[] { new { endpoint, remoteId = remote.Id } };
 
         if (fieldProvenance.Count > 0 && _fieldProvenanceService != null)
-            await _fieldProvenanceService.RecordManyAsync(AffinityHostType.Scene, scene.Id, fieldProvenance, sourceKey, sourceRunId: endpoint, cancellationToken: ct);
+            await _fieldProvenanceService.RecordManyAsync(AffinityHostType.Video, video.Id, fieldProvenance, sourceKey, sourceRunId: endpoint, cancellationToken: ct);
     }
 
     // ===== Submissions =====
@@ -1285,9 +1285,9 @@ query Me {
         }
         """;
 
-    private const string SubmitSceneDraftMutation = """
-        mutation SubmitSceneDraft($input: SceneDraftInput!) {
-          submitSceneDraft(input: $input) { id }
+    private const string SubmitVideoDraftMutation = """
+        mutation SubmitVideoDraft($input: VideoDraftInput!) {
+          submitVideoDraft(input: $input) { id }
         }
         """;
 
@@ -1309,16 +1309,16 @@ query Me {
                 }
                 """;
 
-    public async Task SubmitFingerprintsAsync(Scene scene, string endpoint, CancellationToken ct)
+    public async Task SubmitFingerprintsAsync(Video video, string endpoint, CancellationToken ct)
     {
         var box = ResolveBox(endpoint);
 
-        var sceneRemoteId = scene.RemoteIds.FirstOrDefault(id =>
+        var videoRemoteId = video.RemoteIds.FirstOrDefault(id =>
             EndpointsMatch(id.Endpoint, endpoint));
-        if (sceneRemoteId == null)
-            throw new InvalidOperationException("Scene does not have a remote ID for this endpoint");
+        if (videoRemoteId == null)
+            throw new InvalidOperationException("Video does not have a remote ID for this endpoint");
 
-        foreach (var file in scene.Files)
+        foreach (var file in video.Files)
         {
             foreach (var fingerprint in file.Fingerprints)
             {
@@ -1333,7 +1333,7 @@ query Me {
 
                 var input = new
                 {
-                    scene_id = sceneRemoteId.RemoteId,
+                    video_id = videoRemoteId.RemoteId,
                     fingerprint = new
                     {
                         hash = algorithm == "OSHASH" ? NormalizeOshash(fingerprint.Value) : fingerprint.Value,
@@ -1347,14 +1347,14 @@ query Me {
         }
     }
 
-    public async Task<string?> SubmitSceneDraftAsync(Scene scene, string endpoint, CancellationToken ct)
+    public async Task<string?> SubmitVideoDraftAsync(Video video, string endpoint, CancellationToken ct)
     {
         var box = ResolveBox(endpoint);
 
-        var sceneRemoteId = scene.RemoteIds.FirstOrDefault(id =>
+        var videoRemoteId = video.RemoteIds.FirstOrDefault(id =>
             EndpointsMatch(id.Endpoint, endpoint));
 
-        var fingerprints = scene.Files
+        var fingerprints = video.Files
             .SelectMany(f => f.Fingerprints.Select(fp => new { fp, file = f }))
             .Where(x => x.fp.Type is "md5" or "oshash" or "phash")
             .Select(x => new
@@ -1365,7 +1365,7 @@ query Me {
             })
             .ToList();
 
-        var performers = scene.ScenePerformers
+        var performers = video.VideoPerformers
             .Where(sp => sp.Performer != null)
             .Select(sp =>
             {
@@ -1375,7 +1375,7 @@ query Me {
             })
             .ToList();
 
-        var tags = scene.SceneTags
+        var tags = video.VideoTags
             .Where(st => st.Tag != null)
             .Select(st =>
             {
@@ -1386,30 +1386,30 @@ query Me {
             .ToList();
 
         object? studio = null;
-        if (scene.Studio != null)
+        if (video.Studio != null)
         {
-            var studioRemoteId = scene.Studio.RemoteIds
+            var studioRemoteId = video.Studio.RemoteIds
                 .FirstOrDefault(id => EndpointsMatch(id.Endpoint, endpoint));
-            studio = new { name = scene.Studio.Name, id = studioRemoteId?.RemoteId };
+            studio = new { name = video.Studio.Name, id = studioRemoteId?.RemoteId };
         }
 
         var input = new
         {
-            id = sceneRemoteId?.RemoteId,
-            title = scene.Title,
-            code = scene.Code,
-            details = scene.Details,
-            director = scene.Director,
-            urls = scene.Urls.Select(u => u.Url).ToList(),
-            date = scene.Date?.ToString("yyyy-MM-dd"),
+            id = videoRemoteId?.RemoteId,
+            title = video.Title,
+            code = video.Code,
+            details = video.Details,
+            director = video.Director,
+            urls = video.Urls.Select(u => u.Url).ToList(),
+            date = video.Date?.ToString("yyyy-MM-dd"),
             studio,
             performers,
             tags,
             fingerprints,
         };
 
-        var response = await SendQueryAsync<MetadataServerDraftSubmissionResponse>(box, SubmitSceneDraftMutation, new { input }, ct);
-        return response.SubmitSceneDraft?.Id;
+        var response = await SendQueryAsync<MetadataServerDraftSubmissionResponse>(box, SubmitVideoDraftMutation, new { input }, ct);
+        return response.SubmitVideoDraft?.Id;
     }
 
     public async Task<string?> SubmitPerformerDraftAsync(Performer performer, string endpoint, CancellationToken ct)
@@ -1494,63 +1494,63 @@ query Me {
     }
 
     private sealed record MetadataServerDraftSubmissionResponse(
-        MetadataServerDraftIdResult? SubmitSceneDraft = null,
+        MetadataServerDraftIdResult? SubmitVideoDraft = null,
         MetadataServerDraftIdResult? SubmitPerformerDraft = null,
         MetadataServerDraftIdResult? SubmitStudioDraft = null,
         MetadataServerDraftIdResult? SubmitTagDraft = null
     );
     private sealed record MetadataServerDraftIdResult(string? Id);
 
-    private async Task<Performer?> ResolveScenePerformerAsync(
+    private async Task<Performer?> ResolveVideoPerformerAsync(
         MetadataServerRemotePerformer remote,
         string endpoint,
-        MetadataServerSceneEntityOverrideDto? entityOverride,
+        MetadataServerVideoEntityOverrideDto? entityOverride,
         CancellationToken ct,
         bool allowCreate)
     {
-        return GetSceneEntityOverrideAction(entityOverride) switch
+        return GetVideoEntityOverrideAction(entityOverride) switch
         {
-            SceneEntityOverrideAction.Skip => null,
-            SceneEntityOverrideAction.Existing when entityOverride?.LocalId is int localId => await _db.Performers.FirstOrDefaultAsync(performer => performer.Id == localId, ct),
-            SceneEntityOverrideAction.Create => await FindOrCreatePerformerAsync(remote, endpoint, ct, allowCreate: true),
+            VideoEntityOverrideAction.Skip => null,
+            VideoEntityOverrideAction.Existing when entityOverride?.LocalId is int localId => await _db.Performers.FirstOrDefaultAsync(performer => performer.Id == localId, ct),
+            VideoEntityOverrideAction.Create => await FindOrCreatePerformerAsync(remote, endpoint, ct, allowCreate: true),
             _ => await FindOrCreatePerformerAsync(remote, endpoint, ct, allowCreate: allowCreate),
         };
     }
 
-    private async Task<Studio?> ResolveSceneStudioAsync(
+    private async Task<Studio?> ResolveVideoStudioAsync(
         MetadataServerRemoteStudio remote,
         string endpoint,
-        MetadataServerSceneEntityOverrideDto? entityOverride,
+        MetadataServerVideoEntityOverrideDto? entityOverride,
         CancellationToken ct,
         bool allowCreate)
     {
-        return GetSceneEntityOverrideAction(entityOverride) switch
+        return GetVideoEntityOverrideAction(entityOverride) switch
         {
-            SceneEntityOverrideAction.Skip => null,
-            SceneEntityOverrideAction.Existing when entityOverride?.LocalId is int localId => await _db.Studios.FirstOrDefaultAsync(studio => studio.Id == localId, ct),
-            SceneEntityOverrideAction.Create => await FindOrCreateStudioAsync(remote, endpoint, ct, allowCreate: true),
+            VideoEntityOverrideAction.Skip => null,
+            VideoEntityOverrideAction.Existing when entityOverride?.LocalId is int localId => await _db.Studios.FirstOrDefaultAsync(studio => studio.Id == localId, ct),
+            VideoEntityOverrideAction.Create => await FindOrCreateStudioAsync(remote, endpoint, ct, allowCreate: true),
             _ => await FindOrCreateStudioAsync(remote, endpoint, ct, allowCreate: allowCreate),
         };
     }
 
-    private async Task<Tag?> ResolveSceneTagAsync(
+    private async Task<Tag?> ResolveVideoTagAsync(
         MetadataServerRemoteTag remote,
         string endpoint,
-        MetadataServerSceneEntityOverrideDto? entityOverride,
+        MetadataServerVideoEntityOverrideDto? entityOverride,
         CancellationToken ct,
         bool allowCreate)
     {
-        return GetSceneEntityOverrideAction(entityOverride) switch
+        return GetVideoEntityOverrideAction(entityOverride) switch
         {
-            SceneEntityOverrideAction.Skip => null,
-            SceneEntityOverrideAction.Existing when entityOverride?.LocalId is int localId => await _db.Tags.FirstOrDefaultAsync(tag => tag.Id == localId, ct),
-            SceneEntityOverrideAction.Create => await FindOrCreateTagAsync(remote, endpoint, ct, allowCreate: true),
+            VideoEntityOverrideAction.Skip => null,
+            VideoEntityOverrideAction.Existing when entityOverride?.LocalId is int localId => await _db.Tags.FirstOrDefaultAsync(tag => tag.Id == localId, ct),
+            VideoEntityOverrideAction.Create => await FindOrCreateTagAsync(remote, endpoint, ct, allowCreate: true),
             _ => await FindOrCreateTagAsync(remote, endpoint, ct, allowCreate: allowCreate),
         };
     }
 
-    private static MetadataServerSceneEntityOverrideDto? MatchSceneEntityOverride(
-        IEnumerable<MetadataServerSceneEntityOverrideDto>? overrides,
+    private static MetadataServerVideoEntityOverrideDto? MatchVideoEntityOverride(
+        IEnumerable<MetadataServerVideoEntityOverrideDto>? overrides,
         string? remoteId,
         string? name)
     {
@@ -1562,29 +1562,29 @@ query Me {
             (!string.IsNullOrWhiteSpace(name) && string.Equals(entityOverride.Name, name, StringComparison.OrdinalIgnoreCase)));
     }
 
-    private static MetadataServerSceneEntityOverrideDto? MatchSceneEntityOverride(
-        MetadataServerSceneEntityOverrideDto? entityOverride,
+    private static MetadataServerVideoEntityOverrideDto? MatchVideoEntityOverride(
+        MetadataServerVideoEntityOverrideDto? entityOverride,
         string? remoteId,
         string? name)
     {
         if (entityOverride == null)
             return null;
 
-        return MatchSceneEntityOverride(new[] { entityOverride }, remoteId, name);
+        return MatchVideoEntityOverride(new[] { entityOverride }, remoteId, name);
     }
 
-    private static SceneEntityOverrideAction GetSceneEntityOverrideAction(MetadataServerSceneEntityOverrideDto? entityOverride)
+    private static VideoEntityOverrideAction GetVideoEntityOverrideAction(MetadataServerVideoEntityOverrideDto? entityOverride)
     {
         return entityOverride?.Action.Trim().ToLowerInvariant() switch
         {
-            "skip" => SceneEntityOverrideAction.Skip,
-            "create" => SceneEntityOverrideAction.Create,
-            "existing" => SceneEntityOverrideAction.Existing,
-            _ => SceneEntityOverrideAction.Auto,
+            "skip" => VideoEntityOverrideAction.Skip,
+            "create" => VideoEntityOverrideAction.Create,
+            "existing" => VideoEntityOverrideAction.Existing,
+            _ => VideoEntityOverrideAction.Auto,
         };
     }
 
-    private enum SceneEntityOverrideAction
+    private enum VideoEntityOverrideAction
     {
         Auto,
         Skip,
@@ -1953,9 +1953,9 @@ query Me {
         }
     }
 
-    private static void MergeSceneUrls(Scene scene, IEnumerable<string> urls)
+    private static void MergeVideoUrls(Video video, IEnumerable<string> urls)
     {
-        var existing = scene.Urls
+        var existing = video.Urls
             .Select(url => url.Url)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
@@ -1963,7 +1963,7 @@ query Me {
         {
             if (existing.Add(url))
             {
-                scene.Urls.Add(new SceneUrl { Url = url, SceneId = scene.Id });
+                video.Urls.Add(new VideoUrl { Url = url, VideoId = video.Id });
             }
         }
     }
@@ -2227,11 +2227,11 @@ query Me {
         );
     }
 
-    private async Task<MetadataServerSceneMatchDto> ToSceneMatchDtoAsync(MetadataServerInstance box, MetadataServerRemoteScene scene, IReadOnlyCollection<FileFingerprint>? localFingerprints, CancellationToken ct)
+    private async Task<MetadataServerVideoMatchDto> ToVideoMatchDtoAsync(MetadataServerInstance box, MetadataServerRemoteVideo video, IReadOnlyCollection<FileFingerprint>? localFingerprints, CancellationToken ct)
     {
-        var studioCandidate = await BuildStudioCandidateAsync(box.Endpoint, scene.Studio, ct);
-        var performerCandidates = await BuildPerformerCandidatesAsync(box.Endpoint, scene, ct);
-        var tagCandidates = await BuildTagCandidatesAsync(box.Endpoint, scene, ct);
+        var studioCandidate = await BuildStudioCandidateAsync(box.Endpoint, video.Studio, ct);
+        var performerCandidates = await BuildPerformerCandidatesAsync(box.Endpoint, video, ct);
+        var tagCandidates = await BuildTagCandidatesAsync(box.Endpoint, video, ct);
 
         // Compute which fingerprint algorithms actually matched between local and remote
         var matchedAlgorithms = new List<string>();
@@ -2250,7 +2250,7 @@ query Me {
                 if (algorithm == null || string.IsNullOrWhiteSpace(local.Value)) continue;
 
                 // Count individual remote fingerprint submissions that match this local fingerprint
-                foreach (var fp in scene.Fingerprints)
+                foreach (var fp in video.Fingerprints)
                 {
                     if (!string.Equals(fp.Algorithm, algorithm, StringComparison.OrdinalIgnoreCase)) continue;
 
@@ -2275,7 +2275,7 @@ query Me {
                 if (!matchedAlgorithms.Contains(algorithm, StringComparer.OrdinalIgnoreCase))
                 {
                     // Check if any remote fingerprint of this algorithm type matched
-                    bool anyMatch = scene.Fingerprints.Any(fp =>
+                    bool anyMatch = video.Fingerprints.Any(fp =>
                         string.Equals(fp.Algorithm, algorithm, StringComparison.OrdinalIgnoreCase) &&
                         (string.Equals(algorithm, "PHASH", StringComparison.OrdinalIgnoreCase)
                             ? ComputePhashHammingDistance(local.Value, fp.Hash) <= PhashMatchThreshold
@@ -2288,24 +2288,24 @@ query Me {
             }
         }
 
-        return new MetadataServerSceneMatchDto(
+        return new MetadataServerVideoMatchDto(
             Endpoint: box.Endpoint,
             MetadataServerName: string.IsNullOrWhiteSpace(box.Name) ? box.Endpoint : box.Name,
-            Id: scene.Id,
-            Title: scene.Title,
-            Code: scene.Code,
-            Date: scene.Date,
-            Director: scene.Director,
-            Details: scene.Details,
-            StudioName: scene.Studio?.Name,
-            ImageUrl: scene.Images.FirstOrDefault()?.Url,
-            Duration: scene.Duration,
+            Id: video.Id,
+            Title: video.Title,
+            Code: video.Code,
+            Date: video.Date,
+            Director: video.Director,
+            Details: video.Details,
+            StudioName: video.Studio?.Name,
+            ImageUrl: video.Images.FirstOrDefault()?.Url,
+            Duration: video.Duration,
             PerformerNames: performerCandidates.Select(candidate => candidate.Name).ToList(),
             TagNames: tagCandidates.Select(candidate => candidate.Name).ToList(),
-            Urls: scene.Urls.Select(url => url.Url).Where(url => !string.IsNullOrWhiteSpace(url)).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            Urls: video.Urls.Select(url => url.Url).Where(url => !string.IsNullOrWhiteSpace(url)).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
             FingerprintAlgorithms: matchedAlgorithms,
             MatchCount: matchCount,
-            Fingerprints: scene.Fingerprints.Select(fp => new MetadataServerFingerprintDto(fp.Algorithm, fp.Hash, fp.Duration)).ToList(),
+            Fingerprints: video.Fingerprints.Select(fp => new MetadataServerFingerprintDto(fp.Algorithm, fp.Hash, fp.Duration)).ToList(),
             StudioCandidate: studioCandidate,
             PerformerCandidates: performerCandidates,
             TagCandidates: tagCandidates
@@ -2325,9 +2325,9 @@ query Me {
         return new MetadataServerEntityCandidateDto(remoteStudio.Id, remoteStudio.Name.Trim(), localId.HasValue, localId);
     }
 
-    private async Task<List<MetadataServerEntityCandidateDto>> BuildPerformerCandidatesAsync(string endpoint, MetadataServerRemoteScene scene, CancellationToken ct)
+    private async Task<List<MetadataServerEntityCandidateDto>> BuildPerformerCandidatesAsync(string endpoint, MetadataServerRemoteVideo video, CancellationToken ct)
     {
-        var remotePerformers = scene.Performers
+        var remotePerformers = video.Performers
             .Select(appearance => appearance.Performer)
             .OfType<MetadataServerRemotePerformer>()
             .Where(performer => !string.IsNullOrWhiteSpace(performer.Name))
@@ -2376,9 +2376,9 @@ query Me {
         }).ToList();
     }
 
-    private async Task<List<MetadataServerEntityCandidateDto>> BuildTagCandidatesAsync(string endpoint, MetadataServerRemoteScene scene, CancellationToken ct)
+    private async Task<List<MetadataServerEntityCandidateDto>> BuildTagCandidatesAsync(string endpoint, MetadataServerRemoteVideo video, CancellationToken ct)
     {
-        var remoteTags = scene.Tags
+        var remoteTags = video.Tags
             .Where(tag => !string.IsNullOrWhiteSpace(tag.Name))
             .GroupBy(tag => tag.Id, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
@@ -2425,9 +2425,9 @@ query Me {
         }).ToList();
     }
 
-    private static List<List<object>> BuildFingerprintQueries(Scene scene)
+    private static List<List<object>> BuildFingerprintQueries(Video video)
     {
-        var query = scene.Files
+        var query = video.Files
             .SelectMany(file => file.Fingerprints)
             .Select(CreateFingerprintQuery)
             .Where(item => item != null)
@@ -2477,7 +2477,7 @@ query Me {
     /// </summary>
     private static string NormalizeOshash(string value) => value.PadLeft(16, '0');
 
-    private static IReadOnlyList<string> BuildSceneSearchTerms(string? term)
+    private static IReadOnlyList<string> BuildVideoSearchTerms(string? term)
     {
         if (string.IsNullOrWhiteSpace(term))
             return [];
@@ -2503,7 +2503,7 @@ query Me {
         var trimmed = NormalizeWhitespace(term);
         Add(trimmed);
 
-        var withoutIndex = NormalizeWhitespace(LeadingSceneIndexRegex.Replace(trimmed, string.Empty));
+        var withoutIndex = NormalizeWhitespace(LeadingVideoIndexRegex.Replace(trimmed, string.Empty));
         Add(withoutIndex);
 
         var dashedParts = trimmed.Split(" - ", 2, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
@@ -2513,9 +2513,9 @@ query Me {
         return terms;
     }
 
-    private static int? GetSceneDurationSeconds(Scene scene)
+    private static int? GetVideoDurationSeconds(Video video)
     {
-        var maxDuration = scene.Files.Select(file => file.Duration).DefaultIfEmpty().Max();
+        var maxDuration = video.Files.Select(file => file.Duration).DefaultIfEmpty().Max();
         return maxDuration > 0 ? (int?)Math.Round(maxDuration) : null;
     }
 
@@ -2719,9 +2719,9 @@ query Me {
 
     private sealed record MetadataServerFindPerformerResponse(MetadataServerRemotePerformer? FindPerformer);
 
-    private sealed record MetadataServerSearchSceneResponse(List<MetadataServerRemoteScene> SearchScene);
+    private sealed record MetadataServerSearchVideoResponse(List<MetadataServerRemoteVideo> SearchVideo);
 
-    private sealed record MetadataServerFindSceneResponse(MetadataServerRemoteScene? FindScene);
+    private sealed record MetadataServerFindVideoResponse(MetadataServerRemoteVideo? FindVideo);
 
     private sealed record MetadataServerSearchStudioResponse(List<MetadataServerRemoteStudio> SearchStudio);
 
@@ -2729,7 +2729,7 @@ query Me {
 
     private sealed record MetadataServerFindTagResponse(MetadataServerRemoteTag? FindTag);
 
-    private sealed record MetadataServerFindScenesByFingerprintsResponse(List<List<MetadataServerRemoteScene>> FindScenesBySceneFingerprints);
+    private sealed record MetadataServerFindVideosByFingerprintsResponse(List<List<MetadataServerRemoteVideo>> FindVideosByVideoFingerprints);
 
     private sealed record MetadataServerRemotePerformer(
         string Id,
@@ -2760,7 +2760,7 @@ query Me {
 
     private sealed record MetadataServerRemoteImage(string Url);
 
-    private sealed record MetadataServerRemoteScene(
+    private sealed record MetadataServerRemoteVideo(
         string Id,
         string? Title,
         string? Code,

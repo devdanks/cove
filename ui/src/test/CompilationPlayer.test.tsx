@@ -3,11 +3,11 @@ import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CompilationPlayer } from "../components/CompilationPlayer";
 
-const { mockScenes } = vi.hoisted(() => ({
-  mockScenes: {
+const { mockVideos } = vi.hoisted(() => ({
+  mockVideos: {
     get: vi.fn(),
-    streamUrl: vi.fn((id: number) => `/scene-${id}.mp4`),
-    screenshotUrl: vi.fn((id: number) => `/scene-${id}.jpg`),
+    streamUrl: vi.fn((id: number) => `/video-${id}.mp4`),
+    screenshotUrl: vi.fn((id: number) => `/video-${id}.jpg`),
   },
 }));
 
@@ -19,7 +19,7 @@ vi.mock("../api/client", () => ({
   images: {
     imageUrl: vi.fn((id: number) => `/image-${id}.jpg`),
   },
-  scenes: mockScenes,
+  videos: mockVideos,
   texts: {
     content: vi.fn(),
     fileUrl: vi.fn((id: number) => `/text-${id}`),
@@ -46,12 +46,12 @@ function renderPlayer() {
         items={[
           {
             groupItemId: 1,
-            hostType: "scene",
+            hostType: "video",
             hostId: 14,
-            sceneId: 14,
+            videoId: 14,
             audioId: null,
             title: "Clip One",
-            src: "/scene-14.mp4",
+            src: "/video-14.mp4",
             startSec: 5,
             endSec: 15,
             durationSec: 10,
@@ -72,7 +72,7 @@ describe("CompilationPlayer", () => {
   });
 
   it("uses the shared full-bleed media surface without the framed video wrapper", async () => {
-    mockScenes.get.mockResolvedValue({
+    mockVideos.get.mockResolvedValue({
       id: 14,
       files: [{ format: "mp4", duration: 120, captions: [] }],
     });

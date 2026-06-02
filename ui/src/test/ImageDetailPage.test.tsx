@@ -156,7 +156,7 @@ describe("ImageDetailPage", () => {
         coverImageUrl: undefined,
         appearanceCount: 1,
         frameSampleCount: 1,
-        sceneCount: 1,
+        videoCount: 1,
         imageCount: 1,
       },
     ]);
@@ -221,3 +221,4 @@ describe("ImageDetailPage", () => {
     })));
   });
 });
+

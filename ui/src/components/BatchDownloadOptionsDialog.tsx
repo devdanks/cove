@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Download, Loader2, X } from "lucide-react";
 import type { DownloadSelectionEntity, BatchDownloadOptions } from "../utils/batchDownloads";
 import { normalizeBatchDownloadOptions } from "../utils/batchDownloads";
-import { loadScrapeApplyPreferences, saveScrapeApplyPreferences } from "./sceneScrapeUtils";
+import { loadScrapeApplyPreferences, saveScrapeApplyPreferences } from "./videoScrapeUtils";
 
 interface Props {
   open: boolean;
@@ -70,7 +70,7 @@ export function BatchDownloadOptionsDialog({
               <input
                 type="checkbox"
                 checked={!!options.scrapeMetadata}
-                onChange={(event) => setOptions((current) => ({ ...current, scrapeMetadata: event.target.checked, scrapeScenes: event.target.checked }))}
+                onChange={(event) => setOptions((current) => ({ ...current, scrapeMetadata: event.target.checked, scrapeVideos: event.target.checked }))}
                 className="mt-0.5 h-4 w-4 rounded border-border bg-card text-accent focus:ring-0"
               />
               <span>
@@ -117,7 +117,7 @@ export function BatchDownloadOptionsDialog({
               <CheckboxOption label="Covers" checked={!!generate.thumbnails} onChange={(checked) => setOptions((current) => ({ ...current, generate: { ...current.generate, thumbnails: checked } }))} />
               <CheckboxOption label="Previews" checked={!!generate.previews} onChange={(checked) => setOptions((current) => ({ ...current, generate: { ...current.generate, previews: checked } }))} />
               <CheckboxOption label="Sprites" checked={!!generate.sprites} onChange={(checked) => setOptions((current) => ({ ...current, generate: { ...current.generate, sprites: checked } }))} />
-              <CheckboxOption label="Scene perceptual hashes" checked={!!generate.phashes} onChange={(checked) => setOptions((current) => ({ ...current, generate: { ...current.generate, phashes: checked } }))} />
+              <CheckboxOption label="Video perceptual hashes" checked={!!generate.phashes} onChange={(checked) => setOptions((current) => ({ ...current, generate: { ...current.generate, phashes: checked } }))} />
               <CheckboxOption label="MD5 checksums" checked={!!generate.md5} onChange={(checked) => setOptions((current) => ({ ...current, generate: { ...current.generate, md5: checked } }))} />
               <CheckboxOption label="Image thumbnails" checked={!!generate.imageThumbnails} onChange={(checked) => setOptions((current) => ({ ...current, generate: { ...current.generate, imageThumbnails: checked } }))} />
               <CheckboxOption label="Image perceptual hashes" checked={!!generate.imagePhashes} onChange={(checked) => setOptions((current) => ({ ...current, generate: { ...current.generate, imagePhashes: checked } }))} />

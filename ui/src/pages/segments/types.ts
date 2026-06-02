@@ -11,9 +11,9 @@ export interface DerivedSpanItem {
   id: string;
   key: string;
   kind: "profile" | "derivedQuery";
-  sceneId: number;
-  sceneTitle: string;
-  sceneUpdatedAt?: string;
+  videoId: number;
+  videoTitle: string;
+  videoUpdatedAt?: string;
   span: ResolvedSpan;
   profileId?: number;
   derivedQuery?: SegmentSpanDerivedQuery;
@@ -22,8 +22,8 @@ export interface DerivedSpanItem {
 
 export interface RawSegmentItem extends SegmentRecord {
   key: string;
-  sceneId: number;
-  sceneTitle: string;
+  videoId: number;
+  videoTitle: string;
 }
 
 export type SegmentsPageContentView = "spans" | "raw";

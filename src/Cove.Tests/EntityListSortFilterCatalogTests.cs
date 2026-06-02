@@ -10,7 +10,7 @@ public class EntityListSortFilterCatalogTests
     {
         Assert.Equal(
         [
-            "scenes",
+            "videos",
             "images",
             "audios",
             "texts",
@@ -49,7 +49,7 @@ public class EntityListSortFilterCatalogTests
     }
 
     [Theory]
-    [InlineData("scenes", typeof(SceneFilter))]
+    [InlineData("videos", typeof(VideoFilter))]
     [InlineData("images", typeof(ImageFilter))]
     [InlineData("audios", typeof(AudioFilter))]
     [InlineData("texts", typeof(TextDocumentFilter))]
@@ -67,7 +67,7 @@ public class EntityListSortFilterCatalogTests
 
         var missing = filterType
             .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(property => property.Name is not nameof(SceneFilter.CustomFieldCriteria) and not nameof(SceneFilter.CustomFieldCriterion))
+            .Where(property => property.Name is not nameof(VideoFilter.CustomFieldCriteria) and not nameof(VideoFilter.CustomFieldCriterion))
             .Where(property => IsCriterionProperty(Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType))
             .Select(property => property.Name)
             .Where(propertyName => !matrixKeys.Contains(propertyName))

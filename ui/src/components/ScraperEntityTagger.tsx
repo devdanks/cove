@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { performers, scrapeAttempts, system, tags } from "../api/client";
-import type { ApplySceneScrapeAttemptRequest, ScrapeAttempt, ScraperSummary } from "../api/types";
+import type { ApplyVideoScrapeAttemptRequest, ScrapeAttempt, ScraperSummary } from "../api/types";
 import type { Route } from "../router/location";
 import { createNestedRouteLinkProps } from "./cardNavigation";
 import {
@@ -15,12 +15,12 @@ import {
   DEFAULT_COLLECTION_MODES,
   listsEqual,
   loadScrapeApplyPreferences,
-  normalizeSceneDate,
+  normalizeVideoDate,
   pickBestSourceUrl,
   saveScrapeApplyPreferences,
   type CollectionMode,
   type ScrapeApplyPreferences,
-} from "./sceneScrapeUtils";
+} from "./videoScrapeUtils";
 import {
   CompactCollectionDecision,
   CompactListValue,
@@ -257,7 +257,7 @@ function mapScraperResult(
     aliases: pickStringList(result, "Aliases", "Alias"),
     duration: pickString(result, "Duration", "DurationSeconds"),
     code: pickString(result, "Code"),
-    date: normalizeSceneDate(pickString(result, "Date", "ReleaseDate")),
+    date: normalizeVideoDate(pickString(result, "Date", "ReleaseDate")),
     details: pickString(result, "Details", "Description", "Synopsis"),
     director: pickString(result, "Director"),
     rating: pickString(result, "Rating"),
@@ -279,7 +279,7 @@ function buildCurrentReviewData(item: ScraperEntityItem): ScraperReviewData {
     code: item.code,
     details: item.details ?? item.synopsis,
     director: item.director,
-    date: normalizeSceneDate(item.date),
+    date: normalizeVideoDate(item.date),
     studio: item.studioName,
     imageUrl: item.frontImagePath ?? item.imagePath ?? undefined,
     urls: item.urls ?? [],
@@ -361,7 +361,7 @@ function buildApplyRequest(
   tagActions: ScrapeRelationActionMap,
   performerActions: ScrapeRelationActionMap,
   preferences: ScrapeApplyPreferences,
-): ApplySceneScrapeAttemptRequest {
+): ApplyVideoScrapeAttemptRequest {
   return {
     replaceFields,
     collectionModes,
@@ -627,7 +627,7 @@ function ScraperEntityTaggerRow({
   );
 
   return (
-    <div className={`px-3 py-2 ${state?.saved ? "opacity-50" : ""} ${selected ? "bg-accent/5" : ""}`}>
+    <div className={`px-3 py-2 ${selected ? "bg-accent/5" : ""}`}>
       <div className="flex gap-3">
         {onSelect && (
           <button type="button" onClick={() => onSelect(item.id)} className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded border text-[10px] ${selected ? "border-accent bg-accent text-white" : selecting ? "border-accent/60 text-accent" : "border-border text-transparent hover:border-accent hover:text-accent"}`} aria-label={selected ? "Deselect" : "Select"} title={selected ? "Deselect" : "Select"}>
@@ -777,7 +777,7 @@ function ScraperResultRow({
           </button>
         )}
       </div>
-      {isSelected && (
+      {isSelected && !saved && (
         <div className="border-t border-border px-3 py-2.5 space-y-2">
           {scalarRows.map((row) => (
             <CompactScalarDecision
@@ -836,4 +836,5 @@ function ScraperResultRow({
     </div>
   );
 }
+
 

@@ -71,15 +71,15 @@ public class ExtensionBundleSupportTests
 
         var manifest = manager.GetAggregatedManifest();
         var listFilter = Assert.Single(manifest.ListFilters);
-        Assert.Equal("scene-quality-filter", listFilter.Id);
-        Assert.Equal("scenes", listFilter.EntityType);
+        Assert.Equal("video-quality-filter", listFilter.Id);
+        Assert.Equal("videos", listFilter.EntityType);
         Assert.Equal("quality_score", listFilter.CustomFieldKey);
         Assert.Equal("number", listFilter.CustomFieldType);
         Assert.Equal(ListContributionExtension.ExtensionId, listFilter.ExtensionId);
 
         var listSort = Assert.Single(manifest.ListSorts);
-        Assert.Equal("scene-quality-sort", listSort.Id);
-        Assert.Equal("scenes", listSort.EntityType);
+        Assert.Equal("video-quality-sort", listSort.Id);
+        Assert.Equal("videos", listSort.EntityType);
         Assert.Equal("quality_score", listSort.CustomFieldKey);
         Assert.Equal("number", listSort.CustomFieldType);
         Assert.Equal(ListContributionExtension.ExtensionId, listSort.ExtensionId);
@@ -445,8 +445,8 @@ public class ExtensionBundleSupportTests
 
         public override UIManifest GetUIManifest()
             => ManifestBuilder()
-                .AddCustomFieldListFilter("scenes", "scene-quality-filter", "Quality Score", "quality_score", "number", order: 10)
-                .AddCustomFieldListSort("scenes", "scene-quality-sort", "Quality Score", "quality_score", "number", order: 10)
+                .AddCustomFieldListFilter("videos", "video-quality-filter", "Quality Score", "quality_score", "number", order: 10)
+                .AddCustomFieldListSort("videos", "video-quality-sort", "Quality Score", "quality_score", "number", order: 10)
                 .Build();
     }
 
@@ -461,7 +461,7 @@ public class ExtensionBundleSupportTests
         public override UIManifest GetUIManifest()
             => ManifestBuilder()
                 .AddTab(
-                    "scene",
+                    "video",
                     "related",
                     "Related",
                     "RelatedTab",
@@ -513,3 +513,4 @@ public class ExtensionBundleSupportTests
         public HttpClient CreateClient(string name) => new();
     }
 }
+

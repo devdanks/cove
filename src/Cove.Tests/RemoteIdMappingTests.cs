@@ -12,7 +12,7 @@ public class RemoteIdMappingTests
     {
         using var context = CreateContext();
 
-        Assert.Equal("SceneRemoteId", GetEntityType(context, typeof(SceneRemoteId)).GetTableName());
+        Assert.Equal("VideoRemoteId", GetEntityType(context, typeof(VideoRemoteId)).GetTableName());
         Assert.Equal("PerformerRemoteId", GetEntityType(context, typeof(PerformerRemoteId)).GetTableName());
         Assert.Equal("TagRemoteId", GetEntityType(context, typeof(TagRemoteId)).GetTableName());
         Assert.Equal("StudioRemoteId", GetEntityType(context, typeof(StudioRemoteId)).GetTableName());
@@ -39,3 +39,4 @@ public class RemoteIdMappingTests
         }
     }
 }
+

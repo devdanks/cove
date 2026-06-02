@@ -63,13 +63,13 @@ public class StreamControllerTests
         await using var context = CreateContext(connection);
         await context.Database.EnsureCreatedAsync();
 
-        var scene = new Scene { Title = "HLS scene" };
+        var video = new Video { Title = "HLS video" };
         var folder = new Folder { Path = Path.GetTempPath() };
-        context.AddRange(scene, folder);
+        context.AddRange(video, folder);
         await context.SaveChangesAsync();
         context.VideoFiles.Add(new VideoFile
         {
-            SceneId = scene.Id,
+            VideoId = video.Id,
             ParentFolderId = folder.Id,
             Basename = "video.mp4",
             Width = 1920,
@@ -80,10 +80,10 @@ public class StreamControllerTests
         var controller = CreateController(context, new FakeTranscodeService());
         SetQuery(controller, "?access_token=access token&share_token=share/token&ignored=true");
 
-        var result = await controller.GetHlsMasterPlaylist(scene.Id, CancellationToken.None);
+        var result = await controller.GetHlsMasterPlaylist(video.Id, CancellationToken.None);
 
         var content = Assert.IsType<ContentResult>(result);
-        Assert.Contains($"/api/stream/scene/{scene.Id}/hls/720p.m3u8?access_token=access%20token&share_token=share%2Ftoken", content.Content);
+        Assert.Contains($"/api/stream/video/{video.Id}/hls/720p.m3u8?access_token=access%20token&share_token=share%2Ftoken", content.Content);
         Assert.DoesNotContain("ignored=", content.Content);
     }
 
@@ -102,13 +102,13 @@ public class StreamControllerTests
 
         try
         {
-            var scene = new Scene { Title = "HLS media scene" };
+            var video = new Video { Title = "HLS media video" };
             var folder = new Folder { Path = tempDir };
-            context.AddRange(scene, folder);
+            context.AddRange(video, folder);
             await context.SaveChangesAsync();
             context.VideoFiles.Add(new VideoFile
             {
-                SceneId = scene.Id,
+                VideoId = video.Id,
                 ParentFolderId = folder.Id,
                 Basename = Path.GetFileName(videoPath),
                 Width = 1920,
@@ -119,11 +119,11 @@ public class StreamControllerTests
             var controller = CreateController(context, new FakeTranscodeService());
             SetQuery(controller, "?access_token=access token&share_token=share/token&share_password=p@ss&ignored=true");
 
-            var result = await controller.GetHlsPlaylist(scene.Id, "original", CancellationToken.None);
+            var result = await controller.GetHlsPlaylist(video.Id, "original", CancellationToken.None);
 
             var content = Assert.IsType<ContentResult>(result);
-            Assert.Contains($"/api/stream/scene/{scene.Id}/hls/segment/original_000.ts?access_token=access%20token&share_token=share%2Ftoken&share_password=p%40ss", content.Content);
-            Assert.Contains($"/api/stream/scene/{scene.Id}/hls/segment/original_001.ts?access_token=access%20token&share_token=share%2Ftoken&share_password=p%40ss", content.Content);
+            Assert.Contains($"/api/stream/video/{video.Id}/hls/segment/original_000.ts?access_token=access%20token&share_token=share%2Ftoken&share_password=p%40ss", content.Content);
+            Assert.Contains($"/api/stream/video/{video.Id}/hls/segment/original_001.ts?access_token=access%20token&share_token=share%2Ftoken&share_password=p%40ss", content.Content);
             Assert.Contains("#EXTINF:4,", content.Content);
             Assert.DoesNotContain("ignored=", content.Content);
         }
@@ -157,10 +157,10 @@ public class StreamControllerTests
         public Task<Stream?> TranscodeToMp4Async(string inputPath, string? resolution, double startSeconds = 0, CancellationToken ct = default)
             => Task.FromResult<Stream?>(null);
 
-        public Task<string?> GenerateHlsManifestAsync(int sceneId, string inputPath, string? resolution, CancellationToken ct = default)
+        public Task<string?> GenerateHlsManifestAsync(int videoId, string inputPath, string? resolution, CancellationToken ct = default)
             => Task.FromResult<string?>("#EXTM3U\n#EXTINF:4,\noriginal_000.ts\n#EXTINF:4,\noriginal_001.ts\n");
 
-        public Task<Stream?> GetHlsSegmentAsync(int sceneId, string segment, CancellationToken ct = default)
+        public Task<Stream?> GetHlsSegmentAsync(int videoId, string segment, CancellationToken ct = default)
             => Task.FromResult<Stream?>(null);
 
         public string[] GetAvailableResolutions(int sourceWidth, int sourceHeight) => ["720p"];
@@ -173,25 +173,25 @@ public class StreamControllerTests
 
     private sealed class FakeThumbnailService(string previewPath) : IThumbnailService
     {
-        public Task<string?> GetSceneThumbnailPathAsync(int sceneId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<string?> GetVideoThumbnailPathAsync(int videoId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<string?> GetImageFilePathAsync(int imageId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<(Stream stream, string contentType, bool supportsRangeRequests)?> GetImageStreamAsync(int imageId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<(Stream stream, string contentType, bool supportsRangeRequests)?> GetImageThumbnailStreamAsync(int imageId, int maxDimension = 640, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<(Stream stream, string contentType, bool supportsRangeRequests)?> GetBlobImageThumbnailStreamAsync(string blobId, int maxDimension = 640, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task DeleteSceneGeneratedFilesAsync(int sceneId, CancellationToken ct = default) => Task.CompletedTask;
+        public Task DeleteVideoGeneratedFilesAsync(int videoId, CancellationToken ct = default) => Task.CompletedTask;
         public Task DeleteImageGeneratedFilesAsync(int imageId, CancellationToken ct = default) => Task.CompletedTask;
         public Task DeleteBlobGeneratedFilesAsync(string blobId, CancellationToken ct = default) => Task.CompletedTask;
-        public Task GenerateSceneThumbnailAsync(int sceneId, double? atSeconds = null, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task GenerateVideoThumbnailAsync(int videoId, double? atSeconds = null, CancellationToken ct = default) => throw new NotImplementedException();
         public Task GenerateImageThumbnailAsync(int imageId, int maxDimension = 640, bool overwrite = false, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task GenerateScenePreviewAsync(int sceneId, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task GenerateSegmentAnimatedPreviewAsync(int sceneId, double startSec, double? endSec = null, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task GenerateSceneSpriteAsync(int sceneId, CancellationToken ct = default) => throw new NotImplementedException();
-        public string GetThumbnailPathForScene(int sceneId) => throw new NotImplementedException();
-        public string GetTimestampedThumbnailPath(int sceneId, double seconds) => throw new NotImplementedException();
-        public string GetSegmentAnimatedPreviewPath(int sceneId, double seconds) => throw new NotImplementedException();
-        public string GetPreviewPath(int sceneId) => previewPath;
-        public string GetSpritePath(int sceneId) => throw new NotImplementedException();
-        public string GetSpriteVttPath(int sceneId) => throw new NotImplementedException();
+        public Task GenerateVideoPreviewAsync(int videoId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task GenerateSegmentAnimatedPreviewAsync(int videoId, double startSec, double? endSec = null, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task GenerateVideoSpriteAsync(int videoId, CancellationToken ct = default) => throw new NotImplementedException();
+        public string GetThumbnailPathForVideo(int videoId) => throw new NotImplementedException();
+        public string GetTimestampedThumbnailPath(int videoId, double seconds) => throw new NotImplementedException();
+        public string GetSegmentAnimatedPreviewPath(int videoId, double seconds) => throw new NotImplementedException();
+        public string GetPreviewPath(int videoId) => previewPath;
+        public string GetSpritePath(int videoId) => throw new NotImplementedException();
+        public string GetSpriteVttPath(int videoId) => throw new NotImplementedException();
         public string StartGenerateAllThumbnails() => throw new NotImplementedException();
     }
 }

@@ -14,7 +14,7 @@ public class EntityIdentifier
 {
     public int Id { get; set; }
 
-    /// <summary>'scene' | 'performer' | 'tag' | 'studio' | 'gallery' | 'image' | 'group'</summary>
+    /// <summary>'video' | 'performer' | 'tag' | 'studio' | 'gallery' | 'image' | 'group'</summary>
     public string EntityKind { get; set; } = string.Empty;
 
     public int EntityId { get; set; }
@@ -35,7 +35,7 @@ public class EntityIdentifier
 
 public static class EntityKinds
 {
-    public const string Scene = "scene";
+    public const string Video = "video";
     public const string Audio = "audio";
     public const string Text = "text";
     public const string Performer = "performer";
@@ -55,3 +55,4 @@ public static class IdentifierSchemes
     public const string Alias = "alias";
     public const string RemoteId = "remote_id";
 }
+

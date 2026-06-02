@@ -12,4 +12,6 @@ public interface ICustomFieldRepository
     Task<CustomFieldDefinition> FindOrCreateDefinitionAsync(CustomFieldDefinition definition, CancellationToken ct = default);
     Task<IReadOnlyList<CustomFieldValue>> FindValuesAsync(string entityType, int entityId, CancellationToken ct = default);
     Task UpsertValueAsync(string entityType, int entityId, int definitionId, string value, CancellationToken ct = default);
+    Task UpsertNumberValueAsync(string entityType, int entityId, int definitionId, decimal value, CancellationToken ct = default);
+    Task<decimal?> FindNumberValueAsync(string entityType, int entityId, string definitionKey, CancellationToken ct = default);
 }

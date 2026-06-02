@@ -9,9 +9,9 @@ public class Group : BaseEntity
     public DateTime? LastResolvedAt { get; set; }
     public int? CachedItemCount { get; set; }
     public int CacheTtlSec { get; set; } = 60;
-    public bool ShowInSceneLists { get; set; } = false;
+    public bool ShowInVideoLists { get; set; } = false;
     public int SortOrder { get; set; }
-    public List<string> AllowedHostTypes { get; set; } = ["scene", "image", "audio", "text", "group", "performer", "studio", "tag", "gallery", "face", "segment"];
+    public List<string> AllowedHostTypes { get; set; } = ["video", "image", "audio", "text", "group", "performer", "studio", "tag", "gallery", "face", "segment"];
     public string? Aliases { get; set; }
     public int? Duration { get; set; } // seconds
     public DateOnly? Date { get; set; }
@@ -41,8 +41,8 @@ public enum GroupKind
 
 public enum GroupItemKind
 {
-    Scene = 1,
-    SceneRange = 2,
+    Video = 1,
+    VideoRange = 2,
     Image = 3,
     Audio = 4,
     Text = 5,
@@ -60,9 +60,9 @@ public class GroupItem : BaseEntity
     public int GroupId { get; set; }
     public int OrderIndex { get; set; }
     public GroupItemKind Kind { get; set; }
-    public string HostType { get; set; } = "scene";
+    public string HostType { get; set; } = "video";
     public int HostId { get; set; }
-    public int? SceneId { get; set; }
+    public int? VideoId { get; set; }
     public int? ImageId { get; set; }
     public int? ChildGroupId { get; set; }
     public double? StartSec { get; set; }
@@ -75,7 +75,7 @@ public class GroupItem : BaseEntity
     public DateTime? SnapshotAt { get; set; }
 
     public Group? Group { get; set; }
-    public Scene? Scene { get; set; }
+    public Video? Video { get; set; }
     public Image? Image { get; set; }
     public Group? ChildGroup { get; set; }
 }
@@ -105,3 +105,4 @@ public class GroupRelation
     public Group? ContainingGroup { get; set; }
     public Group? SubGroup { get; set; }
 }
+

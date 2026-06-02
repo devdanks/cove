@@ -11,26 +11,26 @@ public sealed class RepositoryPerformanceRegressionTests(PostgresPerformanceFixt
     public static IEnumerable<object[]> RepositoryBudgets()
     {
         yield return [new RepositoryPerformanceBudget(
-            Name: "scene_sort_duration",
+            Name: "video_sort_duration",
             MaxMeanMs: 140,
             MaxP95Ms: 220,
             Operation: static async (performanceFixture, ct) =>
             {
                 await using var context = performanceFixture.CreateContext();
-                var repository = new SceneRepository(context);
+                var repository = new VideoRepository(context);
                 _ = await repository.FindAsync(null, Desc("duration"), ct);
             })];
 
         yield return [new RepositoryPerformanceBudget(
-            Name: "scene_find_stack5_duration",
+            Name: "video_find_stack5_duration",
             MaxMeanMs: 170,
             MaxP95Ms: 260,
             Operation: static async (performanceFixture, ct) =>
             {
                 await using var context = performanceFixture.CreateContext();
-                var repository = new SceneRepository(context);
+                var repository = new VideoRepository(context);
                 _ = await repository.FindAsync(
-                    new SceneFilter
+                    new VideoFilter
                     {
                         DurationCriterion = GreaterThan(300),
                         ResolutionCriterion = GreaterThan(720),
@@ -43,25 +43,25 @@ public sealed class RepositoryPerformanceRegressionTests(PostgresPerformanceFixt
             })];
 
         yield return [new RepositoryPerformanceBudget(
-            Name: "scene_sort_path",
+            Name: "video_sort_path",
             MaxMeanMs: 130,
             MaxP95Ms: 210,
             Operation: static async (performanceFixture, ct) =>
             {
                 await using var context = performanceFixture.CreateContext();
-                var repository = new SceneRepository(context);
+                var repository = new VideoRepository(context);
                 _ = await repository.FindAsync(null, Asc("path"), ct);
             })];
 
         yield return [new RepositoryPerformanceBudget(
-            Name: "scene_detail_relations",
+            Name: "video_detail_relations",
             MaxMeanMs: 90,
             MaxP95Ms: 140,
             Operation: static async (performanceFixture, ct) =>
             {
                 await using var context = performanceFixture.CreateContext();
-                var repository = new SceneRepository(context);
-                _ = await repository.GetByIdWithRelationsAsync(performanceFixture.SampleSceneId, ct);
+                var repository = new VideoRepository(context);
+                _ = await repository.GetByIdWithRelationsAsync(performanceFixture.SampleVideoId, ct);
             })];
 
         yield return [new RepositoryPerformanceBudget(
@@ -123,18 +123,18 @@ public sealed class RepositoryPerformanceRegressionTests(PostgresPerformanceFixt
             })];
 
         yield return [new RepositoryPerformanceBudget(
-            Name: "performer_sort_scene_count",
+            Name: "performer_sort_video_count",
             MaxMeanMs: 90,
             MaxP95Ms: 150,
             Operation: static async (performanceFixture, ct) =>
             {
                 await using var context = performanceFixture.CreateContext();
                 var repository = new PerformerRepository(context);
-                _ = await repository.FindAsync(null, Desc("scene_count"), ct);
+                _ = await repository.FindAsync(null, Desc("video_count"), ct);
             })];
 
         yield return [new RepositoryPerformanceBudget(
-            Name: "performer_find_rating_scene_count",
+            Name: "performer_find_rating_video_count",
             MaxMeanMs: 95,
             MaxP95Ms: 150,
             Operation: static async (performanceFixture, ct) =>
@@ -145,21 +145,21 @@ public sealed class RepositoryPerformanceRegressionTests(PostgresPerformanceFixt
                     new PerformerFilter
                     {
                         RatingCriterion = GreaterThan(60),
-                        SceneCountCriterion = GreaterThan(1),
+                        VideoCountCriterion = GreaterThan(1),
                     },
-                    Desc("scene_count"),
+                    Desc("video_count"),
                     ct);
             })];
 
         yield return [new RepositoryPerformanceBudget(
-            Name: "tag_sort_scene_count",
+            Name: "tag_sort_video_count",
             MaxMeanMs: 80,
             MaxP95Ms: 130,
             Operation: static async (performanceFixture, ct) =>
             {
                 await using var context = performanceFixture.CreateContext();
                 var repository = new TagRepository(context);
-                _ = await repository.FindAsync(null, Desc("scene_count"), ct);
+                _ = await repository.FindAsync(null, Desc("video_count"), ct);
             })];
 
         yield return [new RepositoryPerformanceBudget(
@@ -174,9 +174,9 @@ public sealed class RepositoryPerformanceRegressionTests(PostgresPerformanceFixt
                     new TagFilter
                     {
                         Favorite = true,
-                        SceneCountCriterion = GreaterThan(1),
+                        VideoCountCriterion = GreaterThan(1),
                     },
-                    Desc("scene_count"),
+                    Desc("video_count"),
                     ct);
             })];
 

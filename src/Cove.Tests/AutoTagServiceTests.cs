@@ -27,34 +27,34 @@ public class AutoTagServiceTests
         await using var verificationScope = environment.Services.CreateAsyncScope();
         var context = verificationScope.ServiceProvider.GetRequiredService<CoveContext>();
 
-        var scene = await context.Scenes.Include(item => item.ScenePerformers).Include(item => item.SceneTags).SingleAsync();
+        var video = await context.Videos.Include(item => item.VideoPerformers).Include(item => item.VideoTags).SingleAsync();
         var image = await context.Images.Include(item => item.ImagePerformers).Include(item => item.ImageTags).SingleAsync();
         var gallery = await context.Galleries.Include(item => item.GalleryPerformers).Include(item => item.GalleryTags).SingleAsync();
         var performerIds = await context.Performers.ToDictionaryAsync(item => item.Name, item => item.Id);
         var studioIds = await context.Studios.ToDictionaryAsync(item => item.Name, item => item.Id);
         var tagIds = await context.Tags.ToDictionaryAsync(item => item.Name, item => item.Id);
 
-        Assert.Equal(studioIds["Acme"], scene.StudioId);
+        Assert.Equal(studioIds["Acme"], video.StudioId);
         Assert.Equal(studioIds["Acme"], image.StudioId);
         Assert.Equal(studioIds["Acme"], gallery.StudioId);
 
-        Assert.Contains(scene.ScenePerformers, item => item.PerformerId == performerIds["Alice"]);
+        Assert.Contains(video.VideoPerformers, item => item.PerformerId == performerIds["Alice"]);
         Assert.Contains(image.ImagePerformers, item => item.PerformerId == performerIds["Alice"]);
         Assert.Contains(gallery.GalleryPerformers, item => item.PerformerId == performerIds["Alice"]);
 
-        Assert.DoesNotContain(scene.ScenePerformers, item => item.PerformerId == performerIds["Bob"]);
+        Assert.DoesNotContain(video.VideoPerformers, item => item.PerformerId == performerIds["Bob"]);
         Assert.DoesNotContain(image.ImagePerformers, item => item.PerformerId == performerIds["Bob"]);
         Assert.DoesNotContain(gallery.GalleryPerformers, item => item.PerformerId == performerIds["Bob"]);
 
-        Assert.Contains(scene.SceneTags, item => item.TagId == tagIds["Summer"]);
+        Assert.Contains(video.VideoTags, item => item.TagId == tagIds["Summer"]);
         Assert.Contains(image.ImageTags, item => item.TagId == tagIds["Summer"]);
         Assert.Contains(gallery.GalleryTags, item => item.TagId == tagIds["Summer"]);
 
-        Assert.DoesNotContain(scene.SceneTags, item => item.TagId == tagIds["Hidden"]);
+        Assert.DoesNotContain(video.VideoTags, item => item.TagId == tagIds["Hidden"]);
         Assert.DoesNotContain(image.ImageTags, item => item.TagId == tagIds["Hidden"]);
         Assert.DoesNotContain(gallery.GalleryTags, item => item.TagId == tagIds["Hidden"]);
 
-        Assert.NotEqual(studioIds["Hidden"], scene.StudioId);
+        Assert.NotEqual(studioIds["Hidden"], video.StudioId);
         Assert.NotEqual(studioIds["Hidden"], image.StudioId);
         Assert.NotEqual(studioIds["Hidden"], gallery.StudioId);
     }
@@ -70,15 +70,15 @@ public class AutoTagServiceTests
 
         await using var verificationScope = environment.Services.CreateAsyncScope();
         var context = verificationScope.ServiceProvider.GetRequiredService<CoveContext>();
-        var scene = await context.Scenes.Include(item => item.ScenePerformers).Include(item => item.SceneTags).SingleAsync();
+        var video = await context.Videos.Include(item => item.VideoPerformers).Include(item => item.VideoTags).SingleAsync();
         var performerIds = await context.Performers.ToDictionaryAsync(item => item.Name, item => item.Id);
         var tagIds = await context.Tags.ToDictionaryAsync(item => item.Name, item => item.Id);
 
-        Assert.Equal(seeded.AcmeId, scene.StudioId);
-        Assert.Contains(scene.ScenePerformers, item => item.PerformerId == performerIds["Alice"]);
-        Assert.DoesNotContain(scene.ScenePerformers, item => item.PerformerId == performerIds["Ann"]);
-        Assert.DoesNotContain(scene.ScenePerformers, item => item.PerformerId == performerIds["Charlie"]);
-        Assert.Contains(scene.SceneTags, item => item.TagId == tagIds["Summer"]);
+        Assert.Equal(seeded.AcmeId, video.StudioId);
+        Assert.Contains(video.VideoPerformers, item => item.PerformerId == performerIds["Alice"]);
+        Assert.DoesNotContain(video.VideoPerformers, item => item.PerformerId == performerIds["Ann"]);
+        Assert.DoesNotContain(video.VideoPerformers, item => item.PerformerId == performerIds["Charlie"]);
+        Assert.Contains(video.VideoTags, item => item.TagId == tagIds["Summer"]);
     }
 
     private static AutoTagService CreateService(IServiceProvider services, ImmediateJobService jobService)
@@ -125,12 +125,12 @@ public class AutoTagServiceTests
             pathParts.Add("Charlie");
 
         var folderName = string.Join(' ', pathParts);
-        var sceneFolder = new Folder { Path = Path.Combine("C:\\library", folderName), ModTime = DateTime.UtcNow };
+        var videoFolder = new Folder { Path = Path.Combine("C:\\library", folderName), ModTime = DateTime.UtcNow };
         var imageFolder = new Folder { Path = Path.Combine("C:\\library", folderName, "images"), ModTime = DateTime.UtcNow };
         var galleryFolder = new Folder { Path = Path.Combine("C:\\library", folderName, "gallery"), ModTime = DateTime.UtcNow };
 
-        var scene = new Scene { Title = includeJoanneOnlyPath ? "Joanne showcase" : "Alice Charlie showcase" };
-        scene.Files.Add(new VideoFile { Basename = "alice-summer-scene.mp4", ParentFolder = sceneFolder, ModTime = DateTime.UtcNow });
+        var video = new Video { Title = includeJoanneOnlyPath ? "Joanne showcase" : "Alice Charlie showcase" };
+        video.Files.Add(new VideoFile { Basename = "alice-summer-video.mp4", ParentFolder = videoFolder, ModTime = DateTime.UtcNow });
 
         var image = new Image { Title = "Alice Summer still" };
         image.Files.Add(new ImageFile { Basename = "alice-summer-image.jpg", ParentFolder = imageFolder, ModTime = DateTime.UtcNow });
@@ -138,7 +138,7 @@ public class AutoTagServiceTests
         var gallery = new Gallery { Title = "Alice Summer gallery" };
         gallery.Files.Add(new GalleryFile { Basename = "alice-summer-gallery.zip", ParentFolder = galleryFolder, ModTime = DateTime.UtcNow });
 
-        context.AddRange(alice, bob, ann, charlie, acme, hiddenStudio, summer, hiddenTag, sceneFolder, imageFolder, galleryFolder, scene, image, gallery);
+        context.AddRange(alice, bob, ann, charlie, acme, hiddenStudio, summer, hiddenTag, videoFolder, imageFolder, galleryFolder, video, image, gallery);
         await context.SaveChangesAsync();
 
         return new SeededIds(acme.Id, ann.Id);
@@ -234,3 +234,4 @@ public class AutoTagServiceTests
             => Task.FromResult<IReadOnlyDictionary<int, List<TagProvenanceDto>>>(new Dictionary<int, List<TagProvenanceDto>>());
     }
 }
+

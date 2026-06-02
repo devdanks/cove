@@ -146,7 +146,7 @@ public sealed class Phase12SchemaParityTests
                 false,
                 ARRAY[]::text[],
                 NULL::uuid,
-                'scene',
+                'video',
                 1
             )
             """;
@@ -227,3 +227,4 @@ public sealed class Phase12SchemaParityTests
         }
     }
 }
+

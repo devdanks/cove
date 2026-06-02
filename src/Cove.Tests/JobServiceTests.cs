@@ -50,20 +50,20 @@ public class JobServiceTests
             IJobService jobs = service;
             var jobId = service.Enqueue(
                 "ai-batch",
-                "Analyzing scenes",
+                "Analyzing videos",
                 async (progress, ct) =>
                 {
                     var result = await jobs.RunBatchAsync(
-                        units: new[] { "scene-a", "scene-b", "scene-c" },
+                        units: new[] { "video-a", "video-b", "video-c" },
                         maxInFlight: 2,
-                        work: async (sceneId, unit, innerCt) =>
+                        work: async (videoId, unit, innerCt) =>
                         {
-                            unit.Report(0.5, $"Analyzing {sceneId}");
+                            unit.Report(0.5, $"Analyzing {videoId}");
                             await Task.Delay(20, innerCt);
-                            if (sceneId == "scene-b")
+                            if (videoId == "video-b")
                                 throw new InvalidOperationException("analysis failed");
 
-                            unit.Complete(JobUnitOutcome.Succeeded, $"Finished {sceneId}");
+                            unit.Complete(JobUnitOutcome.Succeeded, $"Finished {videoId}");
                         },
                         progress: progress,
                         ct: ct);

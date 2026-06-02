@@ -104,6 +104,77 @@ static async Task<bool> HasPostgresApplicationTablesAsync(CoveContext db)
     }
 }
 
+static async Task<bool> HasPostgresColumnAsync(CoveContext db, string tableName, string columnName)
+{
+    var conn = db.Database.GetDbConnection();
+    var shouldClose = conn.State != System.Data.ConnectionState.Open;
+    if (shouldClose)
+        await conn.OpenAsync();
+
+    try
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = @tableName
+              AND column_name = @columnName
+            LIMIT 1
+            """;
+
+        var tableParameter = cmd.CreateParameter();
+        tableParameter.ParameterName = "tableName";
+        tableParameter.Value = tableName;
+        cmd.Parameters.Add(tableParameter);
+
+        var columnParameter = cmd.CreateParameter();
+        columnParameter.ParameterName = "columnName";
+        columnParameter.Value = columnName;
+        cmd.Parameters.Add(columnParameter);
+
+        return await cmd.ExecuteScalarAsync() != null;
+    }
+    finally
+    {
+        if (shouldClose)
+            await conn.CloseAsync();
+    }
+}
+
+static async Task<bool> HasPostgresTableAsync(CoveContext db, string tableName)
+{
+    var conn = db.Database.GetDbConnection();
+    var shouldClose = conn.State != System.Data.ConnectionState.Open;
+    if (shouldClose)
+        await conn.OpenAsync();
+
+    try
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_schema = 'public'
+              AND table_type = 'BASE TABLE'
+              AND table_name = @tableName
+            LIMIT 1
+            """;
+
+        var tableParameter = cmd.CreateParameter();
+        tableParameter.ParameterName = "tableName";
+        tableParameter.Value = tableName;
+        cmd.Parameters.Add(tableParameter);
+
+        return await cmd.ExecuteScalarAsync() != null;
+    }
+    finally
+    {
+        if (shouldClose)
+            await conn.CloseAsync();
+    }
+}
+
 try
 {
     var builder = WebApplication.CreateBuilder(args);
@@ -195,12 +266,12 @@ try
     builder.Services.AddSingleton<ConfigService>();
     builder.Services.AddSingleton<AuthBypassPrincipalProvider>();
     builder.Services.AddSingleton<ScraperService>();
-    builder.Services.AddSingleton<ISceneCoverService, SceneCoverService>();
-    builder.Services.AddScoped<ISceneMetadataApplyService, SceneMetadataApplyService>();
+    builder.Services.AddSingleton<IVideoCoverService, VideoCoverService>();
+    builder.Services.AddScoped<IVideoMetadataApplyService, VideoMetadataApplyService>();
     builder.Services.AddScoped<IGroupMetadataApplyService, GroupMetadataApplyService>();
     builder.Services.AddScoped<PerformerScrapeService>();
     builder.Services.AddScoped<ScrapeAttemptService>();
-    builder.Services.AddScoped<SceneBatchScrapeService>();
+    builder.Services.AddScoped<VideoBatchScrapeService>();
     builder.Services.AddScoped<ImageBatchScrapeService>();
     builder.Services.AddSingleton<DownloaderService>();
     builder.Services.AddSingleton<ITranscodeService, TranscodeService>();
@@ -332,7 +403,7 @@ try
     builder.Services.AddEndpointsApiExplorer();
     builder.Services.AddSwaggerGen();
 
-    // Response compression â€” reduces 22KB scene lists to ~2KB
+    // Response compression â€” reduces 22KB video lists to ~2KB
     builder.Services.AddResponseCompression(options =>
     {
         options.EnableForHttps = true;
@@ -557,7 +628,22 @@ try
                     }
                     else
                     {
-                        Log.Information("Database is up to date");
+                        if (!await HasPostgresTableAsync(db, "videos"))
+                        {
+                            schemaCurrent = false;
+                            Log.Warning(
+                                "Database is missing required table public.videos. Startup will skip model-dependent warmup until migrations are applied.");
+                        }
+                        else if (!await HasPostgresColumnAsync(db, "groups", "ShowInVideoLists"))
+                        {
+                            schemaCurrent = false;
+                            Log.Warning(
+                                "Database is missing required column public.groups.\"ShowInVideoLists\". Startup will skip model-dependent warmup until migrations are applied.");
+                        }
+                        else
+                        {
+                            Log.Information("Database is up to date");
+                        }
                     }
                 }
             }
@@ -566,24 +652,25 @@ try
                 await db.Database.EnsureCreatedAsync();
             }
 
-            await scope.ServiceProvider
-                .GetRequiredService<DynamicGroupResolver>()
-                .EnsureBuiltInGroupsAsync(CancellationToken.None);
-
             if (schemaCurrent)
             {
+                await scope.ServiceProvider
+                    .GetRequiredService<DynamicGroupResolver>()
+                    .EnsureBuiltInGroupsAsync(CancellationToken.None);
+
                 // Pre-warm: compile EF Core query cache, prime connection pool, JIT hot paths
-                _ = await db.Scenes.CountAsync();
-                _ = await db.Scenes.AsNoTracking()
+                _ = await db.Videos.CountAsync();
+                _ = await db.Videos.AsNoTracking()
                     .OrderBy(s => s.Id)
                     .Include(s => s.Files).ThenInclude(f => f.Fingerprints)
-                    .Include(s => s.SceneTags).ThenInclude(st => st.Tag)
-                    .Include(s => s.ScenePerformers).ThenInclude(sp => sp.Performer)
+                    .Include(s => s.VideoTags).ThenInclude(st => st.Tag)
+                    .Include(s => s.VideoPerformers).ThenInclude(sp => sp.Performer)
                     .Take(1).AsSplitQuery().ToListAsync();
                 Log.Information("EF Core and connection pool pre-warmed");
             }
             else
             {
+                Log.Warning("Skipping built-in group sync because database migrations are pending manual approval");
                 Log.Warning("Skipping EF Core pre-warm because database migrations are pending manual approval");
             }
         }
@@ -666,3 +753,4 @@ finally
 public partial class Program
 {
 }
+

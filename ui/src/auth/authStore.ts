@@ -19,7 +19,7 @@ export interface AuthUser {
 }
 
 const READ_PERMISSION_GRANTS: Record<string, string> = {
-  "scenes.read": "scene",
+  "videos.read": "video",
   "audios.read": "audio",
   "texts.read": "text",
   "images.read": "image",
@@ -119,3 +119,4 @@ export function hasPermission(perms: string[] | undefined | null, key: string, r
   if (perms.includes(`*.${verb}`)) return true;
   return false;
 }
+

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Text.Json;
 using Cove.Data.Auth;
@@ -284,7 +284,7 @@ namespace Cove.Data.Migrations
                     SearchText = table.Column<string>(type: "text", nullable: true),
                     ImageBlobId = table.Column<string>(type: "text", nullable: true),
                     ImageOverrideBlobId = table.Column<string>(type: "text", nullable: true),
-                    SceneCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
+                    VideoCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     ImageCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     GalleryCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     TagCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
@@ -459,7 +459,7 @@ namespace Cove.Data.Migrations
                     SearchText = table.Column<string>(type: "text", nullable: true),
                     ImageBlobId = table.Column<string>(type: "text", nullable: true),
                     ImageOverrideBlobId = table.Column<string>(type: "text", nullable: true),
-                    SceneCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
+                    VideoCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     ImageCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     GalleryCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     GroupCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
@@ -613,7 +613,7 @@ namespace Cove.Data.Migrations
                     DetectionCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     AppearanceCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     FrameSampleCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
-                    SceneCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
+                    VideoCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     ImageCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     PrimarySourceKey = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: true),
                     SearchText = table.Column<string>(type: "text", nullable: true),
@@ -861,7 +861,7 @@ namespace Cove.Data.Migrations
                     TagIds = table.Column<int[]>(type: "integer[]", nullable: false),
                     PerformerIds = table.Column<int[]>(type: "integer[]", nullable: false),
                     ImageCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
-                    SceneCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
+                    VideoCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     PerformerCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     TagCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     SearchVector = table.Column<NpgsqlTsVector>(type: "tsvector", nullable: true, computedColumnSql: "setweight(to_tsvector('simple', coalesce(\"Title\", '') || ' ' || coalesce(\"Code\", '')), 'A') ||\r\nsetweight(to_tsvector('simple', coalesce(\"Details\", '') || ' ' || coalesce(\"Photographer\", '')), 'B') ||\r\nsetweight(to_tsvector('simple', coalesce(\"SearchText\", '')), 'C')", stored: true),
@@ -898,7 +898,7 @@ namespace Cove.Data.Migrations
                     LastResolvedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: true),
                     CachedItemCount = table.Column<int>(type: "integer", nullable: true),
                     CacheTtlSec = table.Column<int>(type: "integer", nullable: false),
-                    ShowInSceneLists = table.Column<bool>(type: "boolean", nullable: false),
+                    ShowInVideoLists = table.Column<bool>(type: "boolean", nullable: false),
                     SortOrder = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     AllowedHostTypes = table.Column<List<string>>(type: "text[]", nullable: false),
                     Aliases = table.Column<string>(type: "text", nullable: true),
@@ -971,7 +971,7 @@ namespace Cove.Data.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "scenes",
+                name: "videos",
                 columns: table => new
                 {
                     Id = table.Column<int>(type: "integer", nullable: false)
@@ -987,7 +987,7 @@ namespace Cove.Data.Migrations
                     Captions = table.Column<string>(type: "text", nullable: true),
                     InteractiveSpeed = table.Column<int>(type: "integer", nullable: true),
                     ImageBlobId = table.Column<string>(type: "text", nullable: true),
-                    ParentSceneId = table.Column<int>(type: "integer", nullable: true),
+                    ParentVideoId = table.Column<int>(type: "integer", nullable: true),
                     ClipStartSec = table.Column<double>(type: "double precision", nullable: true),
                     ClipEndSec = table.Column<double>(type: "double precision", nullable: true),
                     TagIds = table.Column<int[]>(type: "integer[]", nullable: false),
@@ -1016,15 +1016,15 @@ namespace Cove.Data.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_scenes", x => x.Id);
+                    table.PrimaryKey("PK_videos", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_scenes_scenes_ParentSceneId",
-                        column: x => x.ParentSceneId,
-                        principalTable: "scenes",
+                        name: "FK_videos_videos_ParentVideoId",
+                        column: x => x.ParentVideoId,
+                        principalTable: "videos",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                     table.ForeignKey(
-                        name: "FK_scenes_studios_StudioId",
+                        name: "FK_videos_studios_StudioId",
                         column: x => x.StudioId,
                         principalTable: "studios",
                         principalColumn: "Id",
@@ -1153,8 +1153,8 @@ namespace Cove.Data.Migrations
                     SearchText = table.Column<string>(type: "text", nullable: true),
                     ImageBlobId = table.Column<string>(type: "text", nullable: true),
                     ImageOverrideBlobId = table.Column<string>(type: "text", nullable: true),
-                    SceneCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
-                    SceneMarkerCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
+                    VideoCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
+                    VideoMarkerCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     ImageCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     GalleryCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     GroupCount = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
@@ -1650,9 +1650,9 @@ namespace Cove.Data.Migrations
                     GroupId = table.Column<int>(type: "integer", nullable: false),
                     OrderIndex = table.Column<int>(type: "integer", nullable: false),
                     Kind = table.Column<int>(type: "integer", nullable: false),
-                    HostType = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: false, defaultValue: "scene"),
+                    HostType = table.Column<string>(type: "character varying(50)", maxLength: 50, nullable: false, defaultValue: "video"),
                     HostId = table.Column<int>(type: "integer", nullable: false),
-                    SceneId = table.Column<int>(type: "integer", nullable: true),
+                    VideoId = table.Column<int>(type: "integer", nullable: true),
                     ImageId = table.Column<int>(type: "integer", nullable: true),
                     ChildGroupId = table.Column<int>(type: "integer", nullable: true),
                     StartSec = table.Column<double>(type: "double precision", nullable: true),
@@ -1688,138 +1688,138 @@ namespace Cove.Data.Migrations
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                     table.ForeignKey(
-                        name: "FK_group_items_scenes_SceneId",
-                        column: x => x.SceneId,
-                        principalTable: "scenes",
+                        name: "FK_group_items_videos_VideoId",
+                        column: x => x.VideoId,
+                        principalTable: "videos",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                 });
 
             migrationBuilder.CreateTable(
-                name: "scene_galleries",
+                name: "video_galleries",
                 columns: table => new
                 {
-                    SceneId = table.Column<int>(type: "integer", nullable: false),
+                    VideoId = table.Column<int>(type: "integer", nullable: false),
                     GalleryId = table.Column<int>(type: "integer", nullable: false)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_scene_galleries", x => new { x.SceneId, x.GalleryId });
+                    table.PrimaryKey("PK_video_galleries", x => new { x.VideoId, x.GalleryId });
                     table.ForeignKey(
-                        name: "FK_scene_galleries_galleries_GalleryId",
+                        name: "FK_video_galleries_galleries_GalleryId",
                         column: x => x.GalleryId,
                         principalTable: "galleries",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                     table.ForeignKey(
-                        name: "FK_scene_galleries_scenes_SceneId",
-                        column: x => x.SceneId,
-                        principalTable: "scenes",
+                        name: "FK_video_galleries_videos_VideoId",
+                        column: x => x.VideoId,
+                        principalTable: "videos",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                 });
 
             migrationBuilder.CreateTable(
-                name: "scene_performers",
+                name: "video_performers",
                 columns: table => new
                 {
-                    SceneId = table.Column<int>(type: "integer", nullable: false),
+                    VideoId = table.Column<int>(type: "integer", nullable: false),
                     PerformerId = table.Column<int>(type: "integer", nullable: false)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_scene_performers", x => new { x.SceneId, x.PerformerId });
+                    table.PrimaryKey("PK_video_performers", x => new { x.VideoId, x.PerformerId });
                     table.ForeignKey(
-                        name: "FK_scene_performers_performers_PerformerId",
+                        name: "FK_video_performers_performers_PerformerId",
                         column: x => x.PerformerId,
                         principalTable: "performers",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                     table.ForeignKey(
-                        name: "FK_scene_performers_scenes_SceneId",
-                        column: x => x.SceneId,
-                        principalTable: "scenes",
+                        name: "FK_video_performers_videos_VideoId",
+                        column: x => x.VideoId,
+                        principalTable: "videos",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                 });
 
             migrationBuilder.CreateTable(
-                name: "SceneLikeHistory",
+                name: "VideoLikeHistory",
                 columns: table => new
                 {
                     Id = table.Column<int>(type: "integer", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    SceneId = table.Column<int>(type: "integer", nullable: false),
+                    VideoId = table.Column<int>(type: "integer", nullable: false),
                     OccurredAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_SceneLikeHistory", x => x.Id);
+                    table.PrimaryKey("PK_VideoLikeHistory", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_SceneLikeHistory_scenes_SceneId",
-                        column: x => x.SceneId,
-                        principalTable: "scenes",
+                        name: "FK_VideoLikeHistory_videos_VideoId",
+                        column: x => x.VideoId,
+                        principalTable: "videos",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                 });
 
             migrationBuilder.CreateTable(
-                name: "ScenePlayHistory",
+                name: "VideoPlayHistory",
                 columns: table => new
                 {
                     Id = table.Column<int>(type: "integer", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    SceneId = table.Column<int>(type: "integer", nullable: false),
+                    VideoId = table.Column<int>(type: "integer", nullable: false),
                     PlayedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_ScenePlayHistory", x => x.Id);
+                    table.PrimaryKey("PK_VideoPlayHistory", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_ScenePlayHistory_scenes_SceneId",
-                        column: x => x.SceneId,
-                        principalTable: "scenes",
+                        name: "FK_VideoPlayHistory_videos_VideoId",
+                        column: x => x.VideoId,
+                        principalTable: "videos",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                 });
 
             migrationBuilder.CreateTable(
-                name: "SceneRemoteId",
+                name: "VideoRemoteId",
                 columns: table => new
                 {
                     Id = table.Column<int>(type: "integer", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    SceneId = table.Column<int>(type: "integer", nullable: false),
+                    VideoId = table.Column<int>(type: "integer", nullable: false),
                     Endpoint = table.Column<string>(type: "text", nullable: false),
                     RemoteId = table.Column<string>(type: "text", nullable: false)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_SceneRemoteId", x => x.Id);
+                    table.PrimaryKey("PK_VideoRemoteId", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_SceneRemoteId_scenes_SceneId",
-                        column: x => x.SceneId,
-                        principalTable: "scenes",
+                        name: "FK_VideoRemoteId_videos_VideoId",
+                        column: x => x.VideoId,
+                        principalTable: "videos",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                 });
 
             migrationBuilder.CreateTable(
-                name: "SceneUrl",
+                name: "VideoUrl",
                 columns: table => new
                 {
                     Id = table.Column<int>(type: "integer", nullable: false)
                         .Annotation("Npgsql:ValueGenerationStrategy", NpgsqlValueGenerationStrategy.IdentityByDefaultColumn),
-                    SceneId = table.Column<int>(type: "integer", nullable: false),
+                    VideoId = table.Column<int>(type: "integer", nullable: false),
                     Url = table.Column<string>(type: "text", nullable: false)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_SceneUrl", x => x.Id);
+                    table.PrimaryKey("PK_VideoUrl", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_SceneUrl_scenes_SceneId",
-                        column: x => x.SceneId,
-                        principalTable: "scenes",
+                        name: "FK_VideoUrl_videos_VideoId",
+                        column: x => x.VideoId,
+                        principalTable: "videos",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                 });
@@ -1867,7 +1867,7 @@ namespace Cove.Data.Migrations
                     VideoFile_BitRate = table.Column<long>(type: "bigint", nullable: true),
                     Interactive = table.Column<bool>(type: "boolean", nullable: true),
                     InteractiveSpeed = table.Column<int>(type: "integer", nullable: true),
-                    SceneId = table.Column<int>(type: "integer", nullable: true)
+                    VideoId = table.Column<int>(type: "integer", nullable: true)
                 },
                 constraints: table =>
                 {
@@ -1897,9 +1897,9 @@ namespace Cove.Data.Migrations
                         principalColumn: "Id",
                         onDelete: ReferentialAction.SetNull);
                     table.ForeignKey(
-                        name: "FK_files_scenes_SceneId",
-                        column: x => x.SceneId,
-                        principalTable: "scenes",
+                        name: "FK_files_videos_VideoId",
+                        column: x => x.VideoId,
+                        principalTable: "videos",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.SetNull);
                     table.ForeignKey(
@@ -2075,7 +2075,7 @@ namespace Cove.Data.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "scene_markers",
+                name: "video_markers",
                 columns: table => new
                 {
                     Id = table.Column<int>(type: "integer", nullable: false)
@@ -2084,21 +2084,21 @@ namespace Cove.Data.Migrations
                     Seconds = table.Column<double>(type: "double precision", nullable: false),
                     EndSeconds = table.Column<double>(type: "double precision", nullable: true),
                     PrimaryTagId = table.Column<int>(type: "integer", nullable: false),
-                    SceneId = table.Column<int>(type: "integer", nullable: false),
+                    VideoId = table.Column<int>(type: "integer", nullable: false),
                     CreatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     UpdatedAt = table.Column<DateTime>(type: "timestamp with time zone", nullable: false)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_scene_markers", x => x.Id);
+                    table.PrimaryKey("PK_video_markers", x => x.Id);
                     table.ForeignKey(
-                        name: "FK_scene_markers_scenes_SceneId",
-                        column: x => x.SceneId,
-                        principalTable: "scenes",
+                        name: "FK_video_markers_videos_VideoId",
+                        column: x => x.VideoId,
+                        principalTable: "videos",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                     table.ForeignKey(
-                        name: "FK_scene_markers_tags_PrimaryTagId",
+                        name: "FK_video_markers_tags_PrimaryTagId",
                         column: x => x.PrimaryTagId,
                         principalTable: "tags",
                         principalColumn: "Id",
@@ -2106,23 +2106,23 @@ namespace Cove.Data.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "scene_tags",
+                name: "video_tags",
                 columns: table => new
                 {
-                    SceneId = table.Column<int>(type: "integer", nullable: false),
+                    VideoId = table.Column<int>(type: "integer", nullable: false),
                     TagId = table.Column<int>(type: "integer", nullable: false)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_scene_tags", x => new { x.SceneId, x.TagId });
+                    table.PrimaryKey("PK_video_tags", x => new { x.VideoId, x.TagId });
                     table.ForeignKey(
-                        name: "FK_scene_tags_scenes_SceneId",
-                        column: x => x.SceneId,
-                        principalTable: "scenes",
+                        name: "FK_video_tags_videos_VideoId",
+                        column: x => x.VideoId,
+                        principalTable: "videos",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                     table.ForeignKey(
-                        name: "FK_scene_tags_tags_TagId",
+                        name: "FK_video_tags_tags_TagId",
                         column: x => x.TagId,
                         principalTable: "tags",
                         principalColumn: "Id",
@@ -2391,23 +2391,23 @@ namespace Cove.Data.Migrations
                 });
 
             migrationBuilder.CreateTable(
-                name: "scene_marker_tags",
+                name: "video_marker_tags",
                 columns: table => new
                 {
-                    SceneMarkerId = table.Column<int>(type: "integer", nullable: false),
+                    VideoMarkerId = table.Column<int>(type: "integer", nullable: false),
                     TagId = table.Column<int>(type: "integer", nullable: false)
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PK_scene_marker_tags", x => new { x.SceneMarkerId, x.TagId });
+                    table.PrimaryKey("PK_video_marker_tags", x => new { x.VideoMarkerId, x.TagId });
                     table.ForeignKey(
-                        name: "FK_scene_marker_tags_scene_markers_SceneMarkerId",
-                        column: x => x.SceneMarkerId,
-                        principalTable: "scene_markers",
+                        name: "FK_video_marker_tags_video_markers_VideoMarkerId",
+                        column: x => x.VideoMarkerId,
+                        principalTable: "video_markers",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
                     table.ForeignKey(
-                        name: "FK_scene_marker_tags_tags_TagId",
+                        name: "FK_video_marker_tags_tags_TagId",
                         column: x => x.TagId,
                         principalTable: "tags",
                         principalColumn: "Id",
@@ -2797,9 +2797,9 @@ namespace Cove.Data.Migrations
                 column: "Path");
 
             migrationBuilder.CreateIndex(
-                name: "IX_files_SceneId_Path",
+                name: "IX_files_VideoId_Path",
                 table: "files",
-                columns: new[] { "SceneId", "Path" });
+                columns: new[] { "VideoId", "Path" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_files_TextDocumentId_Path",
@@ -2854,9 +2854,9 @@ namespace Cove.Data.Migrations
                 .Annotation("Npgsql:IndexMethod", "gin");
 
             migrationBuilder.CreateIndex(
-                name: "IX_galleries_SceneCount",
+                name: "IX_galleries_VideoCount",
                 table: "galleries",
-                column: "SceneCount");
+                column: "VideoCount");
 
             migrationBuilder.CreateIndex(
                 name: "IX_galleries_SearchVector",
@@ -2931,9 +2931,9 @@ namespace Cove.Data.Migrations
                 column: "ImageId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_group_items_SceneId",
+                name: "IX_group_items_VideoId",
                 table: "group_items",
-                column: "SceneId");
+                column: "VideoId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_group_items_SourceProfileId",
@@ -3145,9 +3145,9 @@ namespace Cove.Data.Migrations
                 column: "Name");
 
             migrationBuilder.CreateIndex(
-                name: "IX_performers_SceneCount",
+                name: "IX_performers_VideoCount",
                 table: "performers",
-                column: "SceneCount");
+                column: "VideoCount");
 
             migrationBuilder.CreateIndex(
                 name: "IX_performers_SearchVector",
@@ -3246,192 +3246,192 @@ namespace Cove.Data.Migrations
                 unique: true);
 
             migrationBuilder.CreateIndex(
-                name: "IX_scene_galleries_GalleryId",
-                table: "scene_galleries",
+                name: "IX_video_galleries_GalleryId",
+                table: "video_galleries",
                 column: "GalleryId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scene_marker_tags_TagId",
-                table: "scene_marker_tags",
+                name: "IX_video_marker_tags_TagId",
+                table: "video_marker_tags",
                 column: "TagId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scene_markers_PrimaryTagId",
-                table: "scene_markers",
+                name: "IX_video_markers_PrimaryTagId",
+                table: "video_markers",
                 column: "PrimaryTagId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scene_markers_SceneId",
-                table: "scene_markers",
-                column: "SceneId");
+                name: "IX_video_markers_VideoId",
+                table: "video_markers",
+                column: "VideoId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scene_performers_PerformerId",
-                table: "scene_performers",
+                name: "IX_video_performers_PerformerId",
+                table: "video_performers",
                 column: "PerformerId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scene_tags_TagId",
-                table: "scene_tags",
+                name: "IX_video_tags_TagId",
+                table: "video_tags",
                 column: "TagId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_SceneLikeHistory_SceneId",
-                table: "SceneLikeHistory",
-                column: "SceneId");
+                name: "IX_VideoLikeHistory_VideoId",
+                table: "VideoLikeHistory",
+                column: "VideoId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_ScenePlayHistory_SceneId",
-                table: "ScenePlayHistory",
-                column: "SceneId");
+                name: "IX_VideoPlayHistory_VideoId",
+                table: "VideoPlayHistory",
+                column: "VideoId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_SceneRemoteId_SceneId",
-                table: "SceneRemoteId",
-                column: "SceneId");
+                name: "IX_VideoRemoteId_VideoId",
+                table: "VideoRemoteId",
+                column: "VideoId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scenes_CreatedAt",
-                table: "scenes",
+                name: "IX_videos_CreatedAt",
+                table: "videos",
                 column: "CreatedAt");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scenes_Date",
-                table: "scenes",
+                name: "IX_videos_Date",
+                table: "videos",
                 column: "Date");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scenes_FileCount",
-                table: "scenes",
+                name: "IX_videos_FileCount",
+                table: "videos",
                 column: "FileCount");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scenes_HasDimensionData",
-                table: "scenes",
+                name: "IX_videos_HasDimensionData",
+                table: "videos",
                 column: "HasDimensionData");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scenes_HasInteractiveFiles",
-                table: "scenes",
+                name: "IX_videos_HasInteractiveFiles",
+                table: "videos",
                 column: "HasInteractiveFiles");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scenes_HasLandscapeFiles",
-                table: "scenes",
+                name: "IX_videos_HasLandscapeFiles",
+                table: "videos",
                 column: "HasLandscapeFiles");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scenes_HasNonInteractiveFiles",
-                table: "scenes",
+                name: "IX_videos_HasNonInteractiveFiles",
+                table: "videos",
                 column: "HasNonInteractiveFiles");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scenes_HasPortraitFiles",
-                table: "scenes",
+                name: "IX_videos_HasPortraitFiles",
+                table: "videos",
                 column: "HasPortraitFiles");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scenes_HasSquareFiles",
-                table: "scenes",
+                name: "IX_videos_HasSquareFiles",
+                table: "videos",
                 column: "HasSquareFiles");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scenes_MaxBitRate",
-                table: "scenes",
+                name: "IX_videos_MaxBitRate",
+                table: "videos",
                 column: "MaxBitRate");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scenes_MaxDuration",
-                table: "scenes",
+                name: "IX_videos_MaxDuration",
+                table: "videos",
                 column: "MaxDuration");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scenes_MaxFileModTime",
-                table: "scenes",
+                name: "IX_videos_MaxFileModTime",
+                table: "videos",
                 column: "MaxFileModTime");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scenes_MaxFileSize",
-                table: "scenes",
+                name: "IX_videos_MaxFileSize",
+                table: "videos",
                 column: "MaxFileSize");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scenes_MaxFrameRate",
-                table: "scenes",
+                name: "IX_videos_MaxFrameRate",
+                table: "videos",
                 column: "MaxFrameRate");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scenes_MaxHeight",
-                table: "scenes",
+                name: "IX_videos_MaxHeight",
+                table: "videos",
                 column: "MaxHeight");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scenes_MaxPath",
-                table: "scenes",
+                name: "IX_videos_MaxPath",
+                table: "videos",
                 column: "MaxPath");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scenes_MaxResolution",
-                table: "scenes",
+                name: "IX_videos_MaxResolution",
+                table: "videos",
                 column: "MaxResolution");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scenes_MinPath",
-                table: "scenes",
+                name: "IX_videos_MinPath",
+                table: "videos",
                 column: "MinPath");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scenes_Organized",
-                table: "scenes",
+                name: "IX_videos_Organized",
+                table: "videos",
                 column: "Organized");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scenes_IsVr",
-                table: "scenes",
+                name: "IX_videos_IsVr",
+                table: "videos",
                 column: "IsVr");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scenes_ParentSceneId",
-                table: "scenes",
-                column: "ParentSceneId");
+                name: "IX_videos_ParentVideoId",
+                table: "videos",
+                column: "ParentVideoId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scenes_PerformerIds",
-                table: "scenes",
+                name: "IX_videos_PerformerIds",
+                table: "videos",
                 column: "PerformerIds")
                 .Annotation("Npgsql:IndexMethod", "gin");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scenes_SearchVector",
-                table: "scenes",
+                name: "IX_videos_SearchVector",
+                table: "videos",
                 column: "SearchVector")
                 .Annotation("Npgsql:IndexMethod", "gin");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scenes_StudioId",
-                table: "scenes",
+                name: "IX_videos_StudioId",
+                table: "videos",
                 column: "StudioId");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scenes_TagIds",
-                table: "scenes",
+                name: "IX_videos_TagIds",
+                table: "videos",
                 column: "TagIds")
                 .Annotation("Npgsql:IndexMethod", "gin");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scenes_Title",
-                table: "scenes",
+                name: "IX_videos_Title",
+                table: "videos",
                 column: "Title");
 
             migrationBuilder.CreateIndex(
-                name: "IX_scenes_UpdatedAt",
-                table: "scenes",
+                name: "IX_videos_UpdatedAt",
+                table: "videos",
                 column: "UpdatedAt");
 
             migrationBuilder.CreateIndex(
-                name: "IX_SceneUrl_SceneId",
-                table: "SceneUrl",
-                column: "SceneId");
+                name: "IX_VideoUrl_VideoId",
+                table: "VideoUrl",
+                column: "VideoId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_scrape_attempts_CreatedAt",
@@ -3580,9 +3580,9 @@ namespace Cove.Data.Migrations
                 column: "PerformerCount");
 
             migrationBuilder.CreateIndex(
-                name: "IX_studios_SceneCount",
+                name: "IX_studios_VideoCount",
                 table: "studios",
-                column: "SceneCount");
+                column: "VideoCount");
 
             migrationBuilder.CreateIndex(
                 name: "IX_studios_SearchVector",
@@ -3697,14 +3697,14 @@ namespace Cove.Data.Migrations
                 column: "PerformerCount");
 
             migrationBuilder.CreateIndex(
-                name: "IX_tags_SceneCount",
+                name: "IX_tags_VideoCount",
                 table: "tags",
-                column: "SceneCount");
+                column: "VideoCount");
 
             migrationBuilder.CreateIndex(
-                name: "IX_tags_SceneMarkerCount",
+                name: "IX_tags_VideoMarkerCount",
                 table: "tags",
-                column: "SceneMarkerCount");
+                column: "VideoMarkerCount");
 
             migrationBuilder.CreateIndex(
                 name: "IX_tags_SearchVector",
@@ -3974,28 +3974,28 @@ namespace Cove.Data.Migrations
                 name: "saved_filters");
 
             migrationBuilder.DropTable(
-                name: "scene_galleries");
+                name: "video_galleries");
 
             migrationBuilder.DropTable(
-                name: "scene_marker_tags");
+                name: "video_marker_tags");
 
             migrationBuilder.DropTable(
-                name: "scene_performers");
+                name: "video_performers");
 
             migrationBuilder.DropTable(
-                name: "scene_tags");
+                name: "video_tags");
 
             migrationBuilder.DropTable(
-                name: "SceneLikeHistory");
+                name: "VideoLikeHistory");
 
             migrationBuilder.DropTable(
-                name: "ScenePlayHistory");
+                name: "VideoPlayHistory");
 
             migrationBuilder.DropTable(
-                name: "SceneRemoteId");
+                name: "VideoRemoteId");
 
             migrationBuilder.DropTable(
-                name: "SceneUrl");
+                name: "VideoUrl");
 
             migrationBuilder.DropTable(
                 name: "scrape_attempts");
@@ -4073,7 +4073,7 @@ namespace Cove.Data.Migrations
                 name: "permissions");
 
             migrationBuilder.DropTable(
-                name: "scene_markers");
+                name: "video_markers");
 
             migrationBuilder.DropTable(
                 name: "segment_display_profiles");
@@ -4103,7 +4103,7 @@ namespace Cove.Data.Migrations
                 name: "images");
 
             migrationBuilder.DropTable(
-                name: "scenes");
+                name: "videos");
 
             migrationBuilder.DropTable(
                 name: "text_documents");
@@ -4119,3 +4119,4 @@ namespace Cove.Data.Migrations
         }
     }
 }
+

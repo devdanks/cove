@@ -8,7 +8,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Cove.Api.Services;
 
-public class ScrapeAttemptService(CoveContext db, ScraperService scraperService, ISceneCoverService sceneCoverService, PerformerScrapeService performerScrapeService, ITagProvenanceService tagProvenanceService, IGroupMetadataApplyService groupMetadataApplyService, ILogger<ScrapeAttemptService> logger, IFieldProvenanceService? fieldProvenanceService = null)
+public class ScrapeAttemptService(CoveContext db, ScraperService scraperService, IVideoCoverService videoCoverService, PerformerScrapeService performerScrapeService, ITagProvenanceService tagProvenanceService, IGroupMetadataApplyService groupMetadataApplyService, ILogger<ScrapeAttemptService> logger, IFieldProvenanceService? fieldProvenanceService = null)
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -100,11 +100,11 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
             return null;
 
         var fragment = new Dictionary<string, object>(dto.Fragment, StringComparer.OrdinalIgnoreCase);
-        if (!string.Equals(dto.EntityType, "scene", StringComparison.OrdinalIgnoreCase) || dto.EntityId == null)
+        if (!string.Equals(dto.EntityType, "video", StringComparison.OrdinalIgnoreCase) || dto.EntityId == null)
             return fragment;
 
         var fingerprints = await db.VideoFiles
-            .Where(file => file.SceneId == dto.EntityId.Value)
+            .Where(file => file.VideoId == dto.EntityId.Value)
             .SelectMany(file => file.Fingerprints.Select(fingerprint => new { fingerprint.Type, fingerprint.Value }))
             .ToListAsync(ct);
 
@@ -147,10 +147,10 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         return attempt == null ? null : MapAttempt(attempt);
     }
 
-    public Task<ScrapeAttemptDto?> ApplySceneAttemptAsync(Guid id, ApplySceneScrapeAttemptDto dto, CancellationToken ct = default)
+    public Task<ScrapeAttemptDto?> ApplyVideoAttemptAsync(Guid id, ApplyVideoScrapeAttemptDto dto, CancellationToken ct = default)
         => ApplyAttemptAsync(id, dto, ct);
 
-    public async Task<ScrapeAttemptDto?> ApplyAttemptAsync(Guid id, ApplySceneScrapeAttemptDto dto, CancellationToken ct = default)
+    public async Task<ScrapeAttemptDto?> ApplyAttemptAsync(Guid id, ApplyVideoScrapeAttemptDto dto, CancellationToken ct = default)
     {
         var attempt = await db.ScrapeAttempts.FirstOrDefaultAsync(item => item.Id == id, ct);
         if (attempt == null || attempt.EntityId == null)
@@ -164,7 +164,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
 
         return attempt.EntityType.Trim().ToLowerInvariant() switch
         {
-            EntityKinds.Scene => await ApplySceneAttemptInternalAsync(attempt, dto, resultJson, ct),
+            EntityKinds.Video => await ApplyVideoAttemptInternalAsync(attempt, dto, resultJson, ct),
             EntityKinds.Audio => await ApplyAudioAttemptInternalAsync(attempt, dto, resultJson, ct),
             EntityKinds.Text => await ApplyTextAttemptInternalAsync(attempt, dto, resultJson, ct),
             EntityKinds.Image => await ApplyImageAttemptInternalAsync(attempt, dto, resultJson, ct),
@@ -174,22 +174,22 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         };
     }
 
-    private async Task<ScrapeAttemptDto?> ApplySceneAttemptInternalAsync(ScrapeAttempt attempt, ApplySceneScrapeAttemptDto dto, string resultJson, CancellationToken ct)
+    private async Task<ScrapeAttemptDto?> ApplyVideoAttemptInternalAsync(ScrapeAttempt attempt, ApplyVideoScrapeAttemptDto dto, string resultJson, CancellationToken ct)
     {
-        if (!string.Equals(attempt.EntityType, EntityKinds.Scene, StringComparison.OrdinalIgnoreCase) || attempt.EntityId == null)
+        if (!string.Equals(attempt.EntityType, EntityKinds.Video, StringComparison.OrdinalIgnoreCase) || attempt.EntityId == null)
             return null;
 
-        var scene = await db.Scenes
+        var video = await db.Videos
             .Include(item => item.Urls)
-            .Include(item => item.SceneTags).ThenInclude(item => item.Tag)
-            .Include(item => item.ScenePerformers).ThenInclude(item => item.Performer)
+            .Include(item => item.VideoTags).ThenInclude(item => item.Tag)
+            .Include(item => item.VideoPerformers).ThenInclude(item => item.Performer)
             .Include(item => item.Studio)
             .FirstOrDefaultAsync(item => item.Id == attempt.EntityId.Value, ct);
 
-        if (scene == null)
+        if (video == null)
             return null;
 
-        attempt.EntitySnapshotJson = await BuildSceneSnapshotJsonAsync(scene.Id, ct);
+        attempt.EntitySnapshotJson = await BuildVideoSnapshotJsonAsync(video.Id, ct);
 
         using var resultDocument = JsonDocument.Parse(resultJson);
         var root = resultDocument.RootElement;
@@ -198,65 +198,65 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         var tagSelections = BuildSelectionLookup(dto.TagSelections);
         var performerSelections = BuildSelectionLookup(dto.PerformerSelections);
 
-        var availableFields = GetAvailableSceneFields(root);
+        var availableFields = GetAvailableVideoFields(root);
 
         if (replaceFields.Contains("title"))
         {
             var title = GetString(root, "Title", "Name");
             if (!string.IsNullOrWhiteSpace(title))
-                scene.Title = title;
+                video.Title = title;
         }
 
         if (replaceFields.Contains("code"))
         {
             var code = GetString(root, "Code");
             if (!string.IsNullOrWhiteSpace(code))
-                scene.Code = code;
+                video.Code = code;
         }
 
         if (replaceFields.Contains("details"))
         {
             var details = GetString(root, "Details", "Description", "Synopsis");
             if (!string.IsNullOrWhiteSpace(details))
-                scene.Details = details;
+                video.Details = details;
         }
 
         if (replaceFields.Contains("director"))
         {
             var director = GetString(root, "Director");
             if (!string.IsNullOrWhiteSpace(director))
-                scene.Director = director;
+                video.Director = director;
         }
 
         if (replaceFields.Contains("date"))
         {
             var date = GetString(root, "Date", "ReleaseDate");
-            if (ScrapedSceneDateParser.TryParse(date, out var parsedDate))
-                scene.Date = parsedDate;
+            if (ScrapedVideoDateParser.TryParse(date, out var parsedDate))
+                video.Date = parsedDate;
         }
 
         if (replaceFields.Contains("image"))
         {
             var imageUrl = GetString(root, "Image", "ImageUrl", "ImageURL");
-            await sceneCoverService.TryApplyRemoteCoverAsync(scene, imageUrl, ct);
+            await videoCoverService.TryApplyRemoteCoverAsync(video, imageUrl, ct);
         }
 
         var sourceKey = BuildScraperSourceKey(attempt.ScraperId);
         var sourceRunId = attempt.Id.ToString();
 
-        ApplyUrls(scene, root, collectionModes);
-        await ApplyTagsAsync(scene, root, collectionModes, dto.CreateMissingTags, tagSelections, sourceKey, sourceRunId, ct);
-        await ApplyPerformersAsync(scene, root, collectionModes, dto.CreateMissingPerformers, performerSelections, ct);
+        ApplyUrls(video, root, collectionModes);
+        await ApplyTagsAsync(video, root, collectionModes, dto.CreateMissingTags, tagSelections, sourceKey, sourceRunId, ct);
+        await ApplyPerformersAsync(video, root, collectionModes, dto.CreateMissingPerformers, performerSelections, ct);
         if (dto.HydratePerformers)
             await HydratePerformersAsync(root, dto.CreateMissingPerformers, dto.CreateMissingTags, performerSelections, ct);
-        await ApplyStudioAsync(scene, root, collectionModes, dto.CreateMissingStudio, ct);
+        await ApplyStudioAsync(video, root, collectionModes, dto.CreateMissingStudio, ct);
 
-        var fieldProvenance = BuildAppliedSceneFieldProvenance(root, replaceFields, collectionModes, tagSelections, performerSelections);
+        var fieldProvenance = BuildAppliedVideoFieldProvenance(root, replaceFields, collectionModes, tagSelections, performerSelections);
         if (fieldProvenance.Count > 0 && fieldProvenanceService != null)
-            await fieldProvenanceService.RecordManyAsync(AffinityHostType.Scene, scene.Id, fieldProvenance, sourceKey, sourceRunId: sourceRunId, cancellationToken: ct);
+            await fieldProvenanceService.RecordManyAsync(AffinityHostType.Video, video.Id, fieldProvenance, sourceKey, sourceRunId: sourceRunId, cancellationToken: ct);
 
         if (dto.MarkOrganized)
-            scene.Organized = true;
+            video.Organized = true;
 
         attempt.AppliedAt = DateTime.UtcNow;
         attempt.Status = DetermineApplyStatus(availableFields, replaceFields, collectionModes, dto);
@@ -265,38 +265,38 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         return MapAttempt(attempt);
     }
 
-    public async Task<ScrapeAttemptDto?> ApplySceneAttemptWithDefaultPlanAsync(Guid id, ApplySceneScrapeAttemptDto dto, CancellationToken ct = default)
+    public async Task<ScrapeAttemptDto?> ApplyVideoAttemptWithDefaultPlanAsync(Guid id, ApplyVideoScrapeAttemptDto dto, CancellationToken ct = default)
     {
         var attempt = await db.ScrapeAttempts.AsNoTracking().FirstOrDefaultAsync(item => item.Id == id, ct);
-        if (attempt == null || !string.Equals(attempt.EntityType, "scene", StringComparison.OrdinalIgnoreCase) || attempt.EntityId == null)
+        if (attempt == null || !string.Equals(attempt.EntityType, "video", StringComparison.OrdinalIgnoreCase) || attempt.EntityId == null)
             return null;
 
         var resultJson = ResolveResultJson(attempt, dto.SelectedCandidateIndex);
         if (string.IsNullOrWhiteSpace(resultJson))
             throw new InvalidOperationException("Scrape attempt does not contain a result to apply.");
 
-        var scene = await db.Scenes
+        var video = await db.Videos
             .AsNoTracking()
             .Include(item => item.Urls)
-            .Include(item => item.SceneTags).ThenInclude(item => item.Tag)
-            .Include(item => item.ScenePerformers).ThenInclude(item => item.Performer)
+            .Include(item => item.VideoTags).ThenInclude(item => item.Tag)
+            .Include(item => item.VideoPerformers).ThenInclude(item => item.Performer)
             .Include(item => item.Studio)
             .FirstOrDefaultAsync(item => item.Id == attempt.EntityId.Value, ct);
 
-        if (scene == null)
+        if (video == null)
             return null;
 
         using var resultDocument = JsonDocument.Parse(resultJson);
         var root = resultDocument.RootElement;
 
-        return await ApplySceneAttemptAsync(id, dto with
+        return await ApplyVideoAttemptAsync(id, dto with
         {
-            ReplaceFields = BuildDefaultReplaceFields(scene, root),
-            CollectionModes = BuildDefaultCollectionModes(scene, root),
+            ReplaceFields = BuildDefaultReplaceFields(video, root),
+            CollectionModes = BuildDefaultCollectionModes(video, root),
         }, ct);
     }
 
-    public async Task<ScrapeAttemptDto?> ApplyImageAttemptWithDefaultPlanAsync(Guid id, ApplySceneScrapeAttemptDto dto, CancellationToken ct = default)
+    public async Task<ScrapeAttemptDto?> ApplyImageAttemptWithDefaultPlanAsync(Guid id, ApplyVideoScrapeAttemptDto dto, CancellationToken ct = default)
     {
         var attempt = await db.ScrapeAttempts.AsNoTracking().FirstOrDefaultAsync(item => item.Id == id, ct);
         if (attempt == null || !string.Equals(attempt.EntityType, EntityKinds.Image, StringComparison.OrdinalIgnoreCase) || attempt.EntityId == null)
@@ -334,7 +334,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
 
         return entityType.Trim().ToLowerInvariant() switch
         {
-            EntityKinds.Scene => await BuildSceneSnapshotJsonAsync(entityId.Value, ct),
+            EntityKinds.Video => await BuildVideoSnapshotJsonAsync(entityId.Value, ct),
             EntityKinds.Audio => await BuildAudioSnapshotJsonAsync(entityId.Value, ct),
             EntityKinds.Text => await BuildTextSnapshotJsonAsync(entityId.Value, ct),
             EntityKinds.Image => await BuildImageSnapshotJsonAsync(entityId.Value, ct),
@@ -344,31 +344,31 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         };
     }
 
-    private async Task<string?> BuildSceneSnapshotJsonAsync(int sceneId, CancellationToken ct)
+    private async Task<string?> BuildVideoSnapshotJsonAsync(int videoId, CancellationToken ct)
     {
-        var scene = await db.Scenes
+        var video = await db.Videos
             .AsNoTracking()
             .Include(item => item.Urls)
-            .Include(item => item.SceneTags).ThenInclude(item => item.Tag)
-            .Include(item => item.ScenePerformers).ThenInclude(item => item.Performer)
+            .Include(item => item.VideoTags).ThenInclude(item => item.Tag)
+            .Include(item => item.VideoPerformers).ThenInclude(item => item.Performer)
             .Include(item => item.Studio)
-            .FirstOrDefaultAsync(item => item.Id == sceneId, ct);
+            .FirstOrDefaultAsync(item => item.Id == videoId, ct);
 
-        if (scene == null)
+        if (video == null)
             return null;
 
         var snapshot = new
         {
-            title = scene.Title,
-            code = scene.Code,
-            details = scene.Details,
-            director = scene.Director,
-            date = scene.Date?.ToString("yyyy-MM-dd"),
-            urls = scene.Urls.Select(item => item.Url).OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToList(),
-            studio = scene.Studio?.Name,
-            tags = scene.SceneTags.Where(item => item.Tag != null).Select(item => item.Tag!.Name).OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToList(),
-            performers = scene.ScenePerformers.Where(item => item.Performer != null).Select(item => item.Performer!.Name).OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToList(),
-            organized = scene.Organized,
+            title = video.Title,
+            code = video.Code,
+            details = video.Details,
+            director = video.Director,
+            date = video.Date?.ToString("yyyy-MM-dd"),
+            urls = video.Urls.Select(item => item.Url).OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToList(),
+            studio = video.Studio?.Name,
+            tags = video.VideoTags.Where(item => item.Tag != null).Select(item => item.Tag!.Name).OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToList(),
+            performers = video.VideoPerformers.Where(item => item.Performer != null).Select(item => item.Performer!.Name).OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToList(),
+            organized = video.Organized,
         };
 
         return JsonSerializer.Serialize(snapshot, JsonOptions);
@@ -521,7 +521,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         return JsonSerializer.Serialize(snapshot, JsonOptions);
     }
 
-    private async Task<ScrapeAttemptDto?> ApplyAudioAttemptInternalAsync(ScrapeAttempt attempt, ApplySceneScrapeAttemptDto dto, string resultJson, CancellationToken ct)
+    private async Task<ScrapeAttemptDto?> ApplyAudioAttemptInternalAsync(ScrapeAttempt attempt, ApplyVideoScrapeAttemptDto dto, string resultJson, CancellationToken ct)
     {
         if (!string.Equals(attempt.EntityType, EntityKinds.Audio, StringComparison.OrdinalIgnoreCase) || attempt.EntityId == null)
             return null;
@@ -570,7 +570,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         if (replaceFields.Contains("date"))
         {
             var date = GetString(root, "Date", "ReleaseDate");
-            if (ScrapedSceneDateParser.TryParse(date, out var parsedDate))
+            if (ScrapedVideoDateParser.TryParse(date, out var parsedDate))
                 audio.Date = parsedDate;
         }
 
@@ -597,7 +597,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         return MapAttempt(attempt);
     }
 
-    private async Task<ScrapeAttemptDto?> ApplyTextAttemptInternalAsync(ScrapeAttempt attempt, ApplySceneScrapeAttemptDto dto, string resultJson, CancellationToken ct)
+    private async Task<ScrapeAttemptDto?> ApplyTextAttemptInternalAsync(ScrapeAttempt attempt, ApplyVideoScrapeAttemptDto dto, string resultJson, CancellationToken ct)
     {
         if (!string.Equals(attempt.EntityType, EntityKinds.Text, StringComparison.OrdinalIgnoreCase) || attempt.EntityId == null)
             return null;
@@ -646,7 +646,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         if (replaceFields.Contains("date"))
         {
             var date = GetString(root, "Date", "ReleaseDate");
-            if (ScrapedSceneDateParser.TryParse(date, out var parsedDate))
+            if (ScrapedVideoDateParser.TryParse(date, out var parsedDate))
                 textDocument.Date = parsedDate;
         }
 
@@ -673,7 +673,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         return MapAttempt(attempt);
     }
 
-    private async Task<ScrapeAttemptDto?> ApplyImageAttemptInternalAsync(ScrapeAttempt attempt, ApplySceneScrapeAttemptDto dto, string resultJson, CancellationToken ct)
+    private async Task<ScrapeAttemptDto?> ApplyImageAttemptInternalAsync(ScrapeAttempt attempt, ApplyVideoScrapeAttemptDto dto, string resultJson, CancellationToken ct)
     {
         if (!string.Equals(attempt.EntityType, EntityKinds.Image, StringComparison.OrdinalIgnoreCase) || attempt.EntityId == null)
             return null;
@@ -729,7 +729,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         if (replaceFields.Contains("date"))
         {
             var date = GetString(root, "Date", "ReleaseDate");
-            if (ScrapedSceneDateParser.TryParse(date, out var parsedDate))
+            if (ScrapedVideoDateParser.TryParse(date, out var parsedDate))
                 image.Date = parsedDate;
         }
 
@@ -756,7 +756,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         return MapAttempt(attempt);
     }
 
-    private async Task<ScrapeAttemptDto?> ApplyGalleryAttemptInternalAsync(ScrapeAttempt attempt, ApplySceneScrapeAttemptDto dto, string resultJson, CancellationToken ct)
+    private async Task<ScrapeAttemptDto?> ApplyGalleryAttemptInternalAsync(ScrapeAttempt attempt, ApplyVideoScrapeAttemptDto dto, string resultJson, CancellationToken ct)
     {
         if (!string.Equals(attempt.EntityType, EntityKinds.Gallery, StringComparison.OrdinalIgnoreCase) || attempt.EntityId == null)
             return null;
@@ -812,7 +812,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         if (replaceFields.Contains("date"))
         {
             var date = GetString(root, "Date", "ReleaseDate");
-            if (ScrapedSceneDateParser.TryParse(date, out var parsedDate))
+            if (ScrapedVideoDateParser.TryParse(date, out var parsedDate))
                 gallery.Date = parsedDate;
         }
 
@@ -839,7 +839,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         return MapAttempt(attempt);
     }
 
-    private async Task<ScrapeAttemptDto?> ApplyGroupAttemptInternalAsync(ScrapeAttempt attempt, ApplySceneScrapeAttemptDto dto, string resultJson, CancellationToken ct)
+    private async Task<ScrapeAttemptDto?> ApplyGroupAttemptInternalAsync(ScrapeAttempt attempt, ApplyVideoScrapeAttemptDto dto, string resultJson, CancellationToken ct)
     {
         if (!string.Equals(attempt.EntityType, EntityKinds.Group, StringComparison.OrdinalIgnoreCase) || attempt.EntityId == null)
             return null;
@@ -1606,7 +1606,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         await db.SaveChangesAsync(ct);
     }
 
-    private static void ApplyUrls(Scene scene, JsonElement root, IDictionary<string, string> collectionModes)
+    private static void ApplyUrls(Video video, JsonElement root, IDictionary<string, string> collectionModes)
     {
         var mode = GetMode(collectionModes, "urls");
         if (mode == "skip")
@@ -1616,24 +1616,24 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         if (scrapedUrls.Count == 0)
             return;
 
-        var existing = scene.Urls.Select(item => item.Url).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var existing = video.Urls.Select(item => item.Url).ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         if (mode == "replace")
         {
-            scene.Urls.Clear();
+            video.Urls.Clear();
             foreach (var url in scrapedUrls)
-                scene.Urls.Add(new SceneUrl { SceneId = scene.Id, Url = url });
+                video.Urls.Add(new VideoUrl { VideoId = video.Id, Url = url });
             return;
         }
 
         foreach (var url in scrapedUrls)
         {
             if (existing.Add(url))
-                scene.Urls.Add(new SceneUrl { SceneId = scene.Id, Url = url });
+                video.Urls.Add(new VideoUrl { VideoId = video.Id, Url = url });
         }
     }
 
-    private async Task ApplyTagsAsync(Scene scene, JsonElement root, IDictionary<string, string> collectionModes, bool createMissing, IReadOnlyDictionary<string, string>? selections, string sourceKey, string sourceRunId, CancellationToken ct)
+    private async Task ApplyTagsAsync(Video video, JsonElement root, IDictionary<string, string> collectionModes, bool createMissing, IReadOnlyDictionary<string, string>? selections, string sourceKey, string sourceRunId, CancellationToken ct)
     {
         var mode = GetMode(collectionModes, "tags");
         if (mode == "skip")
@@ -1647,7 +1647,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         if (selectedTagNames.Count == 0)
         {
             if (mode == "replace")
-                scene.SceneTags.Clear();
+                video.VideoTags.Clear();
             return;
         }
 
@@ -1658,9 +1658,9 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
             .ToDictionaryAsync(tag => tag.Name, StringComparer.OrdinalIgnoreCase, ct);
 
         if (mode == "replace")
-            scene.SceneTags.Clear();
+            video.VideoTags.Clear();
 
-        var existingTagIds = scene.SceneTags.Select(item => item.TagId).ToHashSet();
+        var existingTagIds = video.VideoTags.Select(item => item.TagId).ToHashSet();
         var appliedTagNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var selectedTag in selectedTagNames)
         {
@@ -1679,9 +1679,9 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
             appliedTagNames.Add(tag.Name);
 
             if (existingTagIds.Add(tag.Id))
-                scene.SceneTags.Add(new SceneTag { SceneId = scene.Id, TagId = tag.Id, Tag = tag });
+                video.VideoTags.Add(new VideoTag { VideoId = video.Id, TagId = tag.Id, Tag = tag });
 
-            await tagProvenanceService.RecordAsync(AffinityHostType.Scene, scene.Id, tag, sourceKey, sourceRunId: sourceRunId, cancellationToken: ct);
+            await tagProvenanceService.RecordAsync(AffinityHostType.Video, video.Id, tag, sourceKey, sourceRunId: sourceRunId, cancellationToken: ct);
         }
 
         await ApplyTagHierarchyAsync(root, tagLookup, selections == null && createMissing, appliedTagNames, ct);
@@ -1760,7 +1760,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
             db.Set<TagParent>().Add(new TagParent { ParentId = parentId, ChildId = childId });
     }
 
-    private async Task ApplyPerformersAsync(Scene scene, JsonElement root, IDictionary<string, string> collectionModes, bool createMissing, IReadOnlyDictionary<string, string>? selections, CancellationToken ct)
+    private async Task ApplyPerformersAsync(Video video, JsonElement root, IDictionary<string, string> collectionModes, bool createMissing, IReadOnlyDictionary<string, string>? selections, CancellationToken ct)
     {
         var mode = GetMode(collectionModes, "performers");
         if (mode == "skip")
@@ -1774,7 +1774,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         if (selectedPerformerNames.Count == 0)
         {
             if (mode == "replace")
-                scene.ScenePerformers.Clear();
+                video.VideoPerformers.Clear();
             return;
         }
 
@@ -1785,9 +1785,9 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
             .ToDictionaryAsync(performer => performer.Name, StringComparer.OrdinalIgnoreCase, ct);
 
         if (mode == "replace")
-            scene.ScenePerformers.Clear();
+            video.VideoPerformers.Clear();
 
-        var existingPerformerIds = scene.ScenePerformers.Select(item => item.PerformerId).ToHashSet();
+        var existingPerformerIds = video.VideoPerformers.Select(item => item.PerformerId).ToHashSet();
         foreach (var selectedPerformer in selectedPerformerNames)
         {
             var performerName = selectedPerformer.Name;
@@ -1803,11 +1803,11 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
             }
 
             if (existingPerformerIds.Add(performer.Id))
-                scene.ScenePerformers.Add(new ScenePerformer { SceneId = scene.Id, PerformerId = performer.Id, Performer = performer });
+                video.VideoPerformers.Add(new VideoPerformer { VideoId = video.Id, PerformerId = performer.Id, Performer = performer });
         }
     }
 
-    private async Task ApplyStudioAsync(Scene scene, JsonElement root, IDictionary<string, string> collectionModes, bool createMissing, CancellationToken ct)
+    private async Task ApplyStudioAsync(Video video, JsonElement root, IDictionary<string, string> collectionModes, bool createMissing, CancellationToken ct)
     {
         var mode = GetMode(collectionModes, "studio");
         if (mode == "skip")
@@ -1827,16 +1827,16 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         }
 
         if (studio != null)
-            scene.StudioId = studio.Id;
+            video.StudioId = studio.Id;
     }
 
     private async Task HydratePerformersAsync(JsonElement root, bool createMissingPerformers, bool createMissingTags, IReadOnlyDictionary<string, string>? performerSelections, CancellationToken ct)
     {
         var performerItems = GetObjectItems(root, "Performers", "Performer");
-        var sceneUrl = GetString(root, "URL", "Url", "url");
+        var videoUrl = GetString(root, "URL", "Url", "url");
         foreach (var item in performerItems)
         {
-            var sourceUrl = ResolveAbsoluteUrl(GetString(item, "URL", "Url", "url"), sceneUrl);
+            var sourceUrl = ResolveAbsoluteUrl(GetString(item, "URL", "Url", "url"), videoUrl);
 
             var scraped = string.IsNullOrWhiteSpace(sourceUrl) ? null : await performerScrapeService.ScrapeByUrlAsync(sourceUrl, ct);
             var performerName = scraped?.Name ?? GetString(item, "Name", "name", "Title", "title");
@@ -1873,7 +1873,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         }
     }
 
-    private static HashSet<string> GetAvailableSceneFields(JsonElement root)
+    private static HashSet<string> GetAvailableVideoFields(JsonElement root)
     {
         var available = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (!string.IsNullOrWhiteSpace(GetString(root, "Title", "Name"))) available.Add("title");
@@ -1964,7 +1964,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         return available;
     }
 
-    private static string DetermineApplyStatus(HashSet<string> availableFields, HashSet<string> replaceFields, IDictionary<string, string> collectionModes, ApplySceneScrapeAttemptDto dto)
+    private static string DetermineApplyStatus(HashSet<string> availableFields, HashSet<string> replaceFields, IDictionary<string, string> collectionModes, ApplyVideoScrapeAttemptDto dto)
     {
         var skipped = availableFields.Any(field => field switch
         {
@@ -1978,7 +1978,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         return skipped || skippedSelection ? "AppliedPartial" : "Applied";
     }
 
-    private static Dictionary<string, object?> BuildAppliedSceneFieldProvenance(JsonElement root, HashSet<string> replaceFields, IDictionary<string, string> collectionModes, IReadOnlyDictionary<string, string>? tagSelections, IReadOnlyDictionary<string, string>? performerSelections)
+    private static Dictionary<string, object?> BuildAppliedVideoFieldProvenance(JsonElement root, HashSet<string> replaceFields, IDictionary<string, string> collectionModes, IReadOnlyDictionary<string, string>? tagSelections, IReadOnlyDictionary<string, string>? performerSelections)
     {
         var fields = new Dictionary<string, object?>();
 
@@ -1987,7 +1987,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         AddStringField(fields, "details", replaceFields.Contains("details"), GetString(root, "Details", "Description", "Synopsis"));
         AddStringField(fields, "director", replaceFields.Contains("director"), GetString(root, "Director"));
 
-        if (replaceFields.Contains("date") && ScrapedSceneDateParser.TryParse(GetString(root, "Date", "ReleaseDate"), out var parsedDate))
+        if (replaceFields.Contains("date") && ScrapedVideoDateParser.TryParse(GetString(root, "Date", "ReleaseDate"), out var parsedDate))
             fields["date"] = parsedDate.ToString("yyyy-MM-dd");
 
         AddStringField(fields, "image_url", replaceFields.Contains("image"), GetString(root, "Image", "ImageUrl", "ImageURL"));
@@ -2009,7 +2009,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         AddStringField(fields, "code", replaceFields.Contains("code"), GetString(root, "Code"));
         AddStringField(fields, "details", replaceFields.Contains("details"), GetString(root, "Details", "Description", "Synopsis"));
 
-        if (replaceFields.Contains("date") && ScrapedSceneDateParser.TryParse(GetString(root, "Date", "ReleaseDate"), out var parsedDate))
+        if (replaceFields.Contains("date") && ScrapedVideoDateParser.TryParse(GetString(root, "Date", "ReleaseDate"), out var parsedDate))
             fields["date"] = parsedDate.ToString("yyyy-MM-dd");
 
         AddListField(fields, "urls", GetMode(collectionModes, "urls") != "skip", GetStringList(root, "URLs", "Url", "URL"));
@@ -2030,7 +2030,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         AddStringField(fields, "code", replaceFields.Contains("code"), GetString(root, "Code"));
         AddStringField(fields, "details", replaceFields.Contains("details"), GetString(root, "Details", "Description", "Synopsis"));
 
-        if (replaceFields.Contains("date") && ScrapedSceneDateParser.TryParse(GetString(root, "Date", "ReleaseDate"), out var parsedDate))
+        if (replaceFields.Contains("date") && ScrapedVideoDateParser.TryParse(GetString(root, "Date", "ReleaseDate"), out var parsedDate))
             fields["date"] = parsedDate.ToString("yyyy-MM-dd");
 
         AddListField(fields, "urls", GetMode(collectionModes, "urls") != "skip", GetStringList(root, "URLs", "Url", "URL"));
@@ -2052,7 +2052,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         AddStringField(fields, "details", replaceFields.Contains("details"), GetString(root, "Details", "Description", "Synopsis"));
         AddStringField(fields, "photographer", replaceFields.Contains("photographer"), GetString(root, "Photographer"));
 
-        if (replaceFields.Contains("date") && ScrapedSceneDateParser.TryParse(GetString(root, "Date", "ReleaseDate"), out var parsedDate))
+        if (replaceFields.Contains("date") && ScrapedVideoDateParser.TryParse(GetString(root, "Date", "ReleaseDate"), out var parsedDate))
             fields["date"] = parsedDate.ToString("yyyy-MM-dd");
 
         AddListField(fields, "urls", GetMode(collectionModes, "urls") != "skip", GetStringList(root, "URLs", "Url", "URL"));
@@ -2074,7 +2074,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         AddStringField(fields, "details", replaceFields.Contains("details"), GetString(root, "Details", "Description", "Synopsis"));
         AddStringField(fields, "photographer", replaceFields.Contains("photographer"), GetString(root, "Photographer"));
 
-        if (replaceFields.Contains("date") && ScrapedSceneDateParser.TryParse(GetString(root, "Date", "ReleaseDate"), out var parsedDate))
+        if (replaceFields.Contains("date") && ScrapedVideoDateParser.TryParse(GetString(root, "Date", "ReleaseDate"), out var parsedDate))
             fields["date"] = parsedDate.ToString("yyyy-MM-dd");
 
         AddListField(fields, "urls", GetMode(collectionModes, "urls") != "skip", GetStringList(root, "URLs", "Url", "URL"));
@@ -2201,26 +2201,26 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
             ? mode.Trim().ToLowerInvariant()
             : key == "studio" ? "replace" : "merge";
 
-    private static List<string> BuildDefaultReplaceFields(Scene scene, JsonElement root)
+    private static List<string> BuildDefaultReplaceFields(Video video, JsonElement root)
     {
         var replaceFields = new List<string>();
-        var currentDate = scene.Date?.ToString("yyyy-MM-dd");
-        var scrapedDate = GetNormalizedSceneDate(root);
+        var currentDate = video.Date?.ToString("yyyy-MM-dd");
+        var scrapedDate = GetNormalizedVideoDate(root);
 
         var title = GetString(root, "Title", "Name");
-        if (!string.IsNullOrWhiteSpace(title) && !string.Equals(title, scene.Title, StringComparison.Ordinal))
+        if (!string.IsNullOrWhiteSpace(title) && !string.Equals(title, video.Title, StringComparison.Ordinal))
             replaceFields.Add("title");
 
         var code = GetString(root, "Code");
-        if (!string.IsNullOrWhiteSpace(code) && !string.Equals(code, scene.Code, StringComparison.Ordinal))
+        if (!string.IsNullOrWhiteSpace(code) && !string.Equals(code, video.Code, StringComparison.Ordinal))
             replaceFields.Add("code");
 
         var details = GetString(root, "Details", "Description", "Synopsis");
-        if (!string.IsNullOrWhiteSpace(details) && !string.Equals(details, scene.Details, StringComparison.Ordinal))
+        if (!string.IsNullOrWhiteSpace(details) && !string.Equals(details, video.Details, StringComparison.Ordinal))
             replaceFields.Add("details");
 
         var director = GetString(root, "Director");
-        if (!string.IsNullOrWhiteSpace(director) && !string.Equals(director, scene.Director, StringComparison.Ordinal))
+        if (!string.IsNullOrWhiteSpace(director) && !string.Equals(director, video.Director, StringComparison.Ordinal))
             replaceFields.Add("director");
 
         if (!string.IsNullOrWhiteSpace(scrapedDate) && !string.Equals(scrapedDate, currentDate, StringComparison.Ordinal))
@@ -2237,7 +2237,7 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
     {
         var replaceFields = new List<string>();
         var currentDate = image.Date?.ToString("yyyy-MM-dd");
-        var scrapedDate = GetNormalizedSceneDate(root);
+        var scrapedDate = GetNormalizedVideoDate(root);
 
         var title = GetString(root, "Title", "Name");
         if (!string.IsNullOrWhiteSpace(title) && !string.Equals(title, image.Title, StringComparison.Ordinal))
@@ -2261,12 +2261,12 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
         return replaceFields;
     }
 
-    private static Dictionary<string, string> BuildDefaultCollectionModes(Scene scene, JsonElement root)
+    private static Dictionary<string, string> BuildDefaultCollectionModes(Video video, JsonElement root)
     {
-        var currentUrls = scene.Urls.Select(item => item.Url).Where(item => !string.IsNullOrWhiteSpace(item)).Select(item => item.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        var currentTags = scene.SceneTags.Where(item => item.Tag != null).Select(item => item.Tag!.Name).Where(item => !string.IsNullOrWhiteSpace(item)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        var currentPerformers = scene.ScenePerformers.Where(item => item.Performer != null).Select(item => item.Performer!.Name).Where(item => !string.IsNullOrWhiteSpace(item)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        var currentStudio = scene.Studio?.Name?.Trim();
+        var currentUrls = video.Urls.Select(item => item.Url).Where(item => !string.IsNullOrWhiteSpace(item)).Select(item => item.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var currentTags = video.VideoTags.Where(item => item.Tag != null).Select(item => item.Tag!.Name).Where(item => !string.IsNullOrWhiteSpace(item)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var currentPerformers = video.VideoPerformers.Where(item => item.Performer != null).Select(item => item.Performer!.Name).Where(item => !string.IsNullOrWhiteSpace(item)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var currentStudio = video.Studio?.Name?.Trim();
 
         var scrapedUrls = GetStringList(root, "URLs", "Url", "URL");
         var scrapedTags = GetTagNames(root, "Tags", "Tag", "TagNames");
@@ -2346,10 +2346,10 @@ public class ScrapeAttemptService(CoveContext db, ScraperService scraperService,
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-    private static string? GetNormalizedSceneDate(JsonElement root)
+    private static string? GetNormalizedVideoDate(JsonElement root)
     {
         var date = GetString(root, "Date", "ReleaseDate");
-        return ScrapedSceneDateParser.TryParse(date, out var parsedDate)
+        return ScrapedVideoDateParser.TryParse(date, out var parsedDate)
             ? parsedDate.ToString("yyyy-MM-dd")
             : null;
     }

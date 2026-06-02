@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { audios, galleries, groups, images, metadata, performers, scenes, studios, texts, entityImages } from "../api/client";
-import type { Audio, AudioFilterCriteria, FindFilter, Gallery, GalleryFilterCriteria, Group, GroupFilterCriteria, Image, ImageFilterCriteria, MetadataServer, MetadataServerStudioMatch, Performer, PerformerFilterCriteria, Scene, SceneFilterCriteria, Studio, StudioFilterCriteria, TextDocument, TextFilterCriteria } from "../api/types";
+import { audios, galleries, groups, images, metadata, performers, videos, studios, texts, entityImages } from "../api/client";
+import type { Audio, AudioFilterCriteria, FindFilter, Gallery, GalleryFilterCriteria, Group, GroupFilterCriteria, Image, ImageFilterCriteria, MetadataServer, MetadataServerStudioMatch, Performer, PerformerFilterCriteria, Video, VideoFilterCriteria, Studio, StudioFilterCriteria, TextDocument, TextFilterCriteria } from "../api/types";
 import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay, FieldProvenanceHover, resolveTagProvenance } from "../components/shared";
 import { ChevronDown, Building2, CloudDownload, CloudUpload, FileText, Film, FolderOpen, GitMerge, Headphones, ImageIcon, Layers, Link as LinkIcon, Loader2, MoreVertical, Music, Pencil, Search, Trash2, UserRound, Wand2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -20,8 +20,8 @@ import { CoverImageDialog } from "../components/CoverImageDialog";
 import { FloatingActionMenu } from "../components/FloatingActionMenu";
 import { StudioMetadataTaggerDialog } from "../components/MetadataTaggerDialog";
 import { RelatedEntityListView, useRelatedEntityDisplayMode } from "../components/RelatedEntityListView";
-import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
-import { AUDIO_CRITERIA, GALLERY_CRITERIA, GROUP_CRITERIA, IMAGE_CRITERIA, PERFORMER_CRITERIA, SCENE_CRITERIA, STUDIO_CRITERIA, TEXT_CRITERIA } from "../components/FilterDialog";
+import { VIDEO_SORT_OPTIONS } from "../components/videoSortOptions";
+import { AUDIO_CRITERIA, GALLERY_CRITERIA, GROUP_CRITERIA, IMAGE_CRITERIA, PERFORMER_CRITERIA, VIDEO_CRITERIA, STUDIO_CRITERIA, TEXT_CRITERIA } from "../components/FilterDialog";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { GALLERY_SORT_OPTIONS } from "../components/gallerySortOptions";
 import { PERFORMER_SORT_OPTIONS } from "../components/performerSortOptions";
@@ -45,7 +45,7 @@ const GALLERY_SORT = GALLERY_SORT_OPTIONS;
 const STUDIO_SORT = [
   { value: "name", label: "Name" },
   { value: "rating", label: "Rating" },
-  { value: "scene_count", label: "Scene Count" },
+  { value: "video_count", label: "Video Count" },
   { value: "gallery_count", label: "Gallery Count" },
   { value: "image_count", label: "Image Count" },
   { value: "child_count", label: "Substudios Count" },
@@ -89,7 +89,7 @@ interface Props {
   onNavigate: (r: any) => void;
 }
 
-type TabKey = "scenes" | "performers" | "galleries" | "images" | "audios" | "texts" | "studios" | "groups" | (string & {});
+type TabKey = "videos" | "performers" | "galleries" | "images" | "audios" | "texts" | "studios" | "groups" | (string & {});
 
 export function StudioDetailPage({ id, onNavigate }: Props) {
   const { config } = useAppConfig();
@@ -106,9 +106,9 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
   const [showOpsMenu, setShowOpsMenu] = useState(false);
   const [coverOpen, setCoverOpen] = useState(false);
   const opsMenuRef = useRef<HTMLDivElement>(null);
-  const [activeTab, setActiveTab] = useState<TabKey>("scenes");
+  const [activeTab, setActiveTab] = useState<TabKey>("videos");
   const { allTabs: studioTabs, renderExtensionTab, extensionCounts } = useExtensionTabs("studio", [
-    { key: "scenes", label: "Scenes", count: studio?.sceneCount },
+    { key: "videos", label: "Videos", count: studio?.videoCount },
     { key: "performers", label: "Performers", count: studio?.performerCount },
     { key: "galleries", label: "Galleries", count: studio?.galleryCount },
     { key: "images", label: "Images", count: studio?.imageCount },
@@ -117,7 +117,7 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
     { key: "studios", label: "Sub-studios", count: studio?.childStudioCount },
     { key: "groups", label: "Groups", count: studio?.groupCount },
   ], id);
-  const [sceneFilter, setSceneFilter] = useState<FindFilter>({ page: 1, perPage: 24, direction: "desc" });
+  const [videoFilter, setVideoFilter] = useState<FindFilter>({ page: 1, perPage: 24, direction: "desc" });
   const [galleryFilter, setGalleryFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "desc" });
   const [imageFilter, setImageFilter] = useState<FindFilter>({ page: 1, perPage: 30, direction: "desc" });
   const [audioFilter, setAudioFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "desc" });
@@ -134,7 +134,7 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
   const canAutoTagStudio = hasPermission("library.autotag") && canWriteStudio;
   const showStudioOpsMenu = canWriteStudio || canAutoTagStudio || canDeleteStudio;
   const visibleStudioTabs = filterItemsByPermission(studioTabs, {
-    scenes: "scenes.read",
+    videos: "videos.read",
     performers: "performers.read",
     galleries: "galleries.read",
     images: "images.read",
@@ -266,7 +266,7 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
         organizedPending={updateMut.isPending}
         onOrganizedToggle={canWriteStudio ? (organized) => updateMut.mutate({ organized }) : undefined}
         counts={[
-          { key: "scenes", label: "Scenes", value: studio.sceneCount, icon: <Film className="h-4 w-4" /> },
+          { key: "videos", label: "Videos", value: studio.videoCount, icon: <Film className="h-4 w-4" /> },
           { key: "performers", label: "Performers", value: studio.performerCount, icon: <UserRound className="h-4 w-4" /> },
           { key: "images", label: "Images", value: studio.imageCount, icon: <ImageIcon className="h-4 w-4" /> },
           { key: "galleries", label: "Galleries", value: studio.galleryCount, icon: <FolderOpen className="h-4 w-4" /> },
@@ -359,8 +359,8 @@ export function StudioDetailPage({ id, onNavigate }: Props) {
         <EntityDetailTabs tabs={visibleStudioTabs} activeTab={activeTab} onTabChange={(key) => setActiveTab(key as TabKey)} className="mx-auto max-w-7xl mt-6" />
 
         <div className="py-6">
-          {activeTab === "scenes" && (
-            <StudioScenesPanel studioId={id} filter={sceneFilter} setFilter={setSceneFilter} onNavigate={onNavigate} />
+          {activeTab === "videos" && (
+            <StudioVideosPanel studioId={id} filter={videoFilter} setFilter={setVideoFilter} onNavigate={onNavigate} />
           )}
           {activeTab === "performers" && (
             <StudioPerformersPanel studioId={id} filter={performerFilter} setFilter={setPerformerFilter} onNavigate={onNavigate} />
@@ -594,43 +594,43 @@ function StudioMetadataServerPanel({ studio, metadataServers, onNavigate }: { st
   );
 }
 
-function StudioScenesPanel({ studioId, filter, setFilter, onNavigate }: {
+function StudioVideosPanel({ studioId, filter, setFilter, onNavigate }: {
   studioId: number;
   filter: FindFilter;
   setFilter: (filter: FindFilter) => void;
   onNavigate: (r: any) => void;
 }) {
   const [zoomLevel, setZoomLevel] = useState(0);
-  const { displayMode, setDisplayMode, availableDisplayModes } = useRelatedEntityDisplayMode("scenes");
+  const { displayMode, setDisplayMode, availableDisplayModes } = useRelatedEntityDisplayMode("videos");
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
   const [objectFilter, setObjectFilter] = useState<Record<string, unknown>>({});
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
-  const { data, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<Scene>({
-    queryKey: ["studio-scenes", studioId, objectFilter],
+  const { data, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<Video>({
+    queryKey: ["studio-videos", studioId, objectFilter],
     filter,
     queryFn: (nextFilter) => hasObjectFilter
-      ? scenes.findFiltered({
+      ? videos.findFiltered({
           findFilter: nextFilter,
-          objectFilter: withRequiredSingleId(objectFilter as SceneFilterCriteria, "studiosCriterion", studioId),
+          objectFilter: withRequiredSingleId(objectFilter as VideoFilterCriteria, "studiosCriterion", studioId),
         })
-      : scenes.find(nextFilter, { studioId: String(studioId) }),
+      : videos.find(nextFilter, { studioId: String(studioId) }),
   });
   const items = data?.items ?? [];
   const { selectedIds, toggle, selectAll, selectAllPending, selectShown, selectNone } = useDetailListSelection({ items, infinitePageSize, infiniteFilterKey, fetchAllIds, resetKeyParts: [objectFilter] });
   const selecting = selectedIds.size > 0;
   const toolbar = (
-    <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={SCENE_SORT_OPTIONS} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} selectAllPending={selectAllPending} onSelectAllMatching={selectShown} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="scenes" selectedIds={selectedIds} onDone={selectNone} sceneItems={items} onNavigate={onNavigate} removeFromParent={{ type: "studio", id: studioId }} />} criteriaDefinitions={SCENE_CRITERIA} objectFilter={objectFilter} onObjectFilterChange={setObjectFilter} allowInfinitePageSize displayMode={displayMode} onDisplayModeChange={setDisplayMode} availableDisplayModes={availableDisplayModes} />
+    <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={VIDEO_SORT_OPTIONS} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} selectAllPending={selectAllPending} onSelectAllMatching={selectShown} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="videos" selectedIds={selectedIds} onDone={selectNone} videoItems={items} onNavigate={onNavigate} removeFromParent={{ type: "studio", id: studioId }} />} criteriaDefinitions={VIDEO_CRITERIA} objectFilter={objectFilter} onObjectFilterChange={setObjectFilter} allowInfinitePageSize displayMode={displayMode} onDisplayModeChange={setDisplayMode} availableDisplayModes={availableDisplayModes} />
   );
 
-  if (isLoading) return <LoadingPanel icon={<Film className="h-10 w-10" />} message="Loading scenes..." />;
-  if (!data || items.length === 0) return <>{toolbar}<EmptyPanel icon={<Film className="h-12 w-12" />} message="No scenes from this studio" /></>;
+  if (isLoading) return <LoadingPanel icon={<Film className="h-10 w-10" />} message="Loading videos..." />;
+  if (!data || items.length === 0) return <>{toolbar}<EmptyPanel icon={<Film className="h-12 w-12" />} message="No videos from this studio" /></>;
 
   return (
     <>
       {toolbar}
-      <RelatedEntityListView entityType="scenes" items={items} displayMode={displayMode} zoomLevel={zoomLevel} selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} onSceneQuickView={setQuickViewId} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} />
+      <RelatedEntityListView entityType="videos" items={items} displayMode={displayMode} zoomLevel={zoomLevel} selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} onVideoQuickView={setQuickViewId} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} />
       {quickViewId !== null && (
-        <QuickViewDialog type="scene" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
+        <QuickViewDialog type="video" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
       )}
     </>
   );
@@ -917,3 +917,4 @@ function EmptyPanel({ icon, message }: { icon: React.ReactNode; message: string 
     </div>
   );
 }
+

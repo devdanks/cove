@@ -73,14 +73,14 @@ public class FingerprintMatchingTests
     [Fact]
     public void FingerprintQueries_GroupFingerprintsIntoSingleBatchWithStablePriority()
     {
-        var scene = new Scene();
+        var video = new Video();
         var file = new VideoFile();
         file.Fingerprints.Add(new FileFingerprint { Type = "phash", Value = "ffff" });
         file.Fingerprints.Add(new FileFingerprint { Type = "md5", Value = "abc123" });
         file.Fingerprints.Add(new FileFingerprint { Type = "oshash", Value = "1a2b" });
-        scene.Files.Add(file);
+        video.Files.Add(file);
 
-        var batches = InvokeFingerprintQueries(scene);
+        var batches = InvokeFingerprintQueries(video);
 
         var batch = Assert.Single(batches);
         Assert.Equal(["MD5", "OSHASH", "PHASH"], batch.Select(item => GetAnonymousString(item, "algorithm")).ToArray());
@@ -88,26 +88,26 @@ public class FingerprintMatchingTests
     }
 
     [Fact]
-    public void SceneSearchTerms_StripLeadingNumericPrefix()
+    public void VideoSearchTerms_StripLeadingNumericPrefix()
     {
-        var result = InvokeSceneSearchTerms("144 - Two Dragon Cumshots For Boosette");
+        var result = InvokeVideoSearchTerms("144 - Two Dragon Cumshots For Boosette");
 
         Assert.Equal("144 - Two Dragon Cumshots For Boosette", result[0]);
         Assert.Contains("Two Dragon Cumshots For Boosette", result);
     }
 
     [Fact]
-    public void SceneSearchTerms_DoNotDuplicateEquivalentTerms()
+    public void VideoSearchTerms_DoNotDuplicateEquivalentTerms()
     {
-        var result = InvokeSceneSearchTerms("Two Dragon Cumshots For Boosette");
+        var result = InvokeVideoSearchTerms("Two Dragon Cumshots For Boosette");
 
         Assert.Single(result);
         Assert.Equal("Two Dragon Cumshots For Boosette", result[0]);
     }
 
-    private static IReadOnlyList<string> InvokeSceneSearchTerms(string term)
+    private static IReadOnlyList<string> InvokeVideoSearchTerms(string term)
     {
-        var method = typeof(MetadataServerService).GetMethod("BuildSceneSearchTerms", BindingFlags.NonPublic | BindingFlags.Static);
+        var method = typeof(MetadataServerService).GetMethod("BuildVideoSearchTerms", BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(method);
 
         var result = method!.Invoke(null, [term]);
@@ -115,12 +115,12 @@ public class FingerprintMatchingTests
         return terms;
     }
 
-    private static List<List<object>> InvokeFingerprintQueries(Scene scene)
+    private static List<List<object>> InvokeFingerprintQueries(Video video)
     {
         var method = typeof(MetadataServerService).GetMethod("BuildFingerprintQueries", BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(method);
 
-        var result = method!.Invoke(null, [scene]);
+        var result = method!.Invoke(null, [video]);
         var outer = Assert.IsAssignableFrom<System.Collections.IEnumerable>(result)
             .Cast<object>()
             .ToList();
@@ -334,3 +334,4 @@ public class SubTagFilterTests
         Assert.Equal(0, result.Depth);
     }
 }
+

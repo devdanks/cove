@@ -10,11 +10,11 @@ public class CoveContextDerivedMetricsTests
     private const int TestUserId = 1;
 
     [Fact]
-    public async Task SaveChangesAsync_NewSceneWithNewVideoFile_RefreshesFileMetricsAfterFirstSave()
+    public async Task SaveChangesAsync_NewVideoWithNewVideoFile_RefreshesFileMetricsAfterFirstSave()
     {
         await using var context = CreateContext();
-        var folder = new Folder { Path = "E:/media/scenes" };
-        var scene = new Scene
+        var folder = new Folder { Path = "E:/media/videos" };
+        var video = new Video
         {
             Title = "Direct Video",
             Files =
@@ -34,14 +34,14 @@ public class CoveContextDerivedMetricsTests
             ],
         };
 
-        context.Scenes.Add(scene);
+        context.Videos.Add(video);
         await context.SaveChangesAsync();
 
-        Assert.Equal(1, scene.FileCount);
-        Assert.Equal(1234, scene.MaxFileSize);
-        Assert.Equal(12.5, scene.MaxDuration);
-        Assert.Equal(1280, scene.MaxResolution);
-        Assert.Equal("E:/media/scenes/direct.mp4", scene.MinPath);
+        Assert.Equal(1, video.FileCount);
+        Assert.Equal(1234, video.MaxFileSize);
+        Assert.Equal(12.5, video.MaxDuration);
+        Assert.Equal(1280, video.MaxResolution);
+        Assert.Equal("E:/media/videos/direct.mp4", video.MinPath);
     }
 
     [Fact]

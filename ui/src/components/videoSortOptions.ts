@@ -1,4 +1,4 @@
-export const SCENE_SORT_OPTIONS: { value: string; label: string }[] = [
+export const VIDEO_SORT_OPTIONS: { value: string; label: string }[] = [
   { value: "updated_at", label: "Updated At" },
   { value: "created_at", label: "Created At" },
   { value: "title", label: "Title" },

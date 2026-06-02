@@ -1,5 +1,13 @@
 # Cove – App + PostgreSQL (recommended for most users)
 #
+# Data is stored in a single configurable directory on the host
+# (defaults to ./cove-data/ relative to this file). Override with:
+#   COVE_DATA_DIR=/path/to/data docker compose up -d
+#
+# Only the cache uses a named volume (it is safe to lose;
+# it will be recreated automatically). All persistent data
+# uses bind mounts and survives docker compose down -v.
+#
 # Usage:
 #   docker compose up -d
 #
@@ -8,10 +16,6 @@
 #   nvidia-container-toolkit is installed on the host.
 #
 #   For Intel/AMD VAAPI, uncomment the devices section below.
-#
-# Data is persisted in named volumes. To back up, use:
-#   docker compose exec cove dotnet Cove.Api.dll --backup
-#   # or via the Cove UI: Settings → Backup
 
 services:
   cove:
@@ -28,11 +32,11 @@ services:
       COVE__GeneratedPath: /generated
       COVE__CachePath: /cache
     volumes:
-      - cove-data:/data
-      - cove-config:/config
-      - cove-generated:/generated
+      - ${COVE_DATA_DIR:-./cove-data}/data:/data
+      - ${COVE_DATA_DIR:-./cove-data}/config:/config
+      - ${COVE_DATA_DIR:-./cove-data}/generated:/generated
+      - ${COVE_DATA_DIR:-./cove-data}/backups:/backups
       - cove-cache:/cache
-      - cove-backups:/backups
       # Mount your media library (adjust path):
       # - /path/to/your/media:/media:ro
       # Example network share mount using the commented volume below:
@@ -60,7 +64,7 @@ services:
       POSTGRES_USER: cove
       POSTGRES_PASSWORD: cove
     volumes:
-      - pg-data:/var/lib/postgresql/data
+      - ${COVE_DATA_DIR:-./cove-data}/pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U cove -d cove"]
       interval: 5s
@@ -68,17 +72,4 @@ services:
       retries: 10
 
 volumes:
-  cove-data:
-  cove-config:
-  cove-generated:
   cove-cache:
-  cove-backups:
-  # Example SMB/CIFS network share for media mounted at /media above.
-  # The device is the share root; use prefixpath for a folder inside it.
-  # yourcontent:
-  #   driver: local
-  #   driver_opts:
-  #     type: cifs
-  #     device: "//192.168.1.101/share"
-  #     o: "username=youruser,password=yourpassword,vers=3.0"
-  pg-data:

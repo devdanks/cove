@@ -11,7 +11,7 @@ interface MergeItem {
 interface Props {
   open: boolean;
   onClose: () => void;
-  entityType: "scene" | "performer" | "tag" | "studio";
+  entityType: "video" | "performer" | "tag" | "studio";
   items: MergeItem[];
   onMerge: (targetId: number, sourceIds: number[]) => Promise<unknown>;
   queryKey: string | QueryKey;
@@ -133,3 +133,4 @@ export function MergeDialog({ open, onClose, entityType, items, onMerge, queryKe
     </div>
   );
 }
+

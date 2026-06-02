@@ -1,18 +1,18 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { audios, entityEngagement, entityImages, groups, images, scenes, segmentLibrary, texts } from "../api/client";
-import type { AffinityHostType, Audio, BoolCriterion, DateCriterion, EntityEngagement, FindFilter, Group, GroupItem, GroupItemKind, Image, IntCriterion, MultiIdCriterion, Scene, SceneFilterCriteria, SegmentDerivedQueryDescriptor, SegmentRecord, SegmentSpanDerivedQuery, StringCriterion, TextDocument, TimestampCriterion } from "../api/types";
+import { audios, entityEngagement, entityImages, groups, images, videos, segmentLibrary, texts } from "../api/client";
+import type { AffinityHostType, Audio, BoolCriterion, DateCriterion, EntityEngagement, FindFilter, Group, GroupItem, GroupItemKind, Image, IntCriterion, MultiIdCriterion, Video, VideoFilterCriteria, SegmentDerivedQueryDescriptor, SegmentRecord, SegmentSpanDerivedQuery, StringCriterion, TextDocument, TimestampCriterion } from "../api/types";
 import { formatDate, formatDuration, TagBadge, CustomFieldsDisplay, FieldProvenanceHover, resolveTagProvenance } from "../components/shared";
 import { Building2, ExternalLink, FileText, Film, Fingerprint, FolderOpen, GripVertical, Headphones, Images, Layers, Link as LinkIcon, Loader2, Merge, MoreVertical, Pencil, Play, Plus, Tag, Trash2, Unlink, User, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GroupEditModal } from "./GroupEditModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { ExtensionSlot } from "../router/RouteRegistry";
-import { AudioTile, EntityTileFrame, GroupTile, ImageTile, SceneCard, SegmentTile, TextTile } from "../components/EntityCards";
+import { AudioTile, EntityTileFrame, GroupTile, ImageTile, VideoCard, SegmentTile, TextTile } from "../components/EntityCards";
 import { CompilationPlayer } from "../components/CompilationPlayer";
 import { DetailSkeleton } from "../components/DetailSkeleton";
 import { QuickViewDialog } from "../components/QuickViewDialog";
 import { DetailListToolbar, type DetailListDisplayMode } from "../components/DetailListToolbar";
-import { SCENE_CRITERIA, type CriterionDefinition } from "../components/FilterDialog";
+import { VIDEO_CRITERIA, type CriterionDefinition } from "../components/FilterDialog";
 import { EntityHeroLayout, HERO_ACTION_BUTTON_CLASS, HERO_PRIMARY_ACTION_BUTTON_CLASS } from "../components/EntityHeroLayout";
 import { CoverImageDialog } from "../components/CoverImageDialog";
 import { FloatingActionMenu } from "../components/FloatingActionMenu";
@@ -75,7 +75,7 @@ const GROUP_ITEM_CRITERIA: CriterionDefinition[] = [
   { id: "code", label: "Code", type: "string", filterKey: "codeCriterion" },
   { id: "details", label: "Details", type: "string", filterKey: "detailsCriterion" },
   { id: "kind", label: "Type", type: "enum", filterKey: "kindCriterion", modifiers: ["EQUALS", "NOT_EQUALS"], options: [
-    { value: "scene", label: "Scenes" },
+    { value: "video", label: "Videos" },
     { value: "image", label: "Images" },
     { value: "audio", label: "Audio" },
     { value: "text", label: "Texts" },
@@ -125,11 +125,11 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
     { key: "items", label: "Items" },
     { key: "containingGroups", label: "Containing Groups" },
   ], id);
-  const [sceneFilter, setSceneFilter] = useState<FindFilter>({ page: 1, perPage: 24, direction: "asc", sort: "date" });
+  const [videoFilter, setVideoFilter] = useState<FindFilter>({ page: 1, perPage: 24, direction: "asc", sort: "date" });
   const queryClient = useQueryClient();
   const { backLabel, goBack } = useBackNavigation({ page: "groups" }, onNavigate);
   const canReadGroups = canReadEntity("group", hasPermission);
-  const canReadScenes = canReadEntity("scene", hasPermission);
+  const canReadVideos = canReadEntity("video", hasPermission);
   const canWriteGroup = canWriteEntity("group", hasPermission);
   const canDeleteGroup = canDeleteEntity("group", hasPermission) && !isProtectedBuiltInGroup(group?.querySourceKey);
   const canReadStudios = canReadEntity("studio", hasPermission);
@@ -152,10 +152,10 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
   const { data: playbackManifest, isLoading: playbackManifestLoading } = useQuery({
     queryKey: ["group", id, "playback-manifest"],
     queryFn: () => groups.items.playbackManifest(id),
-    enabled: canReadScenes,
+    enabled: canReadVideos,
   });
   const hasPlaybackItems = (playbackManifest?.items.length ?? 0) > 0;
-  const hasCompilationItems = groupItems.some((item) => item.kind === "sceneRange")
+  const hasCompilationItems = groupItems.some((item) => item.kind === "videoRange")
     || playbackManifest?.items.some((item) => item.startSec > 0 || item.endSec != null) === true;
 
   useDocumentTitle(group?.name);
@@ -191,10 +191,10 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
     }));
 
     return filterItemsByPermission(countedTabs, {
-      items: canReadScenes || canReadGroups ? "groups.read" : "__denied__",
+      items: canReadVideos || canReadGroups ? "groups.read" : "__denied__",
       containingGroups: "groups.read",
-    }, hasPermission).filter((tab) => tab.key !== "items" || canReadScenes || canReadGroups);
-  }, [canReadGroups, canReadScenes, group?.containingGroupCount, group?.subGroupCount, groupItems.length, groupTabs, hasPermission]);
+    }, hasPermission).filter((tab) => tab.key !== "items" || canReadVideos || canReadGroups);
+  }, [canReadGroups, canReadVideos, group?.containingGroupCount, group?.subGroupCount, groupItems.length, groupTabs, hasPermission]);
 
   useEffect(() => {
     if (tabs.length > 0 && !tabs.some((tab) => tab.key === activeTab)) {
@@ -217,12 +217,12 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
   const itemsContent = (
     <GroupItemsPanel
       group={group}
-      filter={sceneFilter}
-      setFilter={setSceneFilter}
+      filter={videoFilter}
+      setFilter={setVideoFilter}
       onNavigate={onNavigate}
       groupItems={groupItems}
       groupItemsLoading={groupItemsLoading}
-      canReadScenes={canReadScenes}
+      canReadVideos={canReadVideos}
       canReadGroups={canReadGroups}
       canWriteGroup={canWriteGroup}
       addSubGroupRequestId={addSubGroupRequestId}
@@ -412,7 +412,7 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
 
             <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
               <InfoItem icon={<Layers className="h-4 w-4" />} label="Kind" value={group.kind === "dynamic" ? "Dynamic" : "Static"} />
-              <InfoItem icon={<Film className="h-4 w-4" />} label="Items" value={(group.itemCount ?? group.sceneCount + group.subGroupCount).toLocaleString()} />
+              <InfoItem icon={<Film className="h-4 w-4" />} label="Items" value={(group.itemCount ?? group.videoCount + group.subGroupCount).toLocaleString()} />
               <InfoItem label="Created" value={formatDate(group.createdAt)} />
               <InfoItem label="Updated" value={formatDate(group.updatedAt)} />
             </div>
@@ -458,9 +458,9 @@ export function GroupDetailPage({ id, onNavigate }: Props) {
 }
 
 function getGroupCountMetrics(group: Group) {
-  const alwaysShow = new Set(["scenes", "images", "audio", "texts", "segments"]);
+  const alwaysShow = new Set(["videos", "images", "audio", "texts", "segments"]);
   return [
-    { key: "scenes", label: "Scenes", value: group.sceneCount, icon: <Film className="h-4 w-4" /> },
+    { key: "videos", label: "Videos", value: group.videoCount, icon: <Film className="h-4 w-4" /> },
     { key: "images", label: "Images", value: group.imageCount ?? 0, icon: <Images className="h-4 w-4" /> },
     { key: "audio", label: "Audio", value: group.audioCount ?? 0, icon: <Headphones className="h-4 w-4" /> },
     { key: "texts", label: "Texts", value: group.textCount ?? 0, icon: <FileText className="h-4 w-4" /> },
@@ -478,14 +478,14 @@ type MixedGroupItem =
   | { source: "item"; id: string; item: GroupItem; orderIndex: number; kind: GroupItemKind }
   | { source: "subgroup"; id: string; group: Group; orderIndex: number; kind: "group" };
 
-function GroupItemsPanel({ group, filter, setFilter, onNavigate, groupItems, groupItemsLoading, canReadScenes, canReadGroups, canWriteGroup, addSubGroupRequestId }: {
+function GroupItemsPanel({ group, filter, setFilter, onNavigate, groupItems, groupItemsLoading, canReadVideos, canReadGroups, canWriteGroup, addSubGroupRequestId }: {
   group: Group;
   filter: FindFilter;
   setFilter: (filter: FindFilter) => void;
   onNavigate: (r: any) => void;
   groupItems?: GroupItem[];
   groupItemsLoading?: boolean;
-  canReadScenes: boolean;
+  canReadVideos: boolean;
   canReadGroups: boolean;
   canWriteGroup?: boolean;
   addSubGroupRequestId?: number;
@@ -807,8 +807,8 @@ function GroupItemsPanel({ group, filter, setFilter, onNavigate, groupItems, gro
     </div>
   ) : null;
 
-  if (staticMixedItems.length === 0 && !isDynamic && canReadScenes) {
-    return <>{selectionDialogs}{addSubGroupDialog}<GroupScenesPanel groupId={group.id} filter={filter} setFilter={setFilter} onNavigate={onNavigate} groupItems={groupItems} groupItemsLoading={groupItemsLoading} canWriteGroup={canWriteGroup} /></>;
+  if (staticMixedItems.length === 0 && !isDynamic && canReadVideos) {
+    return <>{selectionDialogs}{addSubGroupDialog}<GroupVideosPanel groupId={group.id} filter={filter} setFilter={setFilter} onNavigate={onNavigate} groupItems={groupItems} groupItemsLoading={groupItemsLoading} canWriteGroup={canWriteGroup} /></>;
   }
 
   if (totalItemCount === 0) {
@@ -1126,29 +1126,29 @@ function getMixedItemMetadata(item: MixedGroupItem, hostData?: HydratedGroupItem
   }
 
   switch (data?.type) {
-    case "scene": {
-      const scene = data.scene;
-      const duration = String(item.kind).toLowerCase() === "scenerange" && (item.item.startSec != null || item.item.endSec != null)
-        ? Math.max(0, (item.item.endSec ?? scene.files[0]?.duration ?? 0) - (item.item.startSec ?? 0))
-        : maxNumber(scene.files.map((file) => file.duration));
+    case "video": {
+      const video = data.video;
+      const duration = String(item.kind).toLowerCase() === "videorange" && (item.item.startSec != null || item.item.endSec != null)
+        ? Math.max(0, (item.item.endSec ?? video.files[0]?.duration ?? 0) - (item.item.startSec ?? 0))
+        : maxNumber(video.files.map((file) => file.duration));
       return {
         ...base,
-        title: item.item.title || scene.title || base.title,
-        code: scene.code,
-        details: scene.details,
-        date: scene.date,
-        createdAt: scene.createdAt,
-        updatedAt: scene.updatedAt,
-        organized: scene.organized,
-        urls: scene.urls ?? [],
-        paths: scene.files.map((file) => file.path).filter(Boolean),
-        tagIds: scene.tags.map((tag) => tag.id),
-        performerIds: scene.performers.map((performer) => performer.id),
-        studioIds: scene.studioId ? [scene.studioId] : [],
-        studioName: scene.studioName,
-        tagCount: scene.tags.length,
-        performerCount: scene.performers.length,
-        fileCount: scene.files.length,
+        title: item.item.title || video.title || base.title,
+        code: video.code,
+        details: video.details,
+        date: video.date,
+        createdAt: video.createdAt,
+        updatedAt: video.updatedAt,
+        organized: video.organized,
+        urls: video.urls ?? [],
+        paths: video.files.map((file) => file.path).filter(Boolean),
+        tagIds: video.tags.map((tag) => tag.id),
+        performerIds: video.performers.map((performer) => performer.id),
+        studioIds: video.studioId ? [video.studioId] : [],
+        studioName: video.studioName,
+        tagCount: video.tags.length,
+        performerCount: video.performers.length,
+        fileCount: video.files.length,
         duration,
       };
     }
@@ -1263,19 +1263,19 @@ function getMixedItemMetadata(item: MixedGroupItem, hostData?: HydratedGroupItem
 function getGroupItemFilterKind(item: MixedGroupItem) {
   if (item.source === "subgroup") return "group";
   const normalized = String(item.kind).toLowerCase();
-  return normalized === "scenerange" ? "scene" : normalized;
+  return normalized === "videorange" ? "video" : normalized;
 }
 
 function isHydratableGroupItemKind(kind: GroupItemKind) {
   const normalized = String(kind).toLowerCase();
-  return ["scene", "scenerange", "image", "audio", "text", "group", "segment"].includes(normalized);
+  return ["video", "videorange", "image", "audio", "text", "group", "segment"].includes(normalized);
 }
 
 function getEngagementHost(item: MixedGroupItem): { hostType: AffinityHostType; hostId: number } | null {
   const hostId = getMixedItemHostIdValue(item);
   if (!hostId) return null;
   const kind = getGroupItemFilterKind(item);
-  if (["scene", "image", "audio", "text", "group"].includes(kind)) {
+  if (["video", "image", "audio", "text", "group"].includes(kind)) {
     return { hostType: kind as AffinityHostType, hostId };
   }
   return null;
@@ -1297,15 +1297,15 @@ function maxNumber(values: Array<number | null | undefined>) {
 
 function groupItemHost(item: MixedGroupItem) {
   if (item.source === "subgroup") {
-    return { title: item.group.name, subtitle: `${item.group.sceneCount} scene${item.group.sceneCount === 1 ? "" : "s"}`, kind: "group" as GroupItemKind, route: { page: "group", id: item.group.id } };
+    return { title: item.group.name, subtitle: `${item.group.videoCount} video${item.group.videoCount === 1 ? "" : "s"}`, kind: "group" as GroupItemKind, route: { page: "group", id: item.group.id } };
   }
 
   const groupItem = item.item;
   const hostType = (groupItem.hostType || groupItem.kind).toLowerCase();
-  const hostId = groupItem.hostId || groupItem.sceneId || groupItem.imageId || groupItem.childGroupId;
-  const title = groupItem.title || groupItem.sceneTitle || groupItem.imageTitle || groupItem.childGroupName || `${labelForGroupItemKind(groupItem.kind)} #${hostId ?? groupItem.id}`;
+  const hostId = groupItem.hostId || groupItem.videoId || groupItem.imageId || groupItem.childGroupId;
+  const title = groupItem.title || groupItem.videoTitle || groupItem.imageTitle || groupItem.childGroupName || `${labelForGroupItemKind(groupItem.kind)} #${hostId ?? groupItem.id}`;
   const route = routeForGroupItem(groupItem, hostType, hostId ?? null);
-  const subtitle = String(groupItem.kind).toLowerCase() === "scenerange" ? formatDurationRange(groupItem.startSec, groupItem.endSec) : labelForGroupItemKind(groupItem.kind);
+  const subtitle = String(groupItem.kind).toLowerCase() === "videorange" ? formatDurationRange(groupItem.startSec, groupItem.endSec) : labelForGroupItemKind(groupItem.kind);
   return { title, subtitle, kind: groupItem.kind, route };
 }
 
@@ -1558,7 +1558,7 @@ function getSelectedDeletableKinds(items: MixedGroupItem[], hasPermission: (perm
 }
 
 function canDeleteAnyMixedHostType(hasPermission: (permission: string) => boolean) {
-  return canDeleteEntity("scene", hasPermission)
+  return canDeleteEntity("video", hasPermission)
     || canDeleteEntity("image", hasPermission)
     || canDeleteEntity("audio", hasPermission)
     || canDeleteEntity("text", hasPermission)
@@ -1567,11 +1567,11 @@ function canDeleteAnyMixedHostType(hasPermission: (permission: string) => boolea
 
 function getMixedItemHostIdValue(item: MixedGroupItem) {
   if (item.source === "subgroup") return item.group.id;
-  return item.item.hostId || item.item.sceneId || item.item.imageId || item.item.childGroupId || item.item.id;
+  return item.item.hostId || item.item.videoId || item.item.imageId || item.item.childGroupId || item.item.id;
 }
 
 async function deleteSelectedGroupHosts(items: MixedGroupItem[], hasPermission: (permission: string) => boolean) {
-  const sceneIds = new Set<number>();
+  const videoIds = new Set<number>();
   const imageIds = new Set<number>();
   const audioIds = new Set<number>();
   const textIds = new Set<number>();
@@ -1582,9 +1582,9 @@ async function deleteSelectedGroupHosts(items: MixedGroupItem[], hasPermission: 
     if (!host || !canDeleteEntity(host.permissionKind, hasPermission)) continue;
 
     switch (host.kind) {
-      case "scene":
-      case "sceneRange":
-        sceneIds.add(host.hostId);
+      case "video":
+      case "videoRange":
+        videoIds.add(host.hostId);
         break;
       case "image":
         imageIds.add(host.hostId);
@@ -1602,7 +1602,7 @@ async function deleteSelectedGroupHosts(items: MixedGroupItem[], hasPermission: 
   }
 
   await Promise.all([
-    sceneIds.size > 0 ? scenes.bulkDelete([...sceneIds]) : Promise.resolve(),
+    videoIds.size > 0 ? videos.bulkDelete([...videoIds]) : Promise.resolve(),
     imageIds.size > 0 ? images.bulkDelete([...imageIds]) : Promise.resolve(),
     audioIds.size > 0 ? audios.bulkDelete([...audioIds]) : Promise.resolve(),
     textIds.size > 0 ? texts.bulkDelete([...textIds]) : Promise.resolve(),
@@ -1610,16 +1610,16 @@ async function deleteSelectedGroupHosts(items: MixedGroupItem[], hasPermission: 
   ]);
 }
 
-function getMixedItemHost(item: MixedGroupItem): { kind: GroupItemKind; hostId: number; permissionKind: "scene" | "image" | "audio" | "text" | "group" } | null {
+function getMixedItemHost(item: MixedGroupItem): { kind: GroupItemKind; hostId: number; permissionKind: "video" | "image" | "audio" | "text" | "group" } | null {
   if (item.source === "subgroup") {
     return { kind: "group", hostId: item.group.id, permissionKind: "group" };
   }
 
   switch (item.kind) {
-    case "scene":
-    case "sceneRange": {
-      const hostId = item.item.sceneId ?? item.item.hostId;
-      return hostId ? { kind: item.kind, hostId, permissionKind: "scene" } : null;
+    case "video":
+    case "videoRange": {
+      const hostId = item.item.videoId ?? item.item.hostId;
+      return hostId ? { kind: item.kind, hostId, permissionKind: "video" } : null;
     }
     case "image": {
       const hostId = item.item.imageId ?? item.item.hostId;
@@ -1640,10 +1640,10 @@ function getMixedItemHost(item: MixedGroupItem): { kind: GroupItemKind; hostId: 
 
 function routeForGroupItem(item: GroupItem, hostType: string, hostId: number | null) {
   if (item.childGroupId) return { page: "group", id: item.childGroupId };
-  if (item.sceneId) return { page: "scene", id: item.sceneId, seekTo: item.startSec ?? 0 };
+  if (item.videoId) return { page: "video", id: item.videoId, seekTo: item.startSec ?? 0 };
   if (item.imageId) return { page: "image", id: item.imageId };
   if (!hostId) return null;
-  if (["audio", "text", "gallery", "performer", "studio", "tag", "face", "group", "image", "scene", "segment"].includes(hostType)) {
+  if (["audio", "text", "gallery", "performer", "studio", "tag", "face", "group", "image", "video", "segment"].includes(hostType)) {
     return { page: hostType === "text" ? "text" : hostType, id: hostId };
   }
   return null;
@@ -1651,7 +1651,7 @@ function routeForGroupItem(item: GroupItem, hostType: string, hostId: number | n
 
 function labelForGroupItemKind(kind: GroupItemKind) {
   switch (String(kind).toLowerCase()) {
-    case "scenerange": return "Scene Range";
+    case "videorange": return "Video Range";
     case "image": return "Image";
     case "audio": return "Audio";
     case "text": return "Text";
@@ -1662,7 +1662,7 @@ function labelForGroupItemKind(kind: GroupItemKind) {
     case "gallery": return "Gallery";
     case "face": return "Face";
     case "segment": return "Segment";
-    default: return "Scene";
+    default: return "Video";
   }
 }
 
@@ -1683,7 +1683,7 @@ function GroupItemKindIcon({ kind, className = "h-4 w-4" }: { kind: GroupItemKin
 }
 
 type HydratedGroupItemData =
-  | { type: "scene"; scene: Scene }
+  | { type: "video"; video: Video }
   | { type: "image"; image: Image }
   | { type: "audio"; audio: Audio }
   | { type: "text"; text: TextDocument }
@@ -1725,8 +1725,8 @@ function useGroupItemEntities(items: MixedGroupItem[]) {
 
 function createGroupItemEntityQuery(item: Extract<MixedGroupItem, { source: "item" }>) {
   const normalizedKind = String(item.kind).toLowerCase();
-  const hostId = normalizedKind === "scene" || normalizedKind === "scenerange"
-    ? item.item.sceneId ?? item.item.hostId
+  const hostId = normalizedKind === "video" || normalizedKind === "videorange"
+    ? item.item.videoId ?? item.item.hostId
     : normalizedKind === "image"
       ? item.item.imageId ?? item.item.hostId
       : normalizedKind === "group"
@@ -1739,9 +1739,9 @@ function createGroupItemEntityQuery(item: Extract<MixedGroupItem, { source: "ite
     staleTime: 60000,
     queryFn: async (): Promise<HydratedGroupItemData> => {
       switch (normalizedKind) {
-        case "scene":
-        case "scenerange":
-          return { type: "scene", scene: await scenes.get(hostId!) };
+        case "video":
+        case "videorange":
+          return { type: "video", video: await videos.get(hostId!) };
         case "image":
           return { type: "image", image: await images.get(hostId!) };
         case "audio":
@@ -1762,13 +1762,13 @@ function createGroupItemEntityQuery(item: Extract<MixedGroupItem, { source: "ite
   };
 }
 
-function applySceneItemOverrides(scene: Scene, item: Extract<MixedGroupItem, { source: "item" }>) {
+function applyVideoItemOverrides(video: Video, item: Extract<MixedGroupItem, { source: "item" }>) {
   return {
-    ...scene,
-    title: item.item.title || scene.title,
-    clipStartSec: item.kind === "sceneRange" ? item.item.startSec ?? scene.clipStartSec : scene.clipStartSec,
-    clipEndSec: item.kind === "sceneRange" ? item.item.endSec ?? scene.clipEndSec : scene.clipEndSec,
-  } satisfies Scene;
+    ...video,
+    title: item.item.title || video.title,
+    clipStartSec: item.kind === "videoRange" ? item.item.startSec ?? video.clipStartSec : video.clipStartSec,
+    clipEndSec: item.kind === "videoRange" ? item.item.endSec ?? video.clipEndSec : video.clipEndSec,
+  } satisfies Video;
 }
 
 function applyNamedItemOverride<T extends { title?: string }>(entity: T, title?: string) {
@@ -1839,12 +1839,12 @@ function GroupItemGridCard({ item, hydrated, onNavigate, selected, onToggleSelec
 
   if (hydrated?.status === "ready") {
     switch (hydrated.data.type) {
-      case "scene": {
-        const scene = applySceneItemOverrides(hydrated.data.scene, item);
+      case "video": {
+        const video = applyVideoItemOverrides(hydrated.data.video, item);
         return (
           <GroupItemCardShell dragHandleProps={dragHandleProps} isDragging={isDragging} isOver={isOver}>
-            <SceneCard
-              scene={scene}
+            <VideoCard
+              video={video}
               onClick={() => selecting ? onToggleSelect() : onNavigate(route)}
               onNavigate={onNavigate}
               selected={selected}
@@ -1971,7 +1971,7 @@ function InfoItem({ icon, label, value }: { icon?: React.ReactNode; label: strin
   );
 }
 
-function GroupScenesPanel({ groupId, filter, setFilter, onNavigate, groupItems, groupItemsLoading, canWriteGroup }: {
+function GroupVideosPanel({ groupId, filter, setFilter, onNavigate, groupItems, groupItemsLoading, canWriteGroup }: {
   groupId: number;
   filter: FindFilter;
   setFilter: (filter: FindFilter) => void;
@@ -1982,19 +1982,19 @@ function GroupScenesPanel({ groupId, filter, setFilter, onNavigate, groupItems, 
 }) {
   const queryClient = useQueryClient();
   const [zoomLevel, setZoomLevel] = useState(0);
-  const { displayMode, setDisplayMode, availableDisplayModes } = useRelatedEntityDisplayMode("scenes");
+  const { displayMode, setDisplayMode, availableDisplayModes } = useRelatedEntityDisplayMode("videos");
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
   const [objectFilter, setObjectFilter] = useState<Record<string, unknown>>({});
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
-  const { data: groupScenes, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<Scene>({
-    queryKey: ["group-scenes", groupId, objectFilter],
+  const { data: groupVideos, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<Video>({
+    queryKey: ["group-videos", groupId, objectFilter],
     filter,
     queryFn: (nextFilter) => hasObjectFilter
-      ? scenes.findFiltered({
+      ? videos.findFiltered({
           findFilter: nextFilter,
-          objectFilter: withRequiredMultiId(objectFilter as SceneFilterCriteria, "groupsCriterion", groupId),
+          objectFilter: withRequiredMultiId(objectFilter as VideoFilterCriteria, "groupsCriterion", groupId),
         })
-      : scenes.find(nextFilter, { groupId: String(groupId) }),
+      : videos.find(nextFilter, { groupId: String(groupId) }),
   });
   const deleteItemMutation = useMutation({
     mutationFn: (itemId: number) => groups.items.delete(groupId, itemId),
@@ -2029,14 +2029,14 @@ function GroupScenesPanel({ groupId, filter, setFilter, onNavigate, groupItems, 
       queryClient.invalidateQueries({ queryKey: ["group-items", groupId] });
     },
   });
-  const items = groupScenes?.items ?? [];
+  const items = groupVideos?.items ?? [];
   const { selectedIds, toggle, selectAll, selectAllPending, selectShown, selectNone } = useDetailListSelection({ items, infinitePageSize, infiniteFilterKey, fetchAllIds, resetKeyParts: [objectFilter] });
   const selecting = selectedIds.size > 0;
   const toolbar = (
     <DetailListToolbar
       filter={filter}
       onFilterChange={setFilter}
-      totalCount={groupScenes?.totalCount ?? 0}
+      totalCount={groupVideos?.totalCount ?? 0}
       sortOptions={[
         { value: "title", label: "Title" },
         { value: "date", label: "Date" },
@@ -2052,8 +2052,8 @@ function GroupScenesPanel({ groupId, filter, setFilter, onNavigate, groupItems, 
       onSelectAllMatching={selectShown}
       selectAllMatchingLabel="Select shown"
       onSelectNone={selectNone}
-      selectionActions={<BulkSelectionActions entityType="scenes" selectedIds={selectedIds} onDone={selectNone} sceneItems={items} onNavigate={onNavigate} removeFromParent={{ type: "group", id: groupId }} />}
-      criteriaDefinitions={SCENE_CRITERIA}
+      selectionActions={<BulkSelectionActions entityType="videos" selectedIds={selectedIds} onDone={selectNone} videoItems={items} onNavigate={onNavigate} removeFromParent={{ type: "group", id: groupId }} />}
+      criteriaDefinitions={VIDEO_CRITERIA}
       objectFilter={objectFilter}
       onObjectFilterChange={setObjectFilter}
       allowInfinitePageSize
@@ -2087,7 +2087,7 @@ function GroupScenesPanel({ groupId, filter, setFilter, onNavigate, groupItems, 
           disabled={!canWriteGroup || reorderItemMutation.isPending}
           className="space-y-2"
           renderItem={(item, { dragHandleProps, isDragging, isOver }) => {
-            const label = item.title || item.sceneTitle || `Scene #${item.sceneId}`;
+            const label = item.title || item.videoTitle || `Video #${item.videoId}`;
             return (
               <div className={`rounded-xl border bg-card/80 p-4 transition-colors ${isDragging ? "border-accent opacity-40" : isOver ? "border-accent bg-accent/5" : "border-border"}`}>
                 <div className="flex flex-wrap items-start justify-between gap-3">
@@ -2101,7 +2101,7 @@ function GroupScenesPanel({ groupId, filter, setFilter, onNavigate, groupItems, 
                       <div className="text-sm font-medium text-foreground">{label}</div>
                       <div className="mt-1 flex flex-wrap gap-2 text-xs text-secondary">
                         <span>#{item.orderIndex + 1}</span>
-                        <span>{item.kind === "sceneRange" ? formatDurationRange(item.startSec, item.endSec) : "Full scene"}</span>
+                        <span>{item.kind === "videoRange" ? formatDurationRange(item.startSec, item.endSec) : "Full video"}</span>
                         {item.sourceSpanKey ? <span>Span snapshot</span> : null}
                       </div>
                     </div>
@@ -2109,18 +2109,18 @@ function GroupScenesPanel({ groupId, filter, setFilter, onNavigate, groupItems, 
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
-                      onClick={() => onNavigate({ page: "scene", id: item.sceneId, seekTo: item.startSec ?? 0 })}
+                      onClick={() => onNavigate({ page: "video", id: item.videoId, seekTo: item.startSec ?? 0 })}
                       className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent"
                     >
                       <ExternalLink className="h-4 w-4" />
-                      Open scene
+                      Open video
                     </button>
                     {item.sourceSpanKey ? (
                       <button
                         type="button"
                         onClick={() => onNavigate({
-                          page: "scene-span",
-                          id: item.sceneId,
+                          page: "video-span",
+                          id: item.videoId,
                           spanKey: item.sourceSpanKey,
                           profileId: item.sourceProfileId,
                           derivedQueryDescriptor: parseGroupItemDerivedQueryDescriptor(item.sourceQueryJson),
@@ -2153,15 +2153,15 @@ function GroupScenesPanel({ groupId, filter, setFilter, onNavigate, groupItems, 
     );
   }
 
-  if (isLoading) return <LoadingPanel icon={<Film className="h-10 w-10" />} message="Loading scenes..." />;
-  if (!groupScenes || items.length === 0) return <>{toolbar}<EmptyPanel icon={<Film className="h-12 w-12" />} message="No scenes in this group" /></>;
+  if (isLoading) return <LoadingPanel icon={<Film className="h-10 w-10" />} message="Loading videos..." />;
+  if (!groupVideos || items.length === 0) return <>{toolbar}<EmptyPanel icon={<Film className="h-12 w-12" />} message="No videos in this group" /></>;
 
   return (
     <>
       {toolbar}
-      <RelatedEntityListView entityType="scenes" items={items} displayMode={displayMode} zoomLevel={zoomLevel} selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} onSceneQuickView={setQuickViewId} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} />
+      <RelatedEntityListView entityType="videos" items={items} displayMode={displayMode} zoomLevel={zoomLevel} selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} onVideoQuickView={setQuickViewId} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} />
       {quickViewId !== null && (
-        <QuickViewDialog type="scene" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
+        <QuickViewDialog type="video" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
       )}
     </>
   );
@@ -2314,7 +2314,7 @@ function GroupSubGroupsPanel({ groupId, onNavigate, canWriteGroup }: { groupId: 
               ) : null}
               <span className="w-6 text-center text-xs text-muted">{index + 1}</span>
               <button onClick={() => onNavigate({ page: "group", id: g.id })} className="flex-1 text-left text-sm font-medium text-foreground hover:text-accent">{g.name}</button>
-              <span className="text-xs text-muted">{g.sceneCount} scenes</span>
+              <span className="text-xs text-muted">{g.videoCount} videos</span>
               {canWriteGroup ? <button
                 onClick={() => { if (confirm(`Remove "${g.name}" from sub-groups?`)) removeMut.mutate(g.id); }}
                 className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-900/20 text-muted hover:text-red-400"
@@ -2403,3 +2403,4 @@ function matchesTimestampCriterion(value: string | undefined, criterion?: Timest
     default: return timestamp === expected;
   }
 }
+

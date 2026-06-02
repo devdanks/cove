@@ -2,7 +2,7 @@ using System.Globalization;
 
 namespace Cove.Api.Services;
 
-internal static class ScrapedSceneDateParser
+internal static class ScrapedVideoDateParser
 {
     private static readonly string[] ExactDateFormats =
     [

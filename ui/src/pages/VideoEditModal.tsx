@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { scenes, tagApplications } from "../api/client";
-import type { Scene, SceneUpdate, TagApplication } from "../api/types";
+import { videos, tagApplications } from "../api/client";
+import type { Video, VideoUpdate, TagApplication } from "../api/types";
 import { EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
 import { RatingField } from "../components/Rating";
 import { CustomFieldsEditor, buildTagProvenanceById } from "../components/shared";
@@ -11,67 +11,67 @@ import { EntityReferenceMultiSelector, EntityReferenceValue } from "../component
 import { getEditableTagIds, getLockedTagIds, mergeTagIds } from "../utils/tags";
 
 interface Props {
-  scene: Scene;
+  video: Video;
   open: boolean;
   onClose: () => void;
 }
 
-export function SceneEditModal({ scene, open, onClose }: Props) {
+export function VideoEditModal({ video, open, onClose }: Props) {
   const queryClient = useQueryClient();
 
-  const [title, setTitle] = useState(scene.title || "");
-  const [code, setCode] = useState(scene.code || "");
-  const [details, setDetails] = useState(scene.details || "");
-  const [captions, setCaptions] = useState(scene.captions || "");
-  const [director, setDirector] = useState(scene.director || "");
-  const [date, setDate] = useState(scene.date || "");
-  const [isVr, setIsVr] = useState(scene.isVr ?? false);
+  const [title, setTitle] = useState(video.title || "");
+  const [code, setCode] = useState(video.code || "");
+  const [details, setDetails] = useState(video.details || "");
+  const [captions, setCaptions] = useState(video.captions || "");
+  const [director, setDirector] = useState(video.director || "");
+  const [date, setDate] = useState(video.date || "");
+  const [isVr, setIsVr] = useState(video.isVr ?? false);
   const [rating, setRating] = useState<number | undefined>(undefined);
-  const [urls, setUrls] = useState<string[]>(scene.urls.length > 0 ? scene.urls : [""]);
+  const [urls, setUrls] = useState<string[]>(video.urls.length > 0 ? video.urls : [""]);
   const addUrl = () => setUrls([...urls, ""]);
   const removeUrl = (i: number) => setUrls(urls.filter((_, idx) => idx !== i));
   const updateUrl = (i: number, val: string) => setUrls(urls.map((u, idx) => idx === i ? val : u));
-  const [studioId, setStudioId] = useState<number | undefined>(scene.studioId ?? undefined);
-  const [selectedTagIds, setSelectedTagIds] = useState<number[]>(getEditableTagIds(scene.tags));
-  const [selectedPerformerIds, setSelectedPerformerIds] = useState<number[]>(scene.performers.map((p) => p.id));
-  const [selectedGalleryIds, setSelectedGalleryIds] = useState<number[]>(scene.galleries.map((g) => g.id));
-  const [selectedGroups, setSelectedGroups] = useState<{ groupId: number; sceneIndex: number }[]>(
-    scene.groups.map((g) => ({ groupId: g.id, sceneIndex: g.sceneIndex }))
+  const [studioId, setStudioId] = useState<number | undefined>(video.studioId ?? undefined);
+  const [selectedTagIds, setSelectedTagIds] = useState<number[]>(getEditableTagIds(video.tags));
+  const [selectedPerformerIds, setSelectedPerformerIds] = useState<number[]>(video.performers.map((p) => p.id));
+  const [selectedGalleryIds, setSelectedGalleryIds] = useState<number[]>(video.galleries.map((g) => g.id));
+  const [selectedGroups, setSelectedGroups] = useState<{ groupId: number; videoIndex: number }[]>(
+    video.groups.map((g) => ({ groupId: g.id, videoIndex: g.videoIndex }))
   );
-  const [contextTagIdsByPerformer, setContextTagIdsByPerformer] = useState<Record<number, number[]>>(() => buildPerformerContextTagIds(scene));
-  const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(scene.customFields ?? {}) });
-  const [remoteIds, setRemoteIds] = useState<RemoteIdValue[]>(scene.remoteIds.map((remoteId) => ({ ...remoteId })));
+  const [contextTagIdsByPerformer, setContextTagIdsByPerformer] = useState<Record<number, number[]>>(() => buildPerformerContextTagIds(video));
+  const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(video.customFields ?? {}) });
+  const [remoteIds, setRemoteIds] = useState<RemoteIdValue[]>(video.remoteIds.map((remoteId) => ({ ...remoteId })));
 
   useEffect(() => {
-    setTitle(scene.title || "");
-    setCode(scene.code || "");
-    setDetails(scene.details || "");
-    setCaptions(scene.captions || "");
-    setDirector(scene.director || "");
-    setDate(scene.date || "");
-    setIsVr(scene.isVr ?? false);
+    setTitle(video.title || "");
+    setCode(video.code || "");
+    setDetails(video.details || "");
+    setCaptions(video.captions || "");
+    setDirector(video.director || "");
+    setDate(video.date || "");
+    setIsVr(video.isVr ?? false);
     setRating(undefined);
-    setUrls(scene.urls.length > 0 ? scene.urls : [""]);
-    setStudioId(scene.studioId ?? undefined);
-    setSelectedTagIds(getEditableTagIds(scene.tags));
-    setSelectedPerformerIds(scene.performers.map((p) => p.id));
-    setSelectedGalleryIds(scene.galleries.map((g) => g.id));
-    setSelectedGroups(scene.groups.map((g) => ({ groupId: g.id, sceneIndex: g.sceneIndex })));
-    setContextTagIdsByPerformer(buildPerformerContextTagIds(scene));
-    setCustomFields({ ...(scene.customFields ?? {}) });
-    setRemoteIds(scene.remoteIds.map((remoteId) => ({ ...remoteId })));
-  }, [scene]);
+    setUrls(video.urls.length > 0 ? video.urls : [""]);
+    setStudioId(video.studioId ?? undefined);
+    setSelectedTagIds(getEditableTagIds(video.tags));
+    setSelectedPerformerIds(video.performers.map((p) => p.id));
+    setSelectedGalleryIds(video.galleries.map((g) => g.id));
+    setSelectedGroups(video.groups.map((g) => ({ groupId: g.id, videoIndex: g.videoIndex })));
+    setContextTagIdsByPerformer(buildPerformerContextTagIds(video));
+    setCustomFields({ ...(video.customFields ?? {}) });
+    setRemoteIds(video.remoteIds.map((remoteId) => ({ ...remoteId })));
+  }, [video]);
 
   const mutation = useMutation({
-    mutationFn: async (data: SceneUpdate) => {
-      const updated = await scenes.update(scene.id, data);
-      await syncPerformerContextTags(scene.id, scene.contextTagApplications ?? [], contextTagIdsByPerformer, selectedPerformerIds);
+    mutationFn: async (data: VideoUpdate) => {
+      const updated = await videos.update(video.id, data);
+      await syncPerformerContextTags(video.id, video.contextTagApplications ?? [], contextTagIdsByPerformer, selectedPerformerIds);
       return updated;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["scene", scene.id] });
+      queryClient.invalidateQueries({ queryKey: ["video", video.id] });
       queryClient.invalidateQueries({ queryKey: ["tagapplications"] });
-      queryClient.invalidateQueries({ queryKey: ["scenes"] });
+      queryClient.invalidateQueries({ queryKey: ["videos"] });
       onClose();
     },
   });
@@ -103,24 +103,24 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
   };
 
   const setSelectedGroupIds = (groupIds: number[]) => {
-    setSelectedGroups(groupIds.map((groupId) => selectedGroups.find((group) => group.groupId === groupId) ?? { groupId, sceneIndex: 0 }));
+    setSelectedGroups(groupIds.map((groupId) => selectedGroups.find((group) => group.groupId === groupId) ?? { groupId, videoIndex: 0 }));
   };
 
-  const lockedTagIds = getLockedTagIds(scene.tags);
+  const lockedTagIds = getLockedTagIds(video.tags);
   const displayedTagIds = mergeTagIds(lockedTagIds, selectedTagIds);
-  const tagProvenanceById = buildTagProvenanceById(scene.tags, scene.fieldProvenance);
+  const tagProvenanceById = buildTagProvenanceById(video.tags, video.fieldProvenance);
   const updateSelectedTagIds = (tagIds: number[]) => {
     const locked = new Set(lockedTagIds);
     setSelectedTagIds(tagIds.filter((tagId) => !locked.has(tagId)));
   };
 
   return (
-    <EditModal title="Edit Scene" open={open} onClose={onClose}>
+    <EditModal title="Edit Video" open={open} onClose={onClose}>
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Title" fieldProvenance={scene.fieldProvenance} fieldKey="title">
-          <TextInput value={title} onChange={setTitle} placeholder="Scene title" />
+        <Field label="Title" fieldProvenance={video.fieldProvenance} fieldKey="title">
+          <TextInput value={title} onChange={setTitle} placeholder="Video title" />
         </Field>
-        <Field label="Date" fieldProvenance={scene.fieldProvenance} fieldKey="date">
+        <Field label="Date" fieldProvenance={video.fieldProvenance} fieldKey="date">
           <input
             type="date"
             value={date}
@@ -131,25 +131,25 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <Field label="Studio Code" fieldProvenance={scene.fieldProvenance} fieldKey="code">
+        <Field label="Studio Code" fieldProvenance={video.fieldProvenance} fieldKey="code">
           <TextInput value={code} onChange={setCode} placeholder="Studio code" />
         </Field>
-        <Field label="Director" fieldProvenance={scene.fieldProvenance} fieldKey="director">
+        <Field label="Director" fieldProvenance={video.fieldProvenance} fieldKey="director">
           <TextInput value={director} onChange={setDirector} placeholder="Director name" />
         </Field>
       </div>
 
-      <Field label="Details" fieldProvenance={scene.fieldProvenance} fieldKey="details">
-        <TextArea value={details} onChange={setDetails} placeholder="Scene description" />
+      <Field label="Details" fieldProvenance={video.fieldProvenance} fieldKey="details">
+        <TextArea value={details} onChange={setDetails} placeholder="Video description" />
       </Field>
 
-      <Field label="Captions" fieldProvenance={scene.fieldProvenance} fieldKey="captions">
+      <Field label="Captions" fieldProvenance={video.fieldProvenance} fieldKey="captions">
         <TextInput value={captions} onChange={setCaptions} placeholder="Subtitle languages or notes" />
       </Field>
 
       <div className="grid grid-cols-2 gap-4">
-        <RatingField value={rating} onChange={setRating} fieldProvenance={scene.fieldProvenance} />
-        <Field label="VR" fieldProvenance={scene.fieldProvenance} fieldKey="isVr">
+        <RatingField value={rating} onChange={setRating} fieldProvenance={video.fieldProvenance} />
+        <Field label="VR" fieldProvenance={video.fieldProvenance} fieldKey="isVr">
           <label className="inline-flex items-center gap-2 rounded border border-border bg-card px-3 py-2 text-sm text-foreground">
             <input type="checkbox" checked={isVr} onChange={(event) => setIsVr(event.target.checked)} className="accent-accent" />
             <span>VR</span>
@@ -157,11 +157,11 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
         </Field>
       </div>
 
-      <Field label="Studio" fieldProvenance={scene.fieldProvenance} fieldKey={["studio", "studioId"]}>
+      <Field label="Studio" fieldProvenance={video.fieldProvenance} fieldKey={["studio", "studioId"]}>
         <StudioSelector value={studioId} onChange={setStudioId} />
       </Field>
 
-      <Field label="URLs" fieldProvenance={scene.fieldProvenance} fieldKey="urls">
+      <Field label="URLs" fieldProvenance={video.fieldProvenance} fieldKey="urls">
         <div className="space-y-1.5">
           {urls.map((url, i) => (
             <div key={i} className="flex items-center gap-1.5">
@@ -189,17 +189,17 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
       </Field>
 
       {/* Tags */}
-      <Field label="Tags" fieldProvenance={scene.fieldProvenance} fieldKey="tags">
+      <Field label="Tags" fieldProvenance={video.fieldProvenance} fieldKey="tags">
         <EntityReferenceMultiSelector entityType="tag" values={displayedTagIds} lockedIds={lockedTagIds} onChange={updateSelectedTagIds} placeholder="Search tags..." selectedProvenanceById={tagProvenanceById} />
       </Field>
 
       {/* Performers */}
-      <Field label="Performers" fieldProvenance={scene.fieldProvenance} fieldKey="performers">
+      <Field label="Performers" fieldProvenance={video.fieldProvenance} fieldKey="performers">
         <EntityReferenceMultiSelector entityType="performer" values={selectedPerformerIds} onChange={setSelectedPerformerIds} placeholder="Search performers..." />
       </Field>
 
       {selectedPerformerIds.length > 0 ? (
-        <Field label="Performer Occurrence Tags" fieldProvenance={scene.fieldProvenance} fieldKey="contextTags">
+        <Field label="Performer Occurrence Tags" fieldProvenance={video.fieldProvenance} fieldKey="contextTags">
           <div className="space-y-3 rounded-lg border border-border bg-surface/40 p-3">
             {selectedPerformerIds.map((performerId) => {
               const tagIds = contextTagIdsByPerformer[performerId] ?? [];
@@ -225,12 +225,12 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
         </Field>
       ) : null}
 
-      <Field label="Galleries" fieldProvenance={scene.fieldProvenance} fieldKey="galleries">
+      <Field label="Galleries" fieldProvenance={video.fieldProvenance} fieldKey="galleries">
         <EntityReferenceMultiSelector entityType="gallery" values={selectedGalleryIds} onChange={setSelectedGalleryIds} placeholder="Search galleries..." />
       </Field>
 
       {/* Groups */}
-      <Field label="Groups" fieldProvenance={scene.fieldProvenance} fieldKey="groups">
+      <Field label="Groups" fieldProvenance={video.fieldProvenance} fieldKey="groups">
         <div className="space-y-1.5 mb-2">
           {selectedGroups.map((sg) => {
             return (
@@ -240,12 +240,12 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
                   <button onClick={() => setSelectedGroups(selectedGroups.filter((g) => g.groupId !== sg.groupId))} className="hover:text-white">×</button>
                 </span>
                 <label className="flex items-center gap-1 text-xs text-secondary">
-                  Scene #
+                  Video #
                   <input
                     type="number"
                     min={0}
-                    value={sg.sceneIndex}
-                    onChange={(e) => setSelectedGroups(selectedGroups.map((g) => g.groupId === sg.groupId ? { ...g, sceneIndex: Number(e.target.value) || 0 } : g))}
+                    value={sg.videoIndex}
+                    onChange={(e) => setSelectedGroups(selectedGroups.map((g) => g.groupId === sg.groupId ? { ...g, videoIndex: Number(e.target.value) || 0 } : g))}
                     className="w-16 bg-card border border-border rounded px-2 py-0.5 text-xs text-foreground focus:outline-none focus:border-accent"
                   />
                 </label>
@@ -256,12 +256,12 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
         <EntityReferenceMultiSelector entityType="group" values={selectedGroups.map((group) => group.groupId)} onChange={setSelectedGroupIds} placeholder="Search groups..." />
       </Field>
 
-      <Field label="Remote IDs" fieldProvenance={scene.fieldProvenance} fieldKey="remoteIds">
+      <Field label="Remote IDs" fieldProvenance={video.fieldProvenance} fieldKey="remoteIds">
         <RemoteIdsEditor value={remoteIds} onChange={setRemoteIds} />
       </Field>
 
-      <Field label="Custom Fields" fieldProvenance={scene.fieldProvenance} fieldKey="customFields">
-        <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="scene" />
+      <Field label="Custom Fields" fieldProvenance={video.fieldProvenance} fieldKey="customFields">
+        <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="video" />
       </Field>
 
       {mutation.error && (
@@ -278,9 +278,9 @@ export function SceneEditModal({ scene, open, onClose }: Props) {
   );
 }
 
-function buildPerformerContextTagIds(scene: Scene): Record<number, number[]> {
+function buildPerformerContextTagIds(video: Video): Record<number, number[]> {
   const result: Record<number, number[]> = {};
-  for (const application of scene.contextTagApplications ?? []) {
+  for (const application of video.contextTagApplications ?? []) {
     if (application.contextType !== "performer" || application.contextId == null) {
       continue;
     }
@@ -291,7 +291,7 @@ function buildPerformerContextTagIds(scene: Scene): Record<number, number[]> {
   return result;
 }
 
-async function syncPerformerContextTags(sceneId: number, existingApplications: TagApplication[], desiredByPerformer: Record<number, number[]>, selectedPerformerIds: number[]) {
+async function syncPerformerContextTags(videoId: number, existingApplications: TagApplication[], desiredByPerformer: Record<number, number[]>, selectedPerformerIds: number[]) {
   const selectedPerformers = new Set(selectedPerformerIds);
   const desiredKeys = new Set<string>();
 
@@ -329,8 +329,8 @@ async function syncPerformerContextTags(sceneId: number, existingApplications: T
       }
 
       await tagApplications.create({
-        hostType: "scene",
-        hostId: sceneId,
+        hostType: "video",
+        hostId: videoId,
         contextType: "performer",
         contextId: performerId,
         tagId,
@@ -339,3 +339,4 @@ async function syncPerformerContextTags(sceneId: number, existingApplications: T
     }
   }
 }
+

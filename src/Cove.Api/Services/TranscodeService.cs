@@ -7,8 +7,8 @@ namespace Cove.Api.Services;
 public interface ITranscodeService
 {
     Task<Stream?> TranscodeToMp4Async(string inputPath, string? resolution, double startSeconds = 0, CancellationToken ct = default);
-    Task<string?> GenerateHlsManifestAsync(int sceneId, string inputPath, string? resolution, CancellationToken ct = default);
-    Task<Stream?> GetHlsSegmentAsync(int sceneId, string segment, CancellationToken ct = default);
+    Task<string?> GenerateHlsManifestAsync(int videoId, string inputPath, string? resolution, CancellationToken ct = default);
+    Task<Stream?> GetHlsSegmentAsync(int videoId, string segment, CancellationToken ct = default);
     string[] GetAvailableResolutions(int sourceWidth, int sourceHeight);
 }
 
@@ -109,12 +109,12 @@ public class TranscodeService : ITranscodeService
         }
     }
 
-    public async Task<string?> GenerateHlsManifestAsync(int sceneId, string inputPath, string? resolution, CancellationToken ct = default)
+    public async Task<string?> GenerateHlsManifestAsync(int videoId, string inputPath, string? resolution, CancellationToken ct = default)
     {
         var ffmpeg = FindFfmpeg();
         if (ffmpeg == null) return null;
 
-        var outputDir = Path.Combine(_config.GeneratedPath ?? Path.GetTempPath(), "transcodes", "hls", sceneId.ToString());
+        var outputDir = Path.Combine(_config.GeneratedPath ?? Path.GetTempPath(), "transcodes", "hls", videoId.ToString());
         Directory.CreateDirectory(outputDir);
 
         var manifestPath = Path.Combine(outputDir, $"{resolution ?? "original"}.m3u8");
@@ -170,12 +170,12 @@ public class TranscodeService : ITranscodeService
         }
     }
 
-    public Task<Stream?> GetHlsSegmentAsync(int sceneId, string segment, CancellationToken ct = default)
+    public Task<Stream?> GetHlsSegmentAsync(int videoId, string segment, CancellationToken ct = default)
     {
         var segmentName = Path.GetFileName(segment);
         if (string.IsNullOrWhiteSpace(segmentName) || segmentName != segment) return Task.FromResult<Stream?>(null);
 
-        var segmentPath = Path.Combine(_config.GeneratedPath ?? Path.GetTempPath(), "transcodes", "hls", sceneId.ToString(), segment);
+        var segmentPath = Path.Combine(_config.GeneratedPath ?? Path.GetTempPath(), "transcodes", "hls", videoId.ToString(), segment);
 
         if (!File.Exists(segmentPath)) return Task.FromResult<Stream?>(null);
 
@@ -254,3 +254,4 @@ file sealed class SemaphoreReleasingStream(Stream inner, System.Diagnostics.Proc
         base.Dispose(disposing);
     }
 }
+

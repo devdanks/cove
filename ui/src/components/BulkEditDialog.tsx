@@ -368,7 +368,7 @@ function serializeBulkFieldValue(field: BulkEditField, value: unknown) {
 
 // ===== Pre-configured bulk edit field sets =====
 
-export const SCENE_BULK_FIELDS: BulkEditField[] = [
+export const VIDEO_BULK_FIELDS: BulkEditField[] = [
   { key: "rating", label: "Rating", type: "rating" },
   { key: "organized", label: "Organized", type: "bool" },
   { key: "isVr", label: "VR", type: "bool" },
@@ -384,7 +384,7 @@ export const SCENE_BULK_FIELDS: BulkEditField[] = [
     type: "multiId",
     entityType: "groups",
     modeKey: "groupMode",
-    serializeValue: (value) => ((value as number[] | undefined) ?? []).map((groupId) => ({ groupId, sceneIndex: 0 })),
+    serializeValue: (value) => ((value as number[] | undefined) ?? []).map((groupId) => ({ groupId, videoIndex: 0 })),
   },
 ];
 
@@ -477,3 +477,4 @@ export const GROUP_BULK_FIELDS: BulkEditField[] = [
   { key: "description", label: "Description", type: "string" },
   { key: "tagIds", label: "Tags", type: "multiId", entityType: "tags", modeKey: "tagMode" },
 ];
+

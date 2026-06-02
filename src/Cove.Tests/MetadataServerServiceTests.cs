@@ -18,7 +18,7 @@ public sealed class MetadataServerServiceTests
     private const string ApiKey = "fixture-key";
 
     [Fact]
-    public async Task SearchScenesAsync_MapsGraphQlFixtureAndLocalCandidates()
+    public async Task SearchVideosAsync_MapsGraphQlFixtureAndLocalCandidates()
     {
         await using var context = CreateContext();
         context.Studios.Add(new Studio { Name = "Fixture Studio" });
@@ -26,28 +26,28 @@ public sealed class MetadataServerServiceTests
         context.Tags.Add(new Tag { Name = "Action" });
         await context.SaveChangesAsync();
 
-        var scene = new Scene { Title = "Local Scene" };
-        scene.Files.Add(new VideoFile { Duration = 118 });
+        var video = new Video { Title = "Local Video" };
+        video.Files.Add(new VideoFile { Duration = 118 });
 
         using var httpClient = new HttpClient(new FixtureMetadataServerHandler(request =>
         {
             Assert.Equal(ApiKey, request.ApiKey);
-            Assert.Contains("query SearchScene", request.Query);
-            Assert.Equal("Remote Scene", GetVariableString(request, "term"));
+            Assert.Contains("query SearchVideo", request.Query);
+            Assert.Equal("Remote Video", GetVariableString(request, "term"));
 
             return GraphQlData($$"""
-                "searchScene": [{{RemoteSceneJson}}]
+                "searchVideo": [{{RemoteVideoJson}}]
                 """);
         }));
 
         var service = CreateService(context, httpClient);
 
-        var matches = await service.SearchScenesAsync(scene, "Remote Scene", Endpoint, CancellationToken.None);
+        var matches = await service.SearchVideosAsync(video, "Remote Video", Endpoint, CancellationToken.None);
 
         var match = Assert.Single(matches);
-        Assert.Equal("remote-scene-1", match.Id);
+        Assert.Equal("remote-video-1", match.Id);
         Assert.Equal("Fixture Box", match.MetadataServerName);
-        Assert.Equal("Remote Scene", match.Title);
+        Assert.Equal("Remote Video", match.Title);
         Assert.Equal("Fixture Studio", match.StudioName);
         Assert.Equal(["Jane Doe"], match.PerformerNames);
         Assert.Equal(["Action"], match.TagNames);
@@ -58,31 +58,31 @@ public sealed class MetadataServerServiceTests
     }
 
     [Fact]
-    public async Task MergeSceneAsync_ImportsFixtureAndRecordsMetadataProvenance()
+    public async Task MergeVideoAsync_ImportsFixtureAndRecordsMetadataProvenance()
     {
         await using var context = CreateContext();
-        var scene = new Scene { Title = "Original Scene" };
-        context.Scenes.Add(scene);
+        var video = new Video { Title = "Original Video" };
+        context.Videos.Add(video);
         await context.SaveChangesAsync();
 
         using var httpClient = new HttpClient(new FixtureMetadataServerHandler(request =>
         {
-            Assert.Contains("query FindSceneByID", request.Query);
-            Assert.Equal("remote-scene-1", GetVariableString(request, "id"));
+            Assert.Contains("query FindVideoByID", request.Query);
+            Assert.Equal("remote-video-1", GetVariableString(request, "id"));
 
             return GraphQlData($$"""
-                "findScene": {{RemoteSceneJson}}
+                "findVideo": {{RemoteVideoJson}}
                 """);
         }));
 
         var fieldProvenance = new FieldProvenanceService(context);
         var service = CreateService(context, httpClient, fieldProvenance: fieldProvenance, tagProvenance: new TagProvenanceService(context));
 
-        var imported = await service.MergeSceneAsync(
-            scene,
+        var imported = await service.MergeVideoAsync(
+            video,
             Endpoint,
-            "remote-scene-1",
-            new MetadataServerSceneImportRequestDto
+            "remote-video-1",
+            new MetadataServerVideoImportRequestDto
             {
                 SetCoverImage = false,
                 MarkOrganized = true,
@@ -98,34 +98,34 @@ public sealed class MetadataServerServiceTests
         await context.SaveChangesAsync();
 
         Assert.True(imported);
-        Assert.Equal("Remote Scene", scene.Title);
-        Assert.Equal("RS-001", scene.Code);
-        Assert.Equal("Imported details", scene.Details);
-        Assert.Equal("Fixture Director", scene.Director);
-        Assert.Equal(new DateOnly(2024, 5, 1), scene.Date);
-        Assert.True(scene.Organized);
-        Assert.Contains(scene.Urls, url => url.Url == "https://metadata.example/scenes/remote-scene-1");
-        Assert.Contains(scene.RemoteIds, remoteId => remoteId.Endpoint == Endpoint && remoteId.RemoteId == "remote-scene-1");
+        Assert.Equal("Remote Video", video.Title);
+        Assert.Equal("RS-001", video.Code);
+        Assert.Equal("Imported details", video.Details);
+        Assert.Equal("Fixture Director", video.Director);
+        Assert.Equal(new DateOnly(2024, 5, 1), video.Date);
+        Assert.True(video.Organized);
+        Assert.Contains(video.Urls, url => url.Url == "https://metadata.example/videos/remote-video-1");
+        Assert.Contains(video.RemoteIds, remoteId => remoteId.Endpoint == Endpoint && remoteId.RemoteId == "remote-video-1");
 
-        var savedScene = await context.Scenes
-            .Include(item => item.SceneTags).ThenInclude(link => link.Tag)
-            .Include(item => item.ScenePerformers).ThenInclude(link => link.Performer)
+        var savedVideo = await context.Videos
+            .Include(item => item.VideoTags).ThenInclude(link => link.Tag)
+            .Include(item => item.VideoPerformers).ThenInclude(link => link.Performer)
             .Include(item => item.Studio)
             .SingleAsync();
-        Assert.Equal("Fixture Studio", savedScene.Studio?.Name);
-        Assert.Contains(savedScene.SceneTags, link => link.Tag != null && link.Tag.Name == "Action");
-        Assert.Contains(savedScene.ScenePerformers, link => link.Performer != null && link.Performer.Name == "Jane Doe");
+        Assert.Equal("Fixture Studio", savedVideo.Studio?.Name);
+        Assert.Contains(savedVideo.VideoTags, link => link.Tag != null && link.Tag.Name == "Action");
+        Assert.Contains(savedVideo.VideoPerformers, link => link.Performer != null && link.Performer.Name == "Jane Doe");
 
         var tagApplication = await context.TagApplications.Include(application => application.Tag).SingleAsync();
         Assert.NotNull(tagApplication.Tag);
-        Assert.Equal(AffinityHostType.Scene, tagApplication.HostType);
-        Assert.Equal(scene.Id, tagApplication.HostId);
+        Assert.Equal(AffinityHostType.Video, tagApplication.HostType);
+        Assert.Equal(video.Id, tagApplication.HostId);
         Assert.Equal("Action", tagApplication.Tag.Name);
         Assert.Equal($"metadata:{Endpoint}", tagApplication.SourceKey);
         Assert.Equal(Endpoint, tagApplication.SourceRunId);
 
-        var provenanceRows = await fieldProvenance.GetForHostAsync(AffinityHostType.Scene, scene.Id);
-        Assert.Contains(provenanceRows, row => row.FieldKey == "title" && row.Value.HasValue && row.Value.Value.GetString() == "Remote Scene");
+        var provenanceRows = await fieldProvenance.GetForHostAsync(AffinityHostType.Video, video.Id);
+        Assert.Contains(provenanceRows, row => row.FieldKey == "title" && row.Value.HasValue && row.Value.Value.GetString() == "Remote Video");
         Assert.Contains(provenanceRows, row => row.FieldKey == "details" && row.Value.HasValue && row.Value.Value.GetString() == "Imported details");
         Assert.Contains(provenanceRows, row => row.FieldKey == "studio" && row.Value.HasValue && row.Value.Value.GetString() == "Fixture Studio");
         Assert.Contains(provenanceRows, row => row.FieldKey == "tags" && row.Value.HasValue && row.Value.Value.EnumerateArray().Any(value => value.GetString() == "Action"));
@@ -133,37 +133,37 @@ public sealed class MetadataServerServiceTests
     }
 
     [Fact]
-    public async Task MergeSceneAsync_AllowsRemoteTagsWithNullAliases()
+    public async Task MergeVideoAsync_AllowsRemoteTagsWithNullAliases()
     {
         await using var context = CreateContext();
-        var scene = new Scene { Title = "Original Scene" };
-        context.Scenes.Add(scene);
+        var video = new Video { Title = "Original Video" };
+        context.Videos.Add(video);
         await context.SaveChangesAsync();
 
-        var remoteSceneJson = RemoteSceneJson.Replace("\"aliases\": [\"Activity\"]", "\"aliases\": null", StringComparison.Ordinal);
+        var remoteVideoJson = RemoteVideoJson.Replace("\"aliases\": [\"Activity\"]", "\"aliases\": null", StringComparison.Ordinal);
         using var httpClient = new HttpClient(new FixtureMetadataServerHandler(request =>
         {
-            Assert.Contains("query FindSceneByID", request.Query);
+            Assert.Contains("query FindVideoByID", request.Query);
             return GraphQlData($$"""
-                "findScene": {{remoteSceneJson}}
+                "findVideo": {{remoteVideoJson}}
                 """);
         }));
 
         var service = CreateService(context, httpClient);
 
-        var imported = await service.MergeSceneAsync(
-            scene,
+        var imported = await service.MergeVideoAsync(
+            video,
             Endpoint,
-            "remote-scene-1",
-            new MetadataServerSceneImportRequestDto { SetCoverImage = false },
+            "remote-video-1",
+            new MetadataServerVideoImportRequestDto { SetCoverImage = false },
             CancellationToken.None);
         await context.SaveChangesAsync();
 
         Assert.True(imported);
         var savedTag = await context.Tags.Include(tag => tag.Aliases).SingleAsync(tag => tag.Name == "Action");
         Assert.Empty(savedTag.Aliases);
-        var savedScene = await context.Scenes.Include(item => item.SceneTags).ThenInclude(link => link.Tag).SingleAsync();
-        Assert.Contains(savedScene.SceneTags, link => link.Tag != null && link.Tag.Name == "Action");
+        var savedVideo = await context.Videos.Include(item => item.VideoTags).ThenInclude(link => link.Tag).SingleAsync();
+        Assert.Contains(savedVideo.VideoTags, link => link.Tag != null && link.Tag.Name == "Action");
     }
 
     [Fact]
@@ -208,7 +208,7 @@ public sealed class MetadataServerServiceTests
     }
 
     [Fact]
-    public async Task SubmitSceneDraftAsync_SendsExpectedGraphQlPayload()
+    public async Task SubmitVideoDraftAsync_SendsExpectedGraphQlPayload()
     {
         await using var context = CreateContext();
         var studio = new Studio { Name = "Fixture Studio" };
@@ -217,45 +217,45 @@ public sealed class MetadataServerServiceTests
         performer.RemoteIds.Add(new PerformerRemoteId { Endpoint = Endpoint, RemoteId = "remote-performer-1" });
         var tag = new Tag { Name = "Action" };
         tag.RemoteIds.Add(new TagRemoteId { Endpoint = Endpoint, RemoteId = "remote-tag-1" });
-        var scene = new Scene
+        var video = new Video
         {
-            Title = "Draft Scene",
+            Title = "Draft Video",
             Code = "D-001",
             Details = "Draft details",
             Director = "Draft Director",
             Date = new DateOnly(2024, 6, 2),
             Studio = studio,
         };
-        scene.RemoteIds.Add(new SceneRemoteId { Endpoint = Endpoint, RemoteId = "remote-scene-1" });
-        scene.Urls.Add(new SceneUrl { Url = "https://cove.example/scenes/draft" });
-        scene.ScenePerformers.Add(new ScenePerformer { Performer = performer });
-        scene.SceneTags.Add(new SceneTag { Tag = tag });
+        video.RemoteIds.Add(new VideoRemoteId { Endpoint = Endpoint, RemoteId = "remote-video-1" });
+        video.Urls.Add(new VideoUrl { Url = "https://cove.example/videos/draft" });
+        video.VideoPerformers.Add(new VideoPerformer { Performer = performer });
+        video.VideoTags.Add(new VideoTag { Tag = tag });
         var file = new VideoFile { Duration = 121 };
         file.Fingerprints.Add(new FileFingerprint { Type = "oshash", Value = "1a2b" });
-        scene.Files.Add(file);
-        context.Scenes.Add(scene);
+        video.Files.Add(file);
+        context.Videos.Add(video);
         await context.SaveChangesAsync();
 
         FixtureMetadataServerHandler? handler = null;
         handler = new FixtureMetadataServerHandler(request =>
         {
-            Assert.Contains("mutation SubmitSceneDraft", request.Query);
+            Assert.Contains("mutation SubmitVideoDraft", request.Query);
             return GraphQlData("""
-                "submitSceneDraft": { "id": "draft-scene-1" }
+                "submitVideoDraft": { "id": "draft-video-1" }
                 """);
         });
 
         using var httpClient = new HttpClient(handler);
         var service = CreateService(context, httpClient);
 
-        var draftId = await service.SubmitSceneDraftAsync(scene, Endpoint, CancellationToken.None);
+        var draftId = await service.SubmitVideoDraftAsync(video, Endpoint, CancellationToken.None);
 
-        Assert.Equal("draft-scene-1", draftId);
+        Assert.Equal("draft-video-1", draftId);
         var request = Assert.Single(handler.Requests);
         using var variables = JsonDocument.Parse(request.VariablesJson);
         var input = variables.RootElement.GetProperty("input");
-        Assert.Equal("remote-scene-1", input.GetProperty("id").GetString());
-        Assert.Equal("Draft Scene", input.GetProperty("title").GetString());
+        Assert.Equal("remote-video-1", input.GetProperty("id").GetString());
+        Assert.Equal("Draft Video", input.GetProperty("title").GetString());
         Assert.Equal("2024-06-02", input.GetProperty("date").GetString());
         Assert.Equal("remote-studio-1", input.GetProperty("studio").GetProperty("id").GetString());
         Assert.Equal("remote-performer-1", input.GetProperty("performers")[0].GetProperty("id").GetString());
@@ -286,7 +286,7 @@ public sealed class MetadataServerServiceTests
             },
             context,
             new NullBlobService(),
-            new NullSceneCoverService(),
+            new NullVideoCoverService(),
             tagProvenance ?? new TagProvenanceService(context),
             NullLogger<MetadataServerService>.Instance,
             fieldProvenance);
@@ -315,17 +315,17 @@ public sealed class MetadataServerServiceTests
            }
            """;
 
-    private const string RemoteSceneJson = """
+    private const string RemoteVideoJson = """
         {
-          "id": "remote-scene-1",
-          "title": "Remote Scene",
+          "id": "remote-video-1",
+          "title": "Remote Video",
           "code": "RS-001",
           "details": "Imported details",
           "director": "Fixture Director",
           "duration": 120,
           "date": "2024-05-01",
           "urls": [
-            { "url": "https://metadata.example/scenes/remote-scene-1" }
+            { "url": "https://metadata.example/videos/remote-video-1" }
           ],
           "images": [],
           "studio": {
@@ -451,9 +451,9 @@ public sealed class MetadataServerServiceTests
             => Task.CompletedTask;
     }
 
-    private sealed class NullSceneCoverService : ISceneCoverService
+    private sealed class NullVideoCoverService : IVideoCoverService
     {
-        public Task<bool> TryApplyRemoteCoverAsync(Scene scene, string? imageUrl, CancellationToken ct = default)
+        public Task<bool> TryApplyRemoteCoverAsync(Video video, string? imageUrl, CancellationToken ct = default)
             => Task.FromResult(true);
     }
 }

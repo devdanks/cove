@@ -14,7 +14,7 @@ import { GenerateDialog } from "../components/GenerateDialog";
 import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
 import { CoverImageDialog } from "../components/CoverImageDialog";
 import type { MediaDetailTab } from "../components/MediaDetailLayout/types";
-import type { FieldProvenance, SceneHistory } from "../api/types";
+import type { FieldProvenance, VideoHistory } from "../api/types";
 import { InteractiveRating } from "../components/Rating";
 import { CustomFieldsDisplay, FieldProvenanceHover, formatDate, formatDuration, formatFileSize, TagBadge, resolveTagProvenance } from "../components/shared";
 import { EntityRefBadge, MediaStudioSubtitle, PerformerTile, StudioHeaderImage } from "../components/EntityCards";
@@ -187,7 +187,7 @@ export function AudioDetailPage({ id, onNavigate }: Props) {
           format={primaryFile.format}
           duration={audio.maxDuration || primaryFile.duration}
           resumeTime={audioEngagement?.resumeTime}
-          sceneId={audio.id}
+          videoId={audio.id}
           trackingEnabled={trackAudioActivity}
           playbackTracking={{ hostType: "audio", hostId: audio.id, surface: "detail", scopeKey: `audio:${audio.id}` }}
           onEnded={() => queryClient.invalidateQueries({ queryKey: ["engagement", "audio", audio.id] })}
@@ -629,7 +629,7 @@ function AudioHistoryTab({
   playCount: number;
   playDuration: number;
   pageVisitCount: number;
-  history?: SceneHistory;
+  history?: VideoHistory;
   historyLoading?: boolean;
   createdAt: string;
   updatedAt: string;
@@ -692,3 +692,4 @@ function RelatedSection({ icon, title, children }: { icon: React.ReactNode; titl
     </div>
   );
 }
+

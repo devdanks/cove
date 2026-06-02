@@ -9,11 +9,11 @@ interface UseDerivedSpansQueryOptions {
   pageNumber: number;
   perPage: number;
   q: string;
-  sceneTitle: string;
+  videoTitle: string;
   sort: string;
   direction: "asc" | "desc";
-  includeSceneIds: number[];
-  excludeSceneIds: number[];
+  includeVideoIds: number[];
+  excludeVideoIds: number[];
   appliedQuery: AppliedDerivedQuery | null;
   derivedQueryDescriptor?: SegmentDerivedQueryDescriptor;
   rawFilter: RawSegmentFilterValue;
@@ -25,11 +25,11 @@ export function useDerivedSpansQuery({
   pageNumber,
   perPage,
   q,
-  sceneTitle,
+  videoTitle,
   sort,
   direction,
-  includeSceneIds,
-  excludeSceneIds,
+  includeVideoIds,
+  excludeVideoIds,
   appliedQuery,
   derivedQueryDescriptor,
   rawFilter,
@@ -43,11 +43,11 @@ export function useDerivedSpansQuery({
       pageNumber,
       perPage,
       q,
-      sceneTitle,
+      videoTitle,
       sort,
       direction,
-      includeSceneIds.join(","),
-      excludeSceneIds.join(","),
+      includeVideoIds.join(","),
+      excludeVideoIds.join(","),
       appliedQuery ?? null,
       rawFilter,
     ],
@@ -69,9 +69,9 @@ export function useDerivedSpansQuery({
         sort,
         direction,
         q: q || undefined,
-        sceneTitle: sceneTitle || undefined,
-        sceneIds: includeSceneIds.length > 0 ? includeSceneIds : undefined,
-        excludeSceneIds: excludeSceneIds.length > 0 ? excludeSceneIds : undefined,
+        videoTitle: videoTitle || undefined,
+        videoIds: includeVideoIds.length > 0 ? includeVideoIds : undefined,
+        excludeVideoIds: excludeVideoIds.length > 0 ? excludeVideoIds : undefined,
         tagIds: rawFilter.tagIds.length > 0 ? rawFilter.tagIds : undefined,
         kind: rawFilter.kind,
         sourceKey: rawFilter.sourceKey,
@@ -109,12 +109,12 @@ export function useDerivedSpansQuery({
 
       return {
         items: response.items.map((item) => ({
-          id: `${item.sceneId}:${item.span.spanKey}`,
-          key: `${item.sceneId}:${item.span.spanKey}`,
+          id: `${item.videoId}:${item.span.spanKey}`,
+          key: `${item.videoId}:${item.span.spanKey}`,
           kind: derivedQueryDescriptor ? "derivedQuery" : "profile",
-          sceneId: item.sceneId,
-          sceneTitle: item.sceneTitle ?? `Scene #${item.sceneId}`,
-          sceneUpdatedAt: item.sceneUpdatedAt,
+          videoId: item.videoId,
+          videoTitle: item.videoTitle ?? `Video #${item.videoId}`,
+          videoUpdatedAt: item.videoUpdatedAt,
           span: item.span,
           profileId: item.profileId,
           derivedQuery: appliedQuery != null ? {

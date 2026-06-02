@@ -4,14 +4,14 @@ namespace Cove.Core.Entities;
 
 public enum SegmentHostType
 {
-    Scene = 1,
+    Video = 1,
     Image = 2,
     Audio = 3
 }
 
 public enum DetectionHostType
 {
-    Scene = 1,
+    Video = 1,
     Image = 2
 }
 

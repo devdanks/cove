@@ -11,8 +11,8 @@ namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/scrape-attempts")]
-[RequiresPermission(Permissions.ScenesScrape, Permissions.ScenesWrite, Permissions.AudiosWrite, Permissions.TextsWrite, Permissions.ImagesWrite, Permissions.GalleriesWrite, Permissions.GroupsWrite, Mode = PermissionMode.Any)]
-public class ScrapeAttemptsController(ScrapeAttemptService scrapeAttemptService, SceneBatchScrapeService sceneBatchScrapeService, ImageBatchScrapeService imageBatchScrapeService, IJobService jobService, ICurrentPrincipalAccessor principalAccessor, IAuthorizationService authorizationService) : ControllerBase
+[RequiresPermission(Permissions.VideosScrape, Permissions.VideosWrite, Permissions.AudiosWrite, Permissions.TextsWrite, Permissions.ImagesWrite, Permissions.GalleriesWrite, Permissions.GroupsWrite, Mode = PermissionMode.Any)]
+public class ScrapeAttemptsController(ScrapeAttemptService scrapeAttemptService, VideoBatchScrapeService videoBatchScrapeService, ImageBatchScrapeService imageBatchScrapeService, IJobService jobService, ICurrentPrincipalAccessor principalAccessor, IAuthorizationService authorizationService) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<ScrapeAttemptDto>>> List([FromQuery] string? entityType, [FromQuery] int? entityId, [FromQuery] int limit = 20, CancellationToken ct = default)
@@ -56,7 +56,7 @@ public class ScrapeAttemptsController(ScrapeAttemptService scrapeAttemptService,
     }
 
     [HttpPost("{id:guid}/apply")]
-    public async Task<ActionResult<ScrapeAttemptDto>> Apply(Guid id, [FromBody] ApplySceneScrapeAttemptDto dto, CancellationToken ct)
+    public async Task<ActionResult<ScrapeAttemptDto>> Apply(Guid id, [FromBody] ApplyVideoScrapeAttemptDto dto, CancellationToken ct)
     {
         var existingAttempt = await scrapeAttemptService.GetAttemptAsync(id, ct);
         if (existingAttempt == null)
@@ -70,27 +70,27 @@ public class ScrapeAttemptsController(ScrapeAttemptService scrapeAttemptService,
         return attempt == null ? NotFound() : Ok(attempt);
     }
 
-    [HttpPost("batch-scenes")]
-    [RequiresPermission(Permissions.JobsRun, Permissions.ScenesScrape)]
-    public async Task<ActionResult<object>> StartSceneBatch([FromBody] BatchSceneScrapeStartRequestDto dto, CancellationToken ct)
+    [HttpPost("batch-videos")]
+    [RequiresPermission(Permissions.JobsRun, Permissions.VideosScrape)]
+    public async Task<ActionResult<object>> StartVideoBatch([FromBody] BatchVideoScrapeStartRequestDto dto, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(dto.ScraperId))
             return BadRequest(new { error = "ScraperId is required." });
 
-        if (dto.SceneIds.Count == 0)
-            return BadRequest(new { error = "Select at least one scene to batch scrape." });
+        if (dto.VideoIds.Count == 0)
+            return BadRequest(new { error = "Select at least one video to batch scrape." });
 
         var normalizedInputKind = dto.InputKind?.Trim().ToLowerInvariant();
         if (normalizedInputKind is not ("url" or "name"))
-            return BadRequest(new { error = $"Unsupported batch scene scrape input kind: {dto.InputKind}" });
+            return BadRequest(new { error = $"Unsupported batch video scrape input kind: {dto.InputKind}" });
 
-        var scenePermission = dto.AutoApply ? Permissions.ScenesWrite : Permissions.ScenesRead;
-        foreach (var sceneId in dto.SceneIds.Distinct())
+        var videoPermission = dto.AutoApply ? Permissions.VideosWrite : Permissions.VideosRead;
+        foreach (var videoId in dto.VideoIds.Distinct())
         {
             var result = await authorizationService.AuthorizeAsync(
                 principalAccessor.Current,
-                scenePermission,
-                new EntityRef(EntityKinds.Scene, sceneId.ToString(CultureInfo.InvariantCulture)),
+                videoPermission,
+                new EntityRef(EntityKinds.Video, videoId.ToString(CultureInfo.InvariantCulture)),
                 ct);
 
             if (!result.Allowed)
@@ -98,16 +98,16 @@ public class ScrapeAttemptsController(ScrapeAttemptService scrapeAttemptService,
         }
 
         var jobId = jobService.Enqueue(
-            "scene-batch-scrape",
-            $"Scraping {dto.SceneIds.Count} scene{(dto.SceneIds.Count == 1 ? string.Empty : "s")}",
+            "video-batch-scrape",
+            $"Scraping {dto.VideoIds.Count} video{(dto.VideoIds.Count == 1 ? string.Empty : "s")}",
             async (progress, jobCt) =>
             {
-                var summary = await sceneBatchScrapeService.RunAsync(dto, progress, jobCt);
-                progress.Report(1d, BuildBatchSceneScrapeCompletionMessage(summary));
+                var summary = await videoBatchScrapeService.RunAsync(dto, progress, jobCt);
+                progress.Report(1d, BuildBatchVideoScrapeCompletionMessage(summary));
             },
             exclusive: false);
 
-        return Accepted(new { jobId, queuedCount = dto.SceneIds.Count });
+        return Accepted(new { jobId, queuedCount = dto.VideoIds.Count });
     }
 
     [HttpPost("batch-images")]
@@ -187,10 +187,10 @@ public class ScrapeAttemptsController(ScrapeAttemptService scrapeAttemptService,
         entityKind = entityType.Trim().ToLowerInvariant();
         switch (entityKind)
         {
-            case EntityKinds.Scene:
+            case EntityKinds.Video:
                 permissions = write
-                    ? [Permissions.ScenesWrite]
-                    : [Permissions.ScenesScrape, Permissions.ScenesWrite];
+                    ? [Permissions.VideosWrite]
+                    : [Permissions.VideosScrape, Permissions.VideosWrite];
                 return true;
             case EntityKinds.Audio:
                 permissions = [Permissions.AudiosWrite];
@@ -221,11 +221,11 @@ public class ScrapeAttemptsController(ScrapeAttemptService scrapeAttemptService,
     })
     { StatusCode = StatusCodes.Status403Forbidden };
 
-    private static string BuildBatchSceneScrapeCompletionMessage(SceneBatchScrapeExecutionSummary summary)
+    private static string BuildBatchVideoScrapeCompletionMessage(VideoBatchScrapeExecutionSummary summary)
     {
         var parts = new List<string>
         {
-            $"Scraped {summary.ScrapedCount} of {summary.TotalCount} scene{(summary.TotalCount == 1 ? string.Empty : "s")}."
+            $"Scraped {summary.ScrapedCount} of {summary.TotalCount} video{(summary.TotalCount == 1 ? string.Empty : "s")}."
         };
 
         if (summary.AppliedCount > 0)

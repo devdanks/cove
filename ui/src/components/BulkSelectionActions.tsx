@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Download, Edit, Image as ImageIcon, Loader2, Trash2, Search, Play, Unlink } from "lucide-react";
-import { scenes as scenesApi, images, galleries, performers, groups, studios, tags, audios, texts, entityImages } from "../api/client";
+import { videos as videosApi, images, galleries, performers, groups, studios, tags, audios, texts, entityImages } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
 import type {
@@ -11,20 +11,20 @@ import type {
   BulkGroupUpdate,
   BulkImageUpdate,
   BulkPerformerUpdate,
-  BulkSceneUpdate,
+  BulkVideoUpdate,
   BulkStudioUpdate,
   BulkTagUpdate,
   BulkTextUpdate,
   DeleteEntityOptions,
-  Scene,
+  Video,
 } from "../api/types";
 import type { TextDocument } from "../api/types";
 import type { Route } from "../router/location";
-import { BulkEditDialog, SCENE_BULK_FIELDS, IMAGE_BULK_FIELDS, GALLERY_BULK_FIELDS, PERFORMER_BULK_FIELDS, GROUP_BULK_FIELDS, STUDIO_BULK_FIELDS, TAG_BULK_FIELDS, AUDIO_BULK_FIELDS, TEXT_BULK_FIELDS, type BulkEditField } from "./BulkEditDialog";
+import { BulkEditDialog, VIDEO_BULK_FIELDS, IMAGE_BULK_FIELDS, GALLERY_BULK_FIELDS, PERFORMER_BULK_FIELDS, GROUP_BULK_FIELDS, STUDIO_BULK_FIELDS, TAG_BULK_FIELDS, AUDIO_BULK_FIELDS, TEXT_BULK_FIELDS, type BulkEditField } from "./BulkEditDialog";
 import { BatchDownloadOptionsDialog } from "./BatchDownloadOptionsDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { IdentifyDialog } from "./IdentifyDialog";
-import { SceneQueue } from "./SceneQueue";
+import { VideoQueue } from "./VideoQueue";
 import { ExtensionSelectionActions } from "./ExtensionSelectionActions";
 import { MediaScrapeDialog } from "./MediaScrapeDialog";
 import {
@@ -41,7 +41,7 @@ import {
 } from "../utils/batchDownloads";
 
 const FIELDS_MAP = {
-  scenes: SCENE_BULK_FIELDS,
+  videos: VIDEO_BULK_FIELDS,
   images: IMAGE_BULK_FIELDS,
   galleries: GALLERY_BULK_FIELDS,
   performers: PERFORMER_BULK_FIELDS,
@@ -52,10 +52,10 @@ const FIELDS_MAP = {
   texts: TEXT_BULK_FIELDS,
 } satisfies Record<string, BulkEditField[]>;
 
-const API_MAP = { scenes: scenesApi, images, galleries, performers, groups, studios, tags, audios, texts } as const;
+const API_MAP = { videos: videosApi, images, galleries, performers, groups, studios, tags, audios, texts } as const;
 
 const ENTITY_RESOURCE_MAP = {
-  scenes: "scene",
+  videos: "video",
   images: "image",
   galleries: "gallery",
   performers: "performer",
@@ -68,7 +68,7 @@ const ENTITY_RESOURCE_MAP = {
 
 type BulkSelectionEntityType = keyof typeof FIELDS_MAP;
 type BulkUpdatePayloadByEntity = {
-  scenes: BulkSceneUpdate;
+  videos: BulkVideoUpdate;
   images: BulkImageUpdate;
   galleries: BulkGalleryUpdate;
   performers: BulkPerformerUpdate;
@@ -82,7 +82,7 @@ type BulkUpdatePayload = BulkUpdatePayloadByEntity[BulkSelectionEntityType];
 
 function runBulkUpdate(entityType: BulkSelectionEntityType, payload: BulkUpdatePayload) {
   switch (entityType) {
-    case "scenes": return scenesApi.bulkUpdate(payload as BulkSceneUpdate);
+    case "videos": return videosApi.bulkUpdate(payload as BulkVideoUpdate);
     case "images": return images.bulkUpdate(payload as BulkImageUpdate);
     case "galleries": return galleries.bulkUpdate(payload as BulkGalleryUpdate);
     case "performers": return performers.bulkUpdate(payload as BulkPerformerUpdate);
@@ -129,7 +129,7 @@ function getRemoveFromParentAction(entityType: BulkSelectionEntityType, parent?:
   if (parent.type === "tag") {
     const run = (ids: number[]) => {
       switch (entityType) {
-        case "scenes": return scenesApi.bulkUpdate({ ids, tagIds: [parent.id], tagMode: "REMOVE" });
+        case "videos": return videosApi.bulkUpdate({ ids, tagIds: [parent.id], tagMode: "REMOVE" });
         case "images": return images.bulkUpdate({ ids, tagIds: [parent.id], tagMode: "REMOVE" });
         case "galleries": return galleries.bulkUpdate({ ids, tagIds: [parent.id], tagMode: "REMOVE" });
         case "performers": return performers.bulkUpdate({ ids, tagIds: [parent.id], tagMode: "REMOVE" });
@@ -146,7 +146,7 @@ function getRemoveFromParentAction(entityType: BulkSelectionEntityType, parent?:
   if (parent.type === "performer") {
     const run = (ids: number[]) => {
       switch (entityType) {
-        case "scenes": return scenesApi.bulkUpdate({ ids, performerIds: [parent.id], performerMode: "REMOVE" });
+        case "videos": return videosApi.bulkUpdate({ ids, performerIds: [parent.id], performerMode: "REMOVE" });
         case "images": return images.bulkUpdate({ ids, performerIds: [parent.id], performerMode: "REMOVE" });
         case "galleries": return galleries.bulkUpdate({ ids, performerIds: [parent.id], performerMode: "REMOVE" });
         case "audios": return audios.bulkUpdate({ ids, performerIds: [parent.id], performerMode: "REMOVE" });
@@ -160,7 +160,7 @@ function getRemoveFromParentAction(entityType: BulkSelectionEntityType, parent?:
   if (parent.type === "studio") {
     const run = (ids: number[]) => {
       switch (entityType) {
-        case "scenes": return scenesApi.bulkUpdate({ ids, clearFields: ["studioId"] });
+        case "videos": return videosApi.bulkUpdate({ ids, clearFields: ["studioId"] });
         case "images": return images.bulkUpdate({ ids, clearFields: ["studioId"] });
         case "galleries": return galleries.bulkUpdate({ ids, clearFields: ["studioId"] });
         case "groups": return groups.bulkUpdate({ ids, clearFields: ["studioId"] });
@@ -177,7 +177,7 @@ function getRemoveFromParentAction(entityType: BulkSelectionEntityType, parent?:
     const run = (ids: number[]) => {
       switch (entityType) {
         case "images": return galleries.removeImages(parent.id, ids);
-        case "scenes": return scenesApi.bulkUpdate({ ids, galleryIds: [parent.id], galleryMode: "REMOVE" });
+        case "videos": return videosApi.bulkUpdate({ ids, galleryIds: [parent.id], galleryMode: "REMOVE" });
         default: return Promise.reject(new Error("This nested removal is not supported."));
       }
     };
@@ -187,7 +187,7 @@ function getRemoveFromParentAction(entityType: BulkSelectionEntityType, parent?:
   if (parent.type === "group") {
     const run = (ids: number[]) => {
       switch (entityType) {
-        case "scenes": return scenesApi.bulkUpdate({ ids, groupIds: [{ groupId: parent.id, sceneIndex: 0 }], groupMode: "REMOVE" });
+        case "videos": return videosApi.bulkUpdate({ ids, groupIds: [{ groupId: parent.id, videoIndex: 0 }], groupMode: "REMOVE" });
         case "images": return groups.items.removeHosts(parent.id, { kind: "image", hostIds: ids });
         case "galleries": return groups.items.removeHosts(parent.id, { kind: "gallery", hostIds: ids });
         case "audios": return groups.items.removeHosts(parent.id, { kind: "audio", hostIds: ids });
@@ -196,19 +196,19 @@ function getRemoveFromParentAction(entityType: BulkSelectionEntityType, parent?:
         default: return Promise.reject(new Error("This nested removal is not supported."));
       }
     };
-    return { label: `Remove from ${parentLabel}`, parentLabel, permissionTarget: entityType === "scenes" ? "child" : "parent", run };
+    return { label: `Remove from ${parentLabel}`, parentLabel, permissionTarget: entityType === "videos" ? "child" : "parent", run };
   }
 
   return null;
 }
 
 function getCoverFromSelectionAction(entityType: BulkSelectionEntityType, parent?: NestedListParent): CoverFromSelectionAction | null {
-  if (!parent || (entityType !== "images" && entityType !== "scenes")) return null;
+  if (!parent || (entityType !== "images" && entityType !== "videos")) return null;
   if (parent.type !== "tag" && parent.type !== "performer" && parent.type !== "group" && parent.type !== "gallery") return null;
 
-  const sourceLabel = entityType === "images" ? "Image" : "Scene";
+  const sourceLabel = entityType === "images" ? "Image" : "Video";
   const parentLabel = parent.type.charAt(0).toUpperCase() + parent.type.slice(1);
-  const sourceFor = (id: number) => entityType === "images" ? { imageId: id } : { sceneId: id };
+  const sourceFor = (id: number) => entityType === "images" ? { imageId: id } : { videoId: id };
   const run = (id: number) => {
     switch (parent.type) {
       case "gallery":
@@ -231,17 +231,17 @@ interface Props {
   entityType: keyof typeof FIELDS_MAP;
   selectedIds: Set<number>;
   onDone: () => void;
-  /** Raw scene items for Play/Identify (only needed when entityType is "scenes") */
-  sceneItems?: Pick<Scene, "id" | "title" | "updatedAt" | "urls" | "files">[];
+  /** Raw video items for Play/Identify (only needed when entityType is "videos") */
+  videoItems?: Pick<Video, "id" | "title" | "updatedAt" | "urls" | "files">[];
   audioItems?: Audio[];
   textItems?: TextDocument[];
   downloadItems?: DownloadSelectionItem[];
-  /** Navigate callback for the scene queue player */
+  /** Navigate callback for the video queue player */
   onNavigate?: (route: Route) => void;
   removeFromParent?: NestedListParent;
 }
 
-export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneItems, audioItems, textItems, downloadItems, onNavigate, removeFromParent }: Props) {
+export function BulkSelectionActions({ entityType, selectedIds, onDone, videoItems, audioItems, textItems, downloadItems, onNavigate, removeFromParent }: Props) {
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [showIdentify, setShowIdentify] = useState(false);
   const [showQueue, setShowQueue] = useState(false);
@@ -272,7 +272,7 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
   const canSetParentCover = !!coverFromSelectionAction
     && selectedSourceId != null
     && canWriteEntity(coverFromSelectionAction.parentType, hasPermission);
-  const supportsDeleteOptions = entityType === "scenes" || entityType === "images" || entityType === "audios" || entityType === "texts";
+  const supportsDeleteOptions = entityType === "videos" || entityType === "images" || entityType === "audios" || entityType === "texts";
 
   const bulkDeleteMut = useMutation<void, Error, DeleteEntityOptions | undefined>({
     mutationFn: async (options) => {
@@ -311,12 +311,12 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
     },
   });
 
-  const isScenes = entityType === "scenes";
+  const isVideos = entityType === "videos";
   const isAudios = entityType === "audios";
   const isTexts = entityType === "texts";
-  const canIdentify = isScenes && hasPermission("library.autotag") && canWrite;
-  const downloadEntity: DownloadSelectionEntity | null = entityType === "scenes"
-    ? "Scene"
+  const canIdentify = isVideos && hasPermission("library.autotag") && canWrite;
+  const downloadEntity: DownloadSelectionEntity | null = entityType === "videos"
+    ? "Video"
     : entityType === "images"
       ? "Image"
       : entityType === "galleries"
@@ -327,8 +327,8 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
             ? "Text"
             : null;
   const resolvedDownloadItems = useMemo(
-    () => downloadItems ?? (downloadEntity === "Scene" ? sceneItems ?? [] : []),
-    [downloadEntity, downloadItems, sceneItems],
+    () => downloadItems ?? (downloadEntity === "Video" ? videoItems ?? [] : []),
+    [downloadEntity, downloadItems, videoItems],
   );
   const selectedDownloadItems = useMemo(
     () => (downloadEntity ? getUndownloadedSelectionItems(resolvedDownloadItems, selectedIds) : []),
@@ -420,7 +420,7 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
           Scrape
         </button>
       )}
-      {isScenes && sceneItems && onNavigate && (
+      {isVideos && videoItems && onNavigate && (
         <button
           onClick={() => setShowQueue(true)}
           className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-green-400 hover:text-green-300 hover:bg-green-900/20"
@@ -487,15 +487,15 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
         />
       )}
       {showIdentify && canIdentify && (
-        <IdentifyDialog open onClose={() => setShowIdentify(false)} sceneIds={[...selectedIds]} />
+        <IdentifyDialog open onClose={() => setShowIdentify(false)} videoIds={[...selectedIds]} />
       )}
-      {showQueue && isScenes && sceneItems && onNavigate && (
-        <SceneQueue
-          scenes={sceneItems.filter(s => selectedIds.has(s.id)).map(s => ({
+      {showQueue && isVideos && videoItems && onNavigate && (
+        <VideoQueue
+          videos={videoItems.filter(s => selectedIds.has(s.id)).map(s => ({
             id: s.id,
             title: s.title || s.files[0]?.basename,
             duration: s.files[0]?.duration,
-            screenshotUrl: scenesApi.screenshotUrl(s.id, s.updatedAt),
+            screenshotUrl: videosApi.screenshotUrl(s.id, s.updatedAt),
           }))}
           onClose={() => setShowQueue(false)}
           onNavigate={onNavigate}
@@ -552,3 +552,4 @@ export function BulkSelectionActions({ entityType, selectedIds, onDone, sceneIte
     </>
   );
 }
+

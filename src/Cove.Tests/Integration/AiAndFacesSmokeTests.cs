@@ -17,22 +17,22 @@ public sealed class AiDataControllerSmokeTests
 
         await factory.WithDbContextAsync(async db =>
         {
-            var scene = new Scene { Title = "Audio Scene" };
-            db.Scenes.Add(scene);
+            var video = new Video { Title = "Audio Video" };
+            db.Videos.Add(video);
             await db.SaveChangesAsync();
 
             db.AiRuns.Add(new AiRun
             {
                 RunKey = "run-summary",
                 SourceKey = "ext:ai.audio",
-                TargetType = AiRunTargetType.Scene,
-                TargetId = scene.Id,
+                TargetType = AiRunTargetType.Video,
+                TargetId = video.Id,
                 Models = JsonDocument.Parse("[{\"ConfigName\":\"audio-model\"}]"),
             });
             db.Segments.Add(new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 StartSec = 0,
                 EndSec = 3,
                 Kind = "audio.label",
@@ -66,7 +66,7 @@ public sealed class AiRunsControllerSmokeTests
             {
                 RunKey = "run-a",
                 SourceKey = "ext:ai.faces",
-                TargetType = AiRunTargetType.Scene,
+                TargetType = AiRunTargetType.Video,
                 TargetId = 10,
                 Trigger = "manual",
                 Status = AiRunStatus.Completed,
@@ -97,16 +97,16 @@ public sealed class EmbeddingsControllerSmokeTests
 
         await factory.WithDbContextAsync(async db =>
         {
-            var scene = new Scene { Title = "Embedding Scene" };
-            db.Scenes.Add(scene);
+            var video = new Video { Title = "Embedding Video" };
+            db.Videos.Add(video);
             await db.SaveChangesAsync();
 
             db.Embeddings.Add(new Embedding
             {
-                HostType = EmbeddingHostType.Scene,
-                HostId = scene.Id,
-                Kind = "scene.clip",
-                KindFamily = "scene.clip",
+                HostType = EmbeddingHostType.Video,
+                HostId = video.Id,
+                Kind = "video.clip",
+                KindFamily = "video.clip",
                 Modality = EmbeddingModality.Visual,
                 Dim = 2,
                 Vector = new Vector(new float[] { 0.1f, 0.2f }),

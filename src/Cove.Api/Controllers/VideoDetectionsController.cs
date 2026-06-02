@@ -10,18 +10,18 @@ using Microsoft.EntityFrameworkCore;
 namespace Cove.Api.Controllers;
 
 [ApiController]
-[Route("api/scenes/{sceneId:int}/detections")]
+[Route("api/videos/{videoId:int}/detections")]
 [RequiresPermission(Permissions.SegmentsRead)]
-public class SceneDetectionsController(CoveContext db) : ControllerBase
+public class VideoDetectionsController(CoveContext db) : ControllerBase
 {
     [HttpGet]
-    public async Task<ActionResult<IReadOnlyList<DetectionDto>>> GetByScene(int sceneId, CancellationToken ct)
+    public async Task<ActionResult<IReadOnlyList<DetectionDto>>> GetByVideo(int videoId, CancellationToken ct)
     {
-        if (!await SceneExistsAsync(sceneId, ct)) return NotFound();
+        if (!await VideoExistsAsync(videoId, ct)) return NotFound();
 
         var detections = await db.VisibleDetections()
             .AsNoTracking()
-            .Where(detection => detection.HostType == DetectionHostType.Scene && detection.HostId == sceneId)
+            .Where(detection => detection.HostType == DetectionHostType.Video && detection.HostId == videoId)
             .OrderBy(detection => detection.ObservedAtSec ?? 0d)
             .ThenBy(detection => detection.Id)
             .ToListAsync(ct);
@@ -30,21 +30,21 @@ public class SceneDetectionsController(CoveContext db) : ControllerBase
     }
 
     [HttpGet("{id:int}")]
-    public async Task<ActionResult<DetectionDto>> GetById(int sceneId, int id, CancellationToken ct)
+    public async Task<ActionResult<DetectionDto>> GetById(int videoId, int id, CancellationToken ct)
     {
         var detection = await db.VisibleDetections()
             .AsNoTracking()
-            .FirstOrDefaultAsync(item => item.Id == id && item.HostType == DetectionHostType.Scene && item.HostId == sceneId, ct);
+            .FirstOrDefaultAsync(item => item.Id == id && item.HostType == DetectionHostType.Video && item.HostId == videoId, ct);
 
         return detection is null ? NotFound() : Ok(MapToDto(detection));
     }
 
     [HttpPost]
     [RequiresPermission(Permissions.SegmentsWrite)]
-    [RequiresEntityAccess(EntityKinds.Scene, Permissions.SegmentsWrite, RouteValueName = "sceneId")]
-    public async Task<ActionResult<DetectionDto>> Create(int sceneId, [FromBody] DetectionCreateDto dto, CancellationToken ct)
+    [RequiresEntityAccess(EntityKinds.Video, Permissions.SegmentsWrite, RouteValueName = "videoId")]
+    public async Task<ActionResult<DetectionDto>> Create(int videoId, [FromBody] DetectionCreateDto dto, CancellationToken ct)
     {
-        if (!await SceneExistsAsync(sceneId, ct)) return NotFound();
+        if (!await VideoExistsAsync(videoId, ct)) return NotFound();
         if (dto.FrameWidth <= 0 || dto.FrameHeight <= 0)
             return BadRequest("Detection frame dimensions must be greater than zero.");
         if (dto.W <= 0 || dto.H <= 0)
@@ -52,8 +52,8 @@ public class SceneDetectionsController(CoveContext db) : ControllerBase
 
         var detection = new Detection
         {
-            HostType = DetectionHostType.Scene,
-            HostId = sceneId,
+            HostType = DetectionHostType.Video,
+            HostId = videoId,
             ObservedAtSec = dto.ObservedAtSec,
             FrameWidth = dto.FrameWidth,
             FrameHeight = dto.FrameHeight,
@@ -74,13 +74,13 @@ public class SceneDetectionsController(CoveContext db) : ControllerBase
         db.Detections.Add(detection);
         await db.SaveChangesAsync(ct);
 
-        return CreatedAtAction(nameof(GetById), new { sceneId, id = detection.Id }, MapToDto(detection));
+        return CreatedAtAction(nameof(GetById), new { videoId, id = detection.Id }, MapToDto(detection));
     }
 
     [HttpPut("{id:int}")]
     [RequiresPermission(Permissions.SegmentsWrite)]
-    [RequiresEntityAccess(EntityKinds.Scene, Permissions.SegmentsWrite, RouteValueName = "sceneId")]
-    public async Task<ActionResult<DetectionDto>> Update(int sceneId, int id, [FromBody] DetectionUpdateDto dto, CancellationToken ct)
+    [RequiresEntityAccess(EntityKinds.Video, Permissions.SegmentsWrite, RouteValueName = "videoId")]
+    public async Task<ActionResult<DetectionDto>> Update(int videoId, int id, [FromBody] DetectionUpdateDto dto, CancellationToken ct)
     {
         if (dto.FrameWidth <= 0 || dto.FrameHeight <= 0)
             return BadRequest("Detection frame dimensions must be greater than zero.");
@@ -88,7 +88,7 @@ public class SceneDetectionsController(CoveContext db) : ControllerBase
             return BadRequest("Detection bounding boxes must have positive width and height.");
 
         var detection = await db.Detections
-            .FirstOrDefaultAsync(item => item.Id == id && item.HostType == DetectionHostType.Scene && item.HostId == sceneId, ct);
+            .FirstOrDefaultAsync(item => item.Id == id && item.HostType == DetectionHostType.Video && item.HostId == videoId, ct);
         if (detection is null) return NotFound();
 
         detection.ObservedAtSec = dto.ObservedAtSec;
@@ -113,11 +113,11 @@ public class SceneDetectionsController(CoveContext db) : ControllerBase
 
     [HttpDelete("{id:int}")]
     [RequiresPermission(Permissions.SegmentsDelete)]
-    [RequiresEntityAccess(EntityKinds.Scene, Permissions.SegmentsDelete, RouteValueName = "sceneId")]
-    public async Task<IActionResult> Delete(int sceneId, int id, CancellationToken ct)
+    [RequiresEntityAccess(EntityKinds.Video, Permissions.SegmentsDelete, RouteValueName = "videoId")]
+    public async Task<IActionResult> Delete(int videoId, int id, CancellationToken ct)
     {
         var detection = await db.Detections
-            .FirstOrDefaultAsync(item => item.Id == id && item.HostType == DetectionHostType.Scene && item.HostId == sceneId, ct);
+            .FirstOrDefaultAsync(item => item.Id == id && item.HostType == DetectionHostType.Video && item.HostId == videoId, ct);
         if (detection is null) return NotFound();
 
         db.Detections.Remove(detection);
@@ -125,8 +125,8 @@ public class SceneDetectionsController(CoveContext db) : ControllerBase
         return NoContent();
     }
 
-    private Task<bool> SceneExistsAsync(int sceneId, CancellationToken ct) =>
-        db.Scenes.AsNoTracking().AnyAsync(scene => scene.Id == sceneId, ct);
+    private Task<bool> VideoExistsAsync(int videoId, CancellationToken ct) =>
+        db.Videos.AsNoTracking().AnyAsync(video => video.Id == videoId, ct);
 
     private static DetectionDto MapToDto(Detection detection) => new(
         detection.Id,

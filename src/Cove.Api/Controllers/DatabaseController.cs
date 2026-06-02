@@ -104,7 +104,7 @@ public class DatabaseController(CoveContext db, IBackupService backupService, IL
         await using var cmd = conn.CreateCommand();
         // TRUNCATE root tables with CASCADE clears all dependent junction tables
         cmd.CommandText = @"
-            TRUNCATE TABLE scenes, performers, tags, studios, galleries, images, groups,
+            TRUNCATE TABLE videos, performers, tags, studios, galleries, images, groups,
                            folders, files, saved_filters, entity_identifiers,
                            ai_runs, embeddings, detections, segments, segment_display_profiles,
                            faces, tag_applications, extension_data
@@ -161,3 +161,4 @@ public class DatabaseController(CoveContext db, IBackupService backupService, IL
         return Ok(new { path });
     }
 }
+

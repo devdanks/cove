@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ListPage } from "../components/ListPage";
-import { SCENE_CRITERIA } from "../components/FilterDialog";
+import { VIDEO_CRITERIA } from "../components/FilterDialog";
 import { getEntityCardMinWidthPx } from "../hooks/useEntityCardSize";
 import { customFieldDefinitionsQueryKey } from "../hooks/useCustomFieldDefinitions";
 import { RouteRegistryProvider } from "../router/RouteRegistry";
@@ -52,12 +52,12 @@ describe("ListPage active filter chips", () => {
       <QueryClientProvider client={queryClient}>
         <RouteRegistryProvider>
           <ListPage
-            title="Scenes"
+            title="Videos"
             filter={{ page: 1, perPage: 40 }}
             onFilterChange={vi.fn()}
             totalCount={0}
             isLoading={false}
-            criteriaDefinitions={SCENE_CRITERIA}
+            criteriaDefinitions={VIDEO_CRITERIA}
             objectFilter={{
               ratingCriterion: { value: 80, modifier: "GREATER_THAN" },
               tagsCriterion: { value: [1, 2], modifier: "INCLUDES_ALL", depth: -1 },
@@ -94,12 +94,12 @@ describe("ListPage active filter chips", () => {
       <QueryClientProvider client={queryClient}>
         <RouteRegistryProvider>
           <ListPage
-            title="Scenes"
+            title="Videos"
             filter={{ page: 1, perPage: 40 }}
             onFilterChange={vi.fn()}
             totalCount={0}
             isLoading={false}
-            criteriaDefinitions={SCENE_CRITERIA}
+            criteriaDefinitions={VIDEO_CRITERIA}
             objectFilter={{
               tagDurationCriterion: { clauses: [{ tagId: 1, value: 90, modifier: "GREATER_THAN", unit: "seconds" }] },
             }}
@@ -129,7 +129,7 @@ describe("ListPage active filter chips", () => {
       <QueryClientProvider client={queryClient}>
         <RouteRegistryProvider>
           <ListPage
-            title="Scenes"
+            title="Videos"
             filter={{ page: 1, perPage: 40 }}
             onFilterChange={vi.fn()}
             totalCount={0}
@@ -155,7 +155,7 @@ describe("ListPage active filter chips", () => {
   });
 
   it("restores saved per-page and zoom preferences for a page key", async () => {
-    localStorage.setItem("cove-list-prefs-scenes", JSON.stringify({ perPage: 120, zoomLevel: 2 }));
+    localStorage.setItem("cove-list-prefs-videos", JSON.stringify({ perPage: 120, zoomLevel: 2 }));
     const queryClient = new QueryClient({
       defaultOptions: {
         queries: {
@@ -169,8 +169,8 @@ describe("ListPage active filter chips", () => {
       <QueryClientProvider client={queryClient}>
         <RouteRegistryProvider>
           <ListPage
-            title="Scenes"
-            pageKey="scenes"
+            title="Videos"
+            pageKey="videos"
             filter={{ page: 1, perPage: 40 }}
             onFilterChange={onFilterChange}
             totalCount={0}
@@ -258,7 +258,7 @@ describe("ListPage active filter chips", () => {
   });
 
   it("uses the same 225-625 global width scale for other entities", () => {
-    expect(getEntityCardMinWidthPx("scenes", 0)).toBe(225);
+    expect(getEntityCardMinWidthPx("videos", 0)).toBe(225);
     expect(getEntityCardMinWidthPx("performers", 8)).toBe(625);
     expect(getEntityCardMinWidthPx("audios", 8)).toBe(625);
   });
@@ -278,7 +278,7 @@ describe("ListPage active filter chips", () => {
       <QueryClientProvider client={queryClient}>
         <RouteRegistryProvider>
           <ListPage
-            title="Scenes"
+            title="Videos"
             filter={{ page: 1, perPage: 40, sort: "random", direction: "desc", seed: 12345 }}
             onFilterChange={onFilterChange}
             totalCount={0}
@@ -312,7 +312,7 @@ describe("ListPage active filter chips", () => {
       <QueryClientProvider client={queryClient}>
         <RouteRegistryProvider>
           <ListPage
-            title="Scenes"
+            title="Videos"
             filter={{ page: 3, perPage: 40, sort: "random", direction: "desc", seed: 12345 }}
             onFilterChange={onFilterChange}
             totalCount={0}
@@ -339,13 +339,13 @@ describe("ListPage active filter chips", () => {
         },
       },
     });
-    queryClient.setQueryData(customFieldDefinitionsQueryKey("scene"), [
+    queryClient.setQueryData(customFieldDefinitionsQueryKey("video"), [
       {
         id: 1,
         key: "testlabel",
         label: "testlabel",
         type: "tag",
-        entityTypes: ["scene"],
+        entityTypes: ["video"],
         options: [],
         filterable: true,
         sortable: false,
@@ -360,13 +360,13 @@ describe("ListPage active filter chips", () => {
       <QueryClientProvider client={queryClient}>
         <RouteRegistryProvider>
           <ListPage
-            title="Scenes"
+            title="Videos"
             filter={{ page: 1, perPage: 40 }}
             onFilterChange={vi.fn()}
             totalCount={0}
             isLoading={false}
-            filterMode="scenes"
-            criteriaDefinitions={SCENE_CRITERIA}
+            filterMode="videos"
+            criteriaDefinitions={VIDEO_CRITERIA}
             objectFilter={{}}
             onObjectFilterChange={vi.fn()}
           >

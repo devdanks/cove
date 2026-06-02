@@ -4,7 +4,7 @@ namespace Cove.Core.Entities;
 
 public enum FaceAppearanceHostType
 {
-    Scene = 1,
+    Video = 1,
     Image = 2,
 }
 

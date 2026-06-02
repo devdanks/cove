@@ -34,35 +34,35 @@ public sealed class Wave1TaggingSmokeTests
     }
 
     [Fact]
-    public async Task SceneSearch_WithQuery_ReturnsMatchingItems()
+    public async Task VideoSearch_WithQuery_ReturnsMatchingItems()
     {
         using var factory = new CoveWebApplicationFactory();
         await factory.ResetDatabaseAsync();
 
         await factory.WithDbContextAsync(async db =>
         {
-            db.Scenes.AddRange(
-                new Scene { Title = "Searchable Squirt Scene", Details = "Contains the search term" },
-                new Scene { Title = "Other Scene", Details = "Different content" });
+            db.Videos.AddRange(
+                new Video { Title = "Searchable Squirt Video", Details = "Contains the search term" },
+                new Video { Title = "Other Video", Details = "Different content" });
             await db.SaveChangesAsync();
         });
 
         using var client = factory.CreateAuthenticatedClient();
-        var response = await client.GetAsync("/api/scenes?q=squirt&perPage=10&sort=title&direction=asc");
+        var response = await client.GetAsync("/api/videos?q=squirt&perPage=10&sort=title&direction=asc");
         response.EnsureSuccessStatusCode();
 
         using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var items = payload.RootElement.GetProperty("items").EnumerateArray().ToArray();
 
-        Assert.Contains(items, item => item.GetProperty("title").GetString() == "Searchable Squirt Scene");
+        Assert.Contains(items, item => item.GetProperty("title").GetString() == "Searchable Squirt Video");
     }
 
     [Theory]
-    [InlineData("Performer Match Scene", "maria")]
-    [InlineData("Performer Alias Scene", "stage-name")]
-    [InlineData("Tag Match Scene", "tagged")]
-    [InlineData("Tag Alias Scene", "alias-tag")]
-    public async Task SceneSearch_WithRelatedEntityQuery_ReturnsMatchingItems(string expectedTitle, string query)
+    [InlineData("Performer Match Video", "maria")]
+    [InlineData("Performer Alias Video", "stage-name")]
+    [InlineData("Tag Match Video", "tagged")]
+    [InlineData("Tag Alias Video", "alias-tag")]
+    public async Task VideoSearch_WithRelatedEntityQuery_ReturnsMatchingItems(string expectedTitle, string query)
     {
         using var factory = new CoveWebApplicationFactory();
         await factory.ResetDatabaseAsync();
@@ -80,17 +80,17 @@ public sealed class Wave1TaggingSmokeTests
                 Aliases = { new TagAlias { Alias = "Alias-Tag Search" } },
             };
 
-            db.Scenes.AddRange(
-                new Scene { Title = "Performer Match Scene", ScenePerformers = { new ScenePerformer { Performer = performer } } },
-                new Scene { Title = "Performer Alias Scene", ScenePerformers = { new ScenePerformer { Performer = performer } } },
-                new Scene { Title = "Tag Match Scene", SceneTags = { new SceneTag { Tag = tag } } },
-                new Scene { Title = "Tag Alias Scene", SceneTags = { new SceneTag { Tag = tag } } },
-                new Scene { Title = "Unrelated Scene" });
+            db.Videos.AddRange(
+                new Video { Title = "Performer Match Video", VideoPerformers = { new VideoPerformer { Performer = performer } } },
+                new Video { Title = "Performer Alias Video", VideoPerformers = { new VideoPerformer { Performer = performer } } },
+                new Video { Title = "Tag Match Video", VideoTags = { new VideoTag { Tag = tag } } },
+                new Video { Title = "Tag Alias Video", VideoTags = { new VideoTag { Tag = tag } } },
+                new Video { Title = "Unrelated Video" });
             await db.SaveChangesAsync();
         });
 
         using var client = factory.CreateAuthenticatedClient();
-        var response = await client.GetAsync($"/api/scenes?q={Uri.EscapeDataString(query)}&perPage=10&sort=title&direction=asc");
+        var response = await client.GetAsync($"/api/videos?q={Uri.EscapeDataString(query)}&perPage=10&sort=title&direction=asc");
         response.EnsureSuccessStatusCode();
 
         using var payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -100,7 +100,7 @@ public sealed class Wave1TaggingSmokeTests
     }
 
     [Theory]
-    [InlineData("/api/scenes", "title", "Melena Maria Rya Scene", "melen")]
+    [InlineData("/api/videos", "title", "Melena Maria Rya Video", "melen")]
     [InlineData("/api/performers", "name", "Melena Maria Rya", "melen")]
     [InlineData("/api/studios", "name", "The Penguin Studio", "peng")]
     [InlineData("/api/tags", "name", "Melena Maria Rya Tag", "melen")]
@@ -116,7 +116,7 @@ public sealed class Wave1TaggingSmokeTests
 
         await factory.WithDbContextAsync(async db =>
         {
-            db.Scenes.Add(new Scene { Title = "Melena Maria Rya Scene" });
+            db.Videos.Add(new Video { Title = "Melena Maria Rya Video" });
             db.Performers.Add(new Performer { Name = "Melena Maria Rya" });
             db.Studios.Add(new Studio { Name = "The Penguin Studio" });
             db.Tags.Add(new Tag { Name = "Melena Maria Rya Tag" });
@@ -221,7 +221,7 @@ public sealed class Wave1TaggingSmokeTests
     }
 
     [Theory]
-    [InlineData(CustomFieldEntityTypes.Scene, "/api/scenes")]
+    [InlineData(CustomFieldEntityTypes.Video, "/api/videos")]
     [InlineData(CustomFieldEntityTypes.Image, "/api/images")]
     public async Task EntityCustomFields_UpdateAndReload_RoundTripsThroughApi(string entityType, string endpoint)
     {
@@ -340,7 +340,7 @@ public sealed class Wave1TaggingSmokeTests
         var customFields = new Dictionary<string, object?> { [fieldKey] = value };
         return entityType switch
         {
-            CustomFieldEntityTypes.Scene => new { title = "Custom Field Scene", organized = false, customFields },
+            CustomFieldEntityTypes.Video => new { title = "Custom Field Video", organized = false, customFields },
             CustomFieldEntityTypes.Image => new { title = "Custom Field Image", organized = false, customFields },
             _ => throw new ArgumentOutOfRangeException(nameof(entityType), entityType, null),
         };
@@ -357,29 +357,29 @@ public sealed class Wave1TaggingSmokeTests
     }
 
     [Fact]
-    public async Task PerformerContextTagApplication_RoundTripsThroughApiAndSceneDetail()
+    public async Task PerformerContextTagApplication_RoundTripsThroughApiAndVideoDetail()
     {
         using var factory = new CoveWebApplicationFactory();
         await factory.ResetDatabaseAsync();
 
-        var (sceneId, performerId, tagId) = await factory.WithDbContextAsync(async db =>
+        var (videoId, performerId, tagId) = await factory.WithDbContextAsync(async db =>
         {
-            var scene = new Scene { Title = "Context Scene", MaxDuration = 100 };
+            var video = new Video { Title = "Context Video", MaxDuration = 100 };
             var performer = new Performer { Name = "Context Performer" };
             var tag = new Tag { Name = "Context Tag", Color = "#f97316" };
-            db.AddRange(scene, performer, tag);
+            db.AddRange(video, performer, tag);
             await db.SaveChangesAsync();
 
-            db.Set<ScenePerformer>().Add(new ScenePerformer { SceneId = scene.Id, PerformerId = performer.Id });
+            db.Set<VideoPerformer>().Add(new VideoPerformer { VideoId = video.Id, PerformerId = performer.Id });
             await db.SaveChangesAsync();
-            return (scene.Id, performer.Id, tag.Id);
+            return (video.Id, performer.Id, tag.Id);
         });
 
         using var client = factory.CreateAuthenticatedClient();
         var createResponse = await client.PostAsJsonAsync("/api/tagapplications", new
         {
-            hostType = "scene",
-            hostId = sceneId,
+            hostType = "video",
+            hostId = videoId,
             contextType = "performer",
             contextId = performerId,
             tagId,
@@ -394,19 +394,19 @@ public sealed class Wave1TaggingSmokeTests
         Assert.Equal(performerId, application.ContextId);
         Assert.Equal(18.0, application.TotalDurationSec);
 
-        var sceneResponse = await client.GetAsync($"/api/scenes/{sceneId}");
-        sceneResponse.EnsureSuccessStatusCode();
-        var scene = await sceneResponse.Content.ReadApiJsonAsync<SceneDto>();
-        Assert.NotNull(scene);
-        var contextApplication = Assert.Single(scene!.ContextTagApplications!);
+        var videoResponse = await client.GetAsync($"/api/videos/{videoId}");
+        videoResponse.EnsureSuccessStatusCode();
+        var video = await videoResponse.Content.ReadApiJsonAsync<VideoDto>();
+        Assert.NotNull(video);
+        var contextApplication = Assert.Single(video!.ContextTagApplications!);
         Assert.Equal(application.Id, contextApplication.Id);
         Assert.Equal("Context Tag", contextApplication.Tag.Name);
         Assert.Equal("#f97316", contextApplication.Tag.Color);
 
         var invalidResponse = await client.PostAsJsonAsync("/api/tagapplications", new
         {
-            hostType = "scene",
-            hostId = sceneId,
+            hostType = "video",
+            hostId = videoId,
             contextType = "performer",
             contextId = performerId + 1000,
             tagId,
@@ -422,3 +422,4 @@ public sealed class Wave1TaggingSmokeTests
         });
     }
 }
+

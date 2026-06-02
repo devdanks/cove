@@ -38,7 +38,7 @@ export interface BulkWizardState {
 }
 
 export const HOST_TYPE_OPTIONS = [
-  { value: "scene", label: "Scene" },
+  { value: "video", label: "Video" },
   { value: "image", label: "Image" },
   { value: "audio", label: "Audio" },
 ];

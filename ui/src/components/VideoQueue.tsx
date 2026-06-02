@@ -13,10 +13,10 @@ import {
   SkipBack,
   SkipForward,
 } from "lucide-react";
-import { scenes } from "../api/client";
+import { videos } from "../api/client";
 
-export interface SceneQueueProps {
-  scenes: { id: number; title?: string; duration?: number; screenshotUrl?: string }[];
+export interface VideoQueueProps {
+  videos: { id: number; title?: string; duration?: number; screenshotUrl?: string }[];
   initialIndex?: number;
   onClose: () => void;
   onNavigate: (route: any) => void;
@@ -31,15 +31,15 @@ function formatQueueDuration(seconds?: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-export function SceneQueue({
-  scenes: initialScenes,
+export function VideoQueue({
+  videos: initialVideos,
   initialIndex = 0,
   onClose,
   onNavigate,
-}: SceneQueueProps) {
-  const [queue, setQueue] = useState(initialScenes);
+}: VideoQueueProps) {
+  const [queue, setQueue] = useState(initialVideos);
   const [currentIndex, setCurrentIndex] = useState(
-    Math.min(initialIndex, initialScenes.length - 1),
+    Math.min(initialIndex, initialVideos.length - 1),
   );
   const [queueOpen, setQueueOpen] = useState(true);
   const [repeat, setRepeat] = useState(false);
@@ -129,13 +129,13 @@ export function SceneQueue({
 
   const shuffleQueue = useCallback(() => {
     setQueue((prev) => {
-      const currentScene = prev[currentIndex];
+      const currentVideo = prev[currentIndex];
       const rest = prev.filter((_, i) => i !== currentIndex);
       for (let i = rest.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [rest[i], rest[j]] = [rest[j], rest[i]];
       }
-      return [currentScene, ...rest];
+      return [currentVideo, ...rest];
     });
     setCurrentIndex(0);
   }, [currentIndex]);
@@ -154,7 +154,7 @@ export function SceneQueue({
 
   if (!current) return <></>;
 
-  const streamUrl = scenes.streamUrl(current.id);
+  const streamUrl = videos.streamUrl(current.id);
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex bg-black">
@@ -218,7 +218,7 @@ export function SceneQueue({
             onClick={goPrev}
             disabled={currentIndex === 0 && !repeat}
             className="p-2 text-white/70 hover:text-white disabled:text-white/20 rounded hover:bg-white/10 disabled:hover:bg-transparent"
-            title="Previous scene"
+            title="Previous video"
           >
             <SkipBack size={20} />
           </button>
@@ -226,7 +226,7 @@ export function SceneQueue({
             onClick={goNext}
             disabled={currentIndex >= queue.length - 1 && !repeat}
             className="p-2 text-white/70 hover:text-white disabled:text-white/20 rounded hover:bg-white/10 disabled:hover:bg-transparent"
-            title="Next scene"
+            title="Next video"
           >
             <SkipForward size={20} />
           </button>
@@ -246,11 +246,11 @@ export function SceneQueue({
             </button>
           </div>
           <div className="flex-1 overflow-y-auto">
-            {queue.map((scene, idx) => (
+            {queue.map((video, idx) => (
               <div
-                key={`${scene.id}-${idx}`}
+                key={`${video.id}-${idx}`}
                 ref={(el) => {
-                  if (el) queueItemRefs.current.set(scene.id, el);
+                  if (el) queueItemRefs.current.set(video.id, el);
                 }}
                 className={`flex items-center gap-2 px-3 py-2 cursor-pointer border-l-2 transition-colors ${
                   idx === currentIndex
@@ -261,9 +261,9 @@ export function SceneQueue({
               >
                 {/* Thumbnail */}
                 <div className="w-16 h-9 flex-shrink-0 rounded overflow-hidden bg-surface">
-                  {scene.screenshotUrl ? (
+                  {video.screenshotUrl ? (
                     <img
-                      src={scene.screenshotUrl}
+                      src={video.screenshotUrl}
                       alt=""
                       className="w-full h-full object-cover"
                       loading="lazy"
@@ -278,10 +278,10 @@ export function SceneQueue({
                 {/* Info */}
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-foreground truncate">
-                    {scene.title || "Untitled"}
+                    {video.title || "Untitled"}
                   </p>
                   <p className="text-[10px] text-muted">
-                    {formatQueueDuration(scene.duration)}
+                    {formatQueueDuration(video.duration)}
                   </p>
                 </div>
 
@@ -323,3 +323,4 @@ export function SceneQueue({
     document.body,
   );
 }
+

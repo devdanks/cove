@@ -2,7 +2,7 @@ namespace Cove.Core.Entities;
 
 public static class CustomFieldEntityTypes
 {
-    public const string Scene = "scene";
+    public const string Video = "video";
     public const string Performer = "performer";
     public const string Tag = "tag";
     public const string Studio = "studio";
@@ -13,7 +13,7 @@ public static class CustomFieldEntityTypes
     public const string Audio = "audio";
     public const string Text = "text";
 
-    public static readonly string[] All = [Scene, Performer, Tag, Studio, Gallery, Image, Group, Face, Audio, Text];
+    public static readonly string[] All = [Video, Performer, Tag, Studio, Gallery, Image, Group, Face, Audio, Text];
 }
 
 public static class CustomFieldTypes
@@ -31,7 +31,7 @@ public static class CustomFieldTypes
     public const string Tag = "tag";
     public const string Performer = "performer";
     public const string Studio = "studio";
-    public const string Scene = "scene";
+    public const string Video = "video";
     public const string Gallery = "gallery";
     public const string Image = "image";
     public const string Group = "group";
@@ -51,7 +51,7 @@ public static class CustomFieldTypes
         Tag,
         Performer,
         Studio,
-        Scene,
+        Video,
         Gallery,
         Image,
         Group,
@@ -70,7 +70,7 @@ public static class CustomFieldTypes
     public static bool IsReference(string? type)
     {
         var normalized = Normalize(type);
-        return normalized == Tag || normalized == Performer || normalized == Studio || normalized == Scene || normalized == Gallery || normalized == Image || normalized == Group;
+        return normalized == Tag || normalized == Performer || normalized == Studio || normalized == Video || normalized == Gallery || normalized == Image || normalized == Group;
     }
 
     public static string Normalize(string? type)

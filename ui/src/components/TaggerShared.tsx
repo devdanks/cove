@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Check, CloudDownload, Eye, EyeOff, Settings2, X } from "lucide-react";
-import type { CollectionMode } from "./sceneScrapeUtils";
+import type { CollectionMode } from "./videoScrapeUtils";
 
 export type TaggerQueryMode = "auto" | "filename" | "dir" | "path" | "metadata";
 

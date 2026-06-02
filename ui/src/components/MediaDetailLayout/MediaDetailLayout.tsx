@@ -206,7 +206,7 @@ function getDefaultTabIcon(tab: MediaDetailTab) {
   if (key === "performers" || label.includes("performer")) return <UserRound className={iconClassName} />;
   if (key === "studios" || label.includes("studio")) return <Building2 className={iconClassName} />;
   if (key === "tags" || label.includes("tag")) return <Tags className={iconClassName} />;
-  if (key === "scenes" || label.includes("scene")) return <ListVideo className={iconClassName} />;
+  if (key === "videos" || label.includes("video")) return <ListVideo className={iconClassName} />;
   if (key === "related" || label.includes("related")) return <Layers className={iconClassName} />;
   if (key === "people" || label.includes("people")) return <Users className={iconClassName} />;
   if (key === "ext") return <Puzzle className={iconClassName} />;

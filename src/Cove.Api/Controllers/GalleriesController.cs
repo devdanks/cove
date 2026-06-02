@@ -17,7 +17,7 @@ namespace Cove.Api.Controllers;
 public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContext db, IUserEngagementService engagementService, IScanService scanService, ITagProvenanceService? tagProvenanceService = null, CustomFieldService? customFields = null, IFieldProvenanceService? fieldProvenanceService = null) : ControllerBase
 {
     private readonly CustomFieldService _customFields = customFields ?? new CustomFieldService(db);
-    private sealed record GalleryRelationshipCounts(IReadOnlyDictionary<int, int> ImageCounts, IReadOnlyDictionary<int, int> SceneCounts);
+    private sealed record GalleryRelationshipCounts(IReadOnlyDictionary<int, int> ImageCounts, IReadOnlyDictionary<int, int> VideoCounts);
 
     [HttpGet]
     [OutputCache(PolicyName = "ShortCache")]
@@ -90,14 +90,14 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
         if (firstImageId.HasValue)
             return Redirect(WithQuery($"/api/stream/image/{firstImageId.Value}/thumbnail", max, v));
 
-        var firstSceneId = await db.Set<SceneGallery>()
+        var firstVideoId = await db.Set<VideoGallery>()
             .Where(sg => sg.GalleryId == id)
-            .OrderBy(sg => sg.SceneId)
-            .Select(sg => (int?)sg.SceneId)
+            .OrderBy(sg => sg.VideoId)
+            .Select(sg => (int?)sg.VideoId)
             .FirstOrDefaultAsync(ct);
 
-        return firstSceneId.HasValue
-            ? Redirect(WithQuery($"/api/stream/scene/{firstSceneId.Value}/screenshot", null, v))
+        return firstVideoId.HasValue
+            ? Redirect(WithQuery($"/api/stream/video/{firstVideoId.Value}/screenshot", null, v))
             : NotFound();
     }
 
@@ -114,7 +114,7 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
         if (dto.Urls?.Count > 0) gallery.Urls = dto.Urls.Select(u => new GalleryUrl { Url = u }).ToList();
         if (dto.TagIds?.Count > 0) gallery.GalleryTags = dto.TagIds.Select(id => new GalleryTag { TagId = id }).ToList();
         if (dto.PerformerIds?.Count > 0) gallery.GalleryPerformers = dto.PerformerIds.Select(id => new GalleryPerformer { PerformerId = id }).ToList();
-        if (dto.SceneIds?.Count > 0) gallery.SceneGalleries = dto.SceneIds.Select(id => new SceneGallery { SceneId = id }).ToList();
+        if (dto.VideoIds?.Count > 0) gallery.VideoGalleries = dto.VideoIds.Select(id => new VideoGallery { VideoId = id }).ToList();
 
         gallery = await galleryRepo.AddAsync(gallery, ct);
         if (dto.CustomFields != null)
@@ -162,10 +162,10 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
             gallery.GalleryPerformers.Clear();
             gallery.GalleryPerformers = dto.PerformerIds.Select(pid => new GalleryPerformer { PerformerId = pid, GalleryId = id }).ToList();
         }
-        if (dto.SceneIds != null)
+        if (dto.VideoIds != null)
         {
-            gallery.SceneGalleries.Clear();
-            gallery.SceneGalleries = dto.SceneIds.Select(sid => new SceneGallery { SceneId = sid, GalleryId = id }).ToList();
+            gallery.VideoGalleries.Clear();
+            gallery.VideoGalleries = dto.VideoIds.Select(sid => new VideoGallery { VideoId = sid, GalleryId = id }).ToList();
         }
         if (dto.TagIds != null && tagProvenanceService != null)
         {
@@ -244,37 +244,37 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
             gallery,
             customFieldValues,
             GetRelationshipCount(relationshipCounts.ImageCounts, gallery.Id),
-            GetRelationshipCount(relationshipCounts.SceneCounts, gallery.Id),
+            GetRelationshipCount(relationshipCounts.VideoCounts, gallery.Id),
             provenanceLookup,
             fieldProvenance);
     }
 
-    private GalleryDto MapToDto(Gallery g, Dictionary<string, object>? customFieldValues = null, int? imageCount = null, int? sceneCount = null, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null, List<FieldProvenanceDto>? fieldProvenance = null) => new(
+    private GalleryDto MapToDto(Gallery g, Dictionary<string, object>? customFieldValues = null, int? imageCount = null, int? videoCount = null, IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup = null, List<FieldProvenanceDto>? fieldProvenance = null) => new(
         g.Id, g.Title, g.Code, g.Date?.ToString("yyyy-MM-dd"), g.Details, g.Photographer,
         g.Organized, g.StudioId, g.Studio?.Name,
         g.Urls.Select(u => u.Url).ToList(),
         g.GalleryTags.Where(gt => gt.Tag != null).Select(gt => TagDtoMapping.MapTagDto(gt.Tag!, GetTagProvenance(provenanceLookup, gt.Tag!.Id))).ToList(),
         g.GalleryPerformers.Where(gp => gp.Performer != null).Select(gp => new PerformerSummaryDto(gp.Performer!.Id, gp.Performer.Name, gp.Performer.Disambiguation, gp.Performer.Gender?.ToString(), gp.Performer.Birthdate?.ToString("yyyy-MM-dd"), gp.Performer.Favorite, EntityImageUrls.PerformerOrNull(ControllerContext.HttpContext, gp.Performer!))).ToList(),
         imageCount ?? g.ImageCount,
-        sceneCount ?? g.SceneCount,
-        g.SceneGalleries?.Select(sg => sg.SceneId).ToList() ?? [],
+        videoCount ?? g.VideoCount,
+        g.VideoGalleries?.Select(sg => sg.VideoId).ToList() ?? [],
         g.Folder?.Path,
         g.Files?.Select(f => new GalleryFileInfoDto(f.Id, f.Path, f.Size, f.ModTime.ToString("o"),
             f.Fingerprints?.Select(fp => new FingerprintDto(fp.Type, fp.Value)).ToList() ?? [])).ToList() ?? [],
         customFieldValues,
         g.CreatedAt.ToString("o"), g.UpdatedAt.ToString("o"),
-        ResolveCoverPath(g, imageCount, sceneCount),
+        ResolveCoverPath(g, imageCount, videoCount),
         g.CoverImageId,
         g.BackImageBlobId != null ? EntityImageUrls.GalleryBackCover(ControllerContext.HttpContext, g.Id, g.UpdatedAt) : null,
         fieldProvenance
     );
 
     /// <summary>Resolve cover image URL through the unified gallery cover endpoint.</summary>
-    private string? ResolveCoverPath(Gallery g, int? imageCount = null, int? sceneCount = null)
+    private string? ResolveCoverPath(Gallery g, int? imageCount = null, int? videoCount = null)
     {
         var resolvedImageCount = imageCount ?? g.ImageCount;
-        var resolvedSceneCount = sceneCount ?? g.SceneCount;
-        if (g.ImageBlobId != null || g.CoverImageId != null || resolvedImageCount > 0 || resolvedSceneCount > 0) return EntityImageUrls.GalleryCover(ControllerContext.HttpContext, g.Id, g.UpdatedAt);
+        var resolvedVideoCount = videoCount ?? g.VideoCount;
+        if (g.ImageBlobId != null || g.CoverImageId != null || resolvedImageCount > 0 || resolvedVideoCount > 0) return EntityImageUrls.GalleryCover(ControllerContext.HttpContext, g.Id, g.UpdatedAt);
         return null;
     }
 
@@ -296,7 +296,7 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
             g,
             GetCustomFields(customFieldValues, g.Id),
             GetRelationshipCount(relationshipCounts.ImageCounts, g.Id),
-            GetRelationshipCount(relationshipCounts.SceneCounts, g.Id))).ToList();
+            GetRelationshipCount(relationshipCounts.VideoCounts, g.Id))).ToList();
     }
 
     private async Task<GalleryRelationshipCounts> GetRelationshipCountsAsync(IReadOnlyCollection<int> galleryIds, CancellationToken ct)
@@ -311,14 +311,14 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
             .Select(group => new { GalleryId = group.Key, Count = group.Count() })
             .ToDictionaryAsync(item => item.GalleryId, item => item.Count, ct);
 
-        var sceneCounts = await db.Set<SceneGallery>()
+        var videoCounts = await db.Set<VideoGallery>()
             .AsNoTracking()
-            .Where(sceneGallery => galleryIds.Contains(sceneGallery.GalleryId))
-            .GroupBy(sceneGallery => sceneGallery.GalleryId)
+            .Where(videoGallery => galleryIds.Contains(videoGallery.GalleryId))
+            .GroupBy(videoGallery => videoGallery.GalleryId)
             .Select(group => new { GalleryId = group.Key, Count = group.Count() })
             .ToDictionaryAsync(item => item.GalleryId, item => item.Count, ct);
 
-        return new GalleryRelationshipCounts(imageCounts, sceneCounts);
+        return new GalleryRelationshipCounts(imageCounts, videoCounts);
     }
 
     private static int GetRelationshipCount(IReadOnlyDictionary<int, int> counts, int galleryId)
@@ -489,4 +489,25 @@ public class GalleriesController(IGalleryRepository galleryRepo, Data.CoveContex
         }
         return Ok(new { updated = galleries.Count });
     }
+
+    [HttpDelete("bulk")]
+    [RequiresPermission(Permissions.GalleriesDelete)]
+    [RequiresEntityAccess(EntityKinds.Gallery, Permissions.GalleriesDelete, ActionArgumentName = "dto", PropertyName = "Ids")]
+    public async Task<IActionResult> BulkDelete([FromBody] BatchDeleteDto dto, CancellationToken ct)
+    {
+        var ids = dto.Ids.Where(id => id > 0).Distinct().ToArray();
+        if (ids.Length == 0) return Ok(new { deleted = 0 });
+
+        var galleries = await db.Galleries.Where(g => ids.Contains(g.Id)).ToListAsync(ct);
+        foreach (var gallery in galleries)
+        {
+            if (tagProvenanceService != null)
+                await tagProvenanceService.RemoveForHostAsync(AffinityHostType.Gallery, gallery.Id, ct);
+            await _customFields.DeleteValuesForEntityAsync(CustomFieldEntityTypes.Gallery, gallery.Id, ct);
+        }
+        db.Galleries.RemoveRange(galleries);
+        await db.SaveChangesAsync(ct);
+        return Ok(new { deleted = galleries.Count });
+    }
 }
+

@@ -125,14 +125,14 @@ public class AuthorizationSurfaceTests
     [Theory]
     [InlineData("GET", "/hubs/notifications", true)]
     [InlineData("POST", "/hubs/notifications", true)]
-    [InlineData("GET", "/api/stream/scene/1/hls/master.m3u8", true)]
-    [InlineData("HEAD", "/api/stream/scene/1/preview", true)]
+    [InlineData("GET", "/api/stream/video/1/hls/master.m3u8", true)]
+    [InlineData("HEAD", "/api/stream/video/1/preview", true)]
     [InlineData("GET", "/api/audios/1/stream", true)]
     [InlineData("GET", "/api/texts/1/file", true)]
     [InlineData("GET", "/api/groups/2/image/front", true)]
     [InlineData("GET", "/api/auth/me", false)]
     [InlineData("GET", "/api/audios/1", false)]
-    [InlineData("POST", "/api/stream/scene/1", false)]
+    [InlineData("POST", "/api/stream/video/1", false)]
     public void Query_tokens_are_only_accepted_for_hubs_and_gettable_media_routes(string method, string path, bool expected)
     {
         var context = new DefaultHttpContext();

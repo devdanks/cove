@@ -15,13 +15,13 @@ public class Gallery : BaseEntity
     public int? CoverImageId { get; set; }
     public string? SearchText { get; set; }
 
-    // Denormalized M2M id sets, GIN-indexed. See Scene.TagIds for rationale.
+    // Denormalized M2M id sets, GIN-indexed. See Video.TagIds for rationale.
     public int[] TagIds { get; set; } = [];
     public int[] PerformerIds { get; set; } = [];
 
     // Denormalized relationship counters for hot list/detail reads.
     public int ImageCount { get; set; }
-    public int SceneCount { get; set; }
+    public int VideoCount { get; set; }
     public int PerformerCount { get; set; }
     public int TagCount { get; set; }
 
@@ -33,7 +33,7 @@ public class Gallery : BaseEntity
     public ICollection<GalleryChapter> Chapters { get; set; } = [];
     public ICollection<GalleryTag> GalleryTags { get; set; } = [];
     public ICollection<GalleryPerformer> GalleryPerformers { get; set; } = [];
-    public ICollection<SceneGallery> SceneGalleries { get; set; } = [];
+    public ICollection<VideoGallery> VideoGalleries { get; set; } = [];
     public ICollection<ImageGallery> ImageGalleries { get; set; } = [];
 }
 
@@ -68,3 +68,4 @@ public class GalleryChapter : BaseEntity
     public int GalleryId { get; set; }
     public Gallery? Gallery { get; set; }
 }
+

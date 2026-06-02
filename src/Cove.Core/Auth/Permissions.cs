@@ -9,12 +9,12 @@ public static class Permissions
     // Wildcard / meta
     public const string All = "*";
 
-    // Scenes
-    public const string ScenesRead = "scenes.read";
-    public const string ScenesWrite = "scenes.write";
-    public const string ScenesDelete = "scenes.delete";
-    public const string ScenesDeleteFile = "scenes.delete.file";
-    public const string ScenesScrape = "scenes.scrape";
+    // Videos
+    public const string VideosRead = "videos.read";
+    public const string VideosWrite = "videos.write";
+    public const string VideosDelete = "videos.delete";
+    public const string VideosDeleteFile = "videos.delete.file";
+    public const string VideosScrape = "videos.scrape";
 
     // Audios
     public const string AudiosRead = "audios.read";
@@ -136,11 +136,11 @@ public static class Permissions
     [
         new(All, "System", "Superuser; bypasses every check. Only assignable to the Owner role.", Dangerous: true),
 
-        new(ScenesRead, "Scenes", "View scenes in lists, detail pages, search."),
-        new(ScenesWrite, "Scenes", "Create or edit scene metadata.", Implies: [ScenesRead]),
-        new(ScenesDelete, "Scenes", "Delete scene rows (metadata).", Dangerous: true, Implies: [ScenesRead]),
-        new(ScenesDeleteFile, "Scenes", "Delete underlying scene files from disk.", Dangerous: true, Implies: [ScenesDelete]),
-        new(ScenesScrape, "Scenes", "Run scrapers against scenes.", Implies: [ScenesRead]),
+        new(VideosRead, "Videos", "View videos in lists, detail pages, search."),
+        new(VideosWrite, "Videos", "Create or edit video metadata.", Implies: [VideosRead]),
+        new(VideosDelete, "Videos", "Delete video rows (metadata).", Dangerous: true, Implies: [VideosRead]),
+        new(VideosDeleteFile, "Videos", "Delete underlying video files from disk.", Dangerous: true, Implies: [VideosDelete]),
+        new(VideosScrape, "Videos", "Run scrapers against videos.", Implies: [VideosRead]),
 
         new(AudiosRead, "Audios", "View audio items."),
         new(AudiosWrite, "Audios", "Create or edit audio metadata.", Implies: [AudiosRead]),
@@ -234,13 +234,13 @@ public static class Permissions
 
         new(ImportStash, "Import", "Run a Stash database import.", Dangerous: true),
 
-        new(StreamRead, "Streaming", "Access the streaming endpoints (raw bytes / HLS).", Implies: [ScenesRead]),
+        new(StreamRead, "Streaming", "Access the streaming endpoints (raw bytes / HLS).", Implies: [VideosRead]),
     ];
 
     /// <summary>Default permission set for the Member role.</summary>
     public static readonly string[] MemberDefaults =
     [
-        ScenesWrite, ScenesScrape,
+        VideosWrite, VideosScrape,
         AudiosWrite, TextsWrite,
         PerformersWrite, PerformersScrape,
         FacesWrite, FacesDelete,
@@ -259,7 +259,7 @@ public static class Permissions
     /// <summary>Default permission set for the Viewer role (read-only).</summary>
     public static readonly string[] ViewerDefaults =
     [
-        ScenesRead, AudiosRead, TextsRead, PerformersRead, TagsRead, StudiosRead,
+        VideosRead, AudiosRead, TextsRead, PerformersRead, TagsRead, StudiosRead,
         TagGroupsRead,
         GalleriesRead, ImagesRead, GroupsRead, SegmentsRead,
         FacesRead, EmbeddingsRead, AiRunsRead,
@@ -270,7 +270,7 @@ public static class Permissions
     /// <summary>Default permission set for the Guest role (share-link target).</summary>
     public static readonly string[] GuestDefaults =
     [
-        ScenesRead, AudiosRead, TextsRead, PerformersRead, TagsRead, StudiosRead,
+        VideosRead, AudiosRead, TextsRead, PerformersRead, TagsRead, StudiosRead,
         TagGroupsRead,
         GalleriesRead, ImagesRead, GroupsRead,
         StreamRead,
@@ -300,3 +300,4 @@ public sealed record PermissionDefinition(
     string[]? Implies = null,
     string Source = "core",
     bool GrantToAdminsByDefault = false);
+

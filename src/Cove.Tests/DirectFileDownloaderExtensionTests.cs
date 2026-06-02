@@ -11,14 +11,14 @@ namespace Cove.Tests;
 public class DirectFileDownloaderExtensionTests
 {
     [Fact]
-    public async Task MatchAsync_ReturnsSceneDownloader_ForVideoUrl()
+    public async Task MatchAsync_ReturnsVideoDownloader_ForVideoUrl()
     {
         var extension = new DirectFileDownloaderExtension();
 
         var match = await extension.MatchAsync("https://cdn.example.com/media/sample-video.mp4?token=abc", CancellationToken.None);
 
         Assert.NotNull(match);
-        Assert.Equal("builtin.direct-file/scene", match!.DownloaderId);
+        Assert.Equal("builtin.direct-file/video", match!.DownloaderId);
         Assert.Equal("sample-video.mp4", match.Label);
     }
 
@@ -56,9 +56,9 @@ public class DirectFileDownloaderExtensionTests
             var host = new FakeDownloaderHost(tempDirectory, new StubHttpClientFactory(new BinaryHttpMessageHandler()));
             var result = await extension.DownloadAsync(
                 new DownloaderRequest(
-                    "builtin.direct-file/scene",
-                    "https://cdn.example.com/video/test-scene.mp4",
-                    DownloaderEntity.Scene,
+                    "builtin.direct-file/video",
+                    "https://cdn.example.com/video/test-video.mp4",
+                    DownloaderEntity.Video,
                     new DownloaderPermissions(["cdn.example.com"])),
                 host,
                 CancellationToken.None);
@@ -66,7 +66,7 @@ public class DirectFileDownloaderExtensionTests
             Assert.NotNull(result);
             var localPath = Path.Combine(tempDirectory, result!.LocalPath);
             Assert.True(File.Exists(localPath));
-            Assert.Equal("test-scene.mp4", result.OriginalFilename);
+            Assert.Equal("test-video.mp4", result.OriginalFilename);
             Assert.Equal("video/mp4", result.Headers!["Content-Type"]);
         }
         finally
@@ -171,3 +171,4 @@ public class DirectFileDownloaderExtensionTests
         }
     }
 }
+

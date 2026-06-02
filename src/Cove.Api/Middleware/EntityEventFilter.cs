@@ -13,7 +13,7 @@ public sealed class EntityEventFilter : IAsyncActionFilter
 {
     private static readonly Dictionary<string, string> ControllerEntityMap = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["Scenes"] = "scene",
+        ["Videos"] = "video",
         ["Performers"] = "performer",
         ["Studios"] = "studio",
         ["Tags"] = "tag",
@@ -80,9 +80,9 @@ public sealed class EntityEventFilter : IAsyncActionFilter
     private static EventType? GetEventType(string entityType, string operation) =>
         (entityType, operation) switch
         {
-            ("scene", "created") => EventType.SceneCreated,
-            ("scene", "updated") => EventType.SceneUpdated,
-            ("scene", "deleted") => EventType.SceneDeleted,
+            ("video", "created") => EventType.VideoCreated,
+            ("video", "updated") => EventType.VideoUpdated,
+            ("video", "deleted") => EventType.VideoDeleted,
             ("performer", "created") => EventType.PerformerCreated,
             ("performer", "updated") => EventType.PerformerUpdated,
             ("performer", "deleted") => EventType.PerformerDeleted,
@@ -104,3 +104,4 @@ public sealed class EntityEventFilter : IAsyncActionFilter
             _ => null,
         };
 }
+

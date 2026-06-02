@@ -17,7 +17,7 @@ namespace Cove.Api.Controllers;
 [RequiresPermission(Permissions.PerformersRead)]
 public class PerformersController(IPerformerRepository performerRepo, MetadataServerService metadataServerService, PerformerScrapeService performerScrapeService, Data.CoveContext db, IEntityIdentifierService entityIdentifiers, IUserEngagementService engagementService, CustomFieldService? customFields = null, IFieldProvenanceService? fieldProvenanceService = null) : ControllerBase
 {
-    private sealed record PerformerUsageCounts(int SceneCount, int ImageCount, int GalleryCount, int GroupCount, int AudioCount, int TextCount);
+    private sealed record PerformerUsageCounts(int VideoCount, int ImageCount, int GalleryCount, int GroupCount, int AudioCount, int TextCount);
     private readonly CustomFieldService _customFields = customFields ?? new CustomFieldService(db);
 
     [HttpGet]
@@ -90,14 +90,14 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
             .Where(item => (item.HostType == "performer" || item.Kind == GroupItemKind.Performer) && item.HostId == id)
             .Select(item => item.GroupId)
             .ToListAsync(ct);
-        var sceneGroupIds = await (
-            from scenePerformer in db.Set<ScenePerformer>().AsNoTracking()
-            join groupItem in db.GroupItems.AsNoTracking().Where(item => item.SceneId.HasValue)
-                on scenePerformer.SceneId equals groupItem.SceneId!.Value
-            where scenePerformer.PerformerId == id
+        var videoGroupIds = await (
+            from videoPerformer in db.Set<VideoPerformer>().AsNoTracking()
+            join groupItem in db.GroupItems.AsNoTracking().Where(item => item.VideoId.HasValue)
+                on videoPerformer.VideoId equals groupItem.VideoId!.Value
+            where videoPerformer.PerformerId == id
             select groupItem.GroupId
         ).ToListAsync(ct);
-        var groupIds = directGroupIds.Concat(sceneGroupIds).Distinct().ToArray();
+        var groupIds = directGroupIds.Concat(videoGroupIds).Distinct().ToArray();
         if (groupIds.Length == 0)
             return Ok(new PaginatedResponse<GroupDto>([], 0, page, perPage));
 
@@ -144,21 +144,21 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         perPage = Math.Clamp(perPage, 1, 250);
 
         var coPerformerCounts =
-            from scenePerformer in db.Set<ScenePerformer>().AsNoTracking()
-            join coPerformer in db.Set<ScenePerformer>().AsNoTracking()
-                on scenePerformer.SceneId equals coPerformer.SceneId
-            where scenePerformer.PerformerId == id && coPerformer.PerformerId != id
+            from videoPerformer in db.Set<VideoPerformer>().AsNoTracking()
+            join coPerformer in db.Set<VideoPerformer>().AsNoTracking()
+                on videoPerformer.VideoId equals coPerformer.VideoId
+            where videoPerformer.PerformerId == id && coPerformer.PerformerId != id
             group coPerformer by coPerformer.PerformerId into grouped
             select new
             {
                 PerformerId = grouped.Key,
-                SceneCount = grouped.Select(item => item.SceneId).Distinct().Count(),
+                VideoCount = grouped.Select(item => item.VideoId).Distinct().Count(),
             };
 
         var query =
             from relation in coPerformerCounts
             join performer in db.Performers.AsNoTracking() on relation.PerformerId equals performer.Id
-            select new { relation.PerformerId, relation.SceneCount, performer.Name };
+            select new { relation.PerformerId, relation.VideoCount, performer.Name };
 
         if (!string.IsNullOrWhiteSpace(q))
         {
@@ -170,7 +170,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         query = sort switch
         {
             "name" => desc ? query.OrderByDescending(item => item.Name) : query.OrderBy(item => item.Name),
-            _ => query.OrderByDescending(item => item.SceneCount).ThenBy(item => item.Name),
+            _ => query.OrderByDescending(item => item.VideoCount).ThenBy(item => item.Name),
         };
 
         var totalCount = await query.CountAsync(ct);
@@ -539,9 +539,9 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         group.Synopsis,
         group.Urls.Select(url => url.Url).ToList(),
         group.GroupTags.Where(groupTag => groupTag.Tag != null).Select(groupTag => TagDtoMapping.MapTagDto(groupTag.Tag!)).ToList(),
-        group.GroupItems.Select(item => item.SceneId).Where(sceneId => sceneId.HasValue).Distinct().Count(),
+        group.GroupItems.Select(item => item.VideoId).Where(videoId => videoId.HasValue).Distinct().Count(),
         group.GroupItems.Count,
-        group.GroupItems.Any(item => item.Kind == GroupItemKind.SceneRange),
+        group.GroupItems.Any(item => item.Kind == GroupItemKind.VideoRange),
         group.SubGroupRelations?.Count ?? 0,
         group.ContainingGroupRelations?.Count ?? 0,
         customFieldValues,
@@ -554,11 +554,11 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         group.QueryJson,
         group.LastResolvedAt?.ToString("o"),
         group.CachedItemCount,
-        group.ShowInSceneLists,
+        group.ShowInVideoLists,
         group.AllowedHostTypes);
 
     private string? ResolveGroupFrontImagePath(Group group)
-        => group.FrontImageBlobId != null || group.GroupItems.Any(item => item.ImageId.HasValue || item.SceneId.HasValue)
+        => group.FrontImageBlobId != null || group.GroupItems.Any(item => item.ImageId.HasValue || item.VideoId.HasValue)
             ? EntityImageUrls.GroupFront(ControllerContext.HttpContext, group.Id, group.UpdatedAt)
             : null;
 
@@ -573,7 +573,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         p.Aliases.Select(a => a.Alias).ToList(),
         p.PerformerTags.Where(pt => pt.Tag != null).Select(pt => TagDtoMapping.MapTagDto(pt.Tag!)).ToList(),
         p.RemoteIds.Select(remoteId => new PerformerRemoteIdDto(remoteId.Endpoint, remoteId.RemoteId)).ToList(),
-        usageCounts?.SceneCount ?? p.SceneCount,
+        usageCounts?.VideoCount ?? p.VideoCount,
         usageCounts?.ImageCount ?? p.ImageCount,
         usageCounts?.GalleryCount ?? p.GalleryCount,
         usageCounts?.GroupCount ?? 0,
@@ -606,11 +606,11 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         if (ids.Length == 0)
             return [];
 
-        var sceneCounts = await db.Set<ScenePerformer>()
+        var videoCounts = await db.Set<VideoPerformer>()
             .AsNoTracking()
-            .Where(scenePerformer => ids.Contains(scenePerformer.PerformerId))
-            .GroupBy(scenePerformer => scenePerformer.PerformerId)
-            .Select(group => new { group.Key, Count = group.Select(scenePerformer => scenePerformer.SceneId).Distinct().Count() })
+            .Where(videoPerformer => ids.Contains(videoPerformer.PerformerId))
+            .GroupBy(videoPerformer => videoPerformer.PerformerId)
+            .Select(group => new { group.Key, Count = group.Select(videoPerformer => videoPerformer.VideoId).Distinct().Count() })
             .ToDictionaryAsync(item => item.Key, item => item.Count, ct);
         var imageCounts = await db.Set<ImagePerformer>()
             .AsNoTracking()
@@ -642,22 +642,22 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
             .Where(groupItem => groupItem.HostType == "performer" && ids.Contains(groupItem.HostId))
             .Select(groupItem => new { PerformerId = groupItem.HostId, groupItem.GroupId })
             .ToListAsync(ct);
-        var sceneGroupRows = await (
-            from scenePerformer in db.Set<ScenePerformer>().AsNoTracking()
-            join groupItem in db.GroupItems.AsNoTracking().Where(item => item.SceneId.HasValue)
-                on scenePerformer.SceneId equals groupItem.SceneId!.Value
-            where ids.Contains(scenePerformer.PerformerId)
-            select new { scenePerformer.PerformerId, groupItem.GroupId }
+        var videoGroupRows = await (
+            from videoPerformer in db.Set<VideoPerformer>().AsNoTracking()
+            join groupItem in db.GroupItems.AsNoTracking().Where(item => item.VideoId.HasValue)
+                on videoPerformer.VideoId equals groupItem.VideoId!.Value
+            where ids.Contains(videoPerformer.PerformerId)
+            select new { videoPerformer.PerformerId, groupItem.GroupId }
         ).ToListAsync(ct);
         var groupCounts = directGroupRows
-            .Concat(sceneGroupRows)
+            .Concat(videoGroupRows)
             .GroupBy(item => item.PerformerId)
             .ToDictionary(group => group.Key, group => group.Select(item => item.GroupId).Distinct().Count());
 
         return ids.ToDictionary(
             id => id,
             id => new PerformerUsageCounts(
-                sceneCounts.GetValueOrDefault(id),
+                videoCounts.GetValueOrDefault(id),
                 imageCounts.GetValueOrDefault(id),
                 galleryCounts.GetValueOrDefault(id),
                 groupCounts.GetValueOrDefault(id),
@@ -775,7 +775,7 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         var sources = await db.Performers
             .Include(p => p.Aliases)
             .Include(p => p.Urls)
-            .Include(p => p.ScenePerformers)
+            .Include(p => p.VideoPerformers)
             .Include(p => p.ImagePerformers)
             .Include(p => p.GalleryPerformers)
             .Where(p => dto.SourceIds.Contains(p.Id))
@@ -783,10 +783,10 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
 
         foreach (var source in sources)
         {
-            // Move scene associations
-            foreach (var sp in source.ScenePerformers)
-                if (!target.ScenePerformers.Any(t => t.SceneId == sp.SceneId))
-                    target.ScenePerformers.Add(new ScenePerformer { SceneId = sp.SceneId, PerformerId = target.Id });
+            // Move video associations
+            foreach (var sp in source.VideoPerformers)
+                if (!target.VideoPerformers.Any(t => t.VideoId == sp.VideoId))
+                    target.VideoPerformers.Add(new VideoPerformer { VideoId = sp.VideoId, PerformerId = target.Id });
             // Move image associations
             foreach (var ip in source.ImagePerformers)
                 if (!target.ImagePerformers.Any(t => t.ImageId == ip.ImageId))
@@ -803,3 +803,4 @@ public class PerformersController(IPerformerRepository performerRepo, MetadataSe
         return Ok(await MapToDetailDtoAsync(result!, ct));
     }
 }
+

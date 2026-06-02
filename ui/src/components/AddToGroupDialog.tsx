@@ -7,7 +7,7 @@ import { EditModal } from "./EditModal";
 
 export interface AddToGroupEntry {
   key: string;
-  sceneId?: number;
+  videoId?: number;
   hostType?: string;
   hostId?: number;
   kind?: GroupItemKind;
@@ -32,7 +32,7 @@ export function AddToGroupDialog({ open, onClose, items, onAdded }: Props) {
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null);
   const [newGroupName, setNewGroupName] = useState("");
 
-  const normalizedItems = useMemo(() => items.filter((item) => (item.sceneId ?? item.hostId ?? 0) > 0), [items]);
+  const normalizedItems = useMemo(() => items.filter((item) => (item.videoId ?? item.hostId ?? 0) > 0), [items]);
   const existingGroupQuery = useQuery({
     queryKey: ["groups", "picker", groupSearch],
     queryFn: () => groups.find({ page: 1, perPage: 20, sort: "name", direction: "asc", q: groupSearch.trim() || undefined }),
@@ -56,14 +56,14 @@ export function AddToGroupDialog({ open, onClose, items, onAdded }: Props) {
         groupId = created.id;
       }
 
-      const spanItems = normalizedItems.filter((item) => item.sceneId && (item.spanKey || item.startSec != null || item.endSec != null || item.derivedQuery));
+      const spanItems = normalizedItems.filter((item) => item.videoId && (item.spanKey || item.startSec != null || item.endSec != null || item.derivedQuery));
       const directItems = normalizedItems.filter((item) => !spanItems.includes(item));
 
       if (spanItems.length > 0) {
         await groups.items.fromSpans(groupId, {
           spans: spanItems.map((item) => ({
           spanKey: item.spanKey,
-          sceneId: item.sceneId,
+          videoId: item.videoId,
           startSec: item.startSec,
           endSec: item.endSec,
           title: item.title,
@@ -74,15 +74,15 @@ export function AddToGroupDialog({ open, onClose, items, onAdded }: Props) {
       }
 
       for (const item of directItems) {
-        const hostType = item.hostType ?? (item.sceneId ? "scene" : undefined);
-        const hostId = item.hostId ?? item.sceneId;
+        const hostType = item.hostType ?? (item.videoId ? "video" : undefined);
+        const hostId = item.hostId ?? item.videoId;
         if (!hostType || !hostId) continue;
         await groups.items.create(groupId, {
           orderIndex: 1_000_000,
           kind: item.kind ?? getGroupItemKind(hostType),
           hostType,
           hostId,
-          sceneId: hostType === "scene" ? hostId : undefined,
+          videoId: hostType === "video" ? hostId : undefined,
           title: item.title,
         });
       }
@@ -114,7 +114,7 @@ export function AddToGroupDialog({ open, onClose, items, onAdded }: Props) {
           <div className="mt-3 flex flex-wrap gap-2 text-xs text-secondary">
             {normalizedItems.slice(0, 6).map((item) => (
               <span key={item.key} className="rounded-full border border-border bg-surface px-2 py-1">
-                {item.title || "Untitled scene"}
+                {item.title || "Untitled video"}
               </span>
             ))}
             {normalizedItems.length > 6 ? (
@@ -207,5 +207,5 @@ function getGroupItemKind(hostType: string): GroupItemKind {
     return hostType;
   }
 
-  return "scene";
+  return "video";
 }

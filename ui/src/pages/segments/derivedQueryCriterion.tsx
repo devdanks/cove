@@ -6,7 +6,7 @@ import type { FilterDialogCustomSection } from "../../components/FilterDialog";
 import type { SegmentDerivedQueryDescriptor, SegmentSpanOperand, SegmentSpanOperator } from "../../api/types";
 import type { AppliedDerivedQuery, DerivedSpanOperandFilterValue, DerivedSpanQueryFilterValue } from "./types";
 
-export function createDerivedSpanCustomFilterSection(scopeSceneIds: number[]): FilterDialogCustomSection {
+export function createDerivedSpanCustomFilterSection(scopeVideoIds: number[]): FilterDialogCustomSection {
   return {
     id: "derivedSpanQuery",
     label: "Derived Spans",
@@ -19,7 +19,7 @@ export function createDerivedSpanCustomFilterSection(scopeSceneIds: number[]): F
       <DerivedSpanQueryEditor
         value={readDerivedSpanQueryFilter(value)}
         onChange={(nextValue) => onChange(nextValue)}
-        scopeSceneIds={scopeSceneIds}
+        scopeVideoIds={scopeVideoIds}
       />
     ),
   };
@@ -215,17 +215,17 @@ function normalizeFiniteNumber(value: unknown) {
 function DerivedSpanQueryEditor({
   value,
   onChange,
-  scopeSceneIds,
+  scopeVideoIds,
 }: {
   value: DerivedSpanQueryFilterValue;
   onChange: (value: DerivedSpanQueryFilterValue) => void;
-  scopeSceneIds: number[];
+  scopeVideoIds: number[];
 }) {
   const optionsQuery = useQuery({
-    queryKey: ["segments-page", "operand-options", scopeSceneIds.join(",")],
+    queryKey: ["segments-page", "operand-options", scopeVideoIds.join(",")],
     queryFn: async () => {
       const response = await segmentLibrary.list({
-        sceneIds: scopeSceneIds.length > 0 ? scopeSceneIds.join(",") : undefined,
+        videoIds: scopeVideoIds.length > 0 ? scopeVideoIds.join(",") : undefined,
         perPage: 5000,
       });
 

@@ -21,7 +21,7 @@ public static class FullTextSearchHelpers
     /// Augments a free-text search result with relational matches against applied tags and
     /// performers, returning the union (distinct) of the two. Tag matching is whole-word
     /// (including aliases) so that searching "1F" does not match a tag named "1F1M". Performer
-    /// matching is substring (including aliases) to mirror scene search behavior. Descriptions
+    /// matching is substring (including aliases) to mirror video search behavior. Descriptions
     /// are intentionally not handled here because every entity already indexes its description
     /// field in its full-text <c>SearchVector</c>.
     /// </summary>
@@ -180,3 +180,4 @@ public static class FullTextSearchHelpers
         return builder.Length == 0 ? null : builder.ToString();
     }
 }
+

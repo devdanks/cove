@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { audios } from "../api/client";
-import type { Audio, AudioUpdate, SceneGroupInput } from "../api/types";
+import type { Audio, AudioUpdate, VideoGroupInput } from "../api/types";
 import { Field } from "../components/EditModal";
 import { PerformerContextTagEditor, buildPerformerContextTagIds, syncPerformerContextTags } from "../components/PerformerContextTags";
 import { CustomFieldsEditor, buildTagProvenanceById } from "../components/shared";
@@ -29,7 +29,7 @@ export function AudioEditPanel({ audio, onSaved }: Props) {
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>(getEditableTagIds(audio.tags));
   const [selectedPerformerIds, setSelectedPerformerIds] = useState<number[]>(audio.performers.map((performer) => performer.id));
   const [contextTagIdsByPerformer, setContextTagIdsByPerformer] = useState<Record<number, number[]>>(() => buildPerformerContextTagIds(audio.contextTagApplications));
-  const [selectedGroups, setSelectedGroups] = useState<SceneGroupInput[]>(audio.groups.map((group) => ({ groupId: group.id, sceneIndex: 0 })));
+  const [selectedGroups, setSelectedGroups] = useState<VideoGroupInput[]>(audio.groups.map((group) => ({ groupId: group.id, videoIndex: 0 })));
   useEffect(() => {
     setTitle(audio.title ?? "");
     setCode(audio.code ?? "");
@@ -41,7 +41,7 @@ export function AudioEditPanel({ audio, onSaved }: Props) {
     setSelectedTagIds(getEditableTagIds(audio.tags));
     setSelectedPerformerIds(audio.performers.map((performer) => performer.id));
     setContextTagIdsByPerformer(buildPerformerContextTagIds(audio.contextTagApplications));
-    setSelectedGroups(audio.groups.map((group) => ({ groupId: group.id, sceneIndex: 0 })));
+    setSelectedGroups(audio.groups.map((group) => ({ groupId: group.id, videoIndex: 0 })));
   }, [audio]);
 
   const mutation = useMutation({
@@ -58,7 +58,7 @@ export function AudioEditPanel({ audio, onSaved }: Props) {
   });
 
   const setSelectedGroupIds = (groupIds: number[]) => {
-    setSelectedGroups(groupIds.map((groupId) => selectedGroups.find((group) => group.groupId === groupId) ?? { groupId, sceneIndex: 0 }));
+    setSelectedGroups(groupIds.map((groupId) => selectedGroups.find((group) => group.groupId === groupId) ?? { groupId, videoIndex: 0 }));
   };
 
   const lockedTagIds = getLockedTagIds(audio.tags);

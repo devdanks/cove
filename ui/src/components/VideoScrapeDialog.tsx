@@ -11,27 +11,27 @@ import {
   ScrapeRelationChoices,
   type ScrapeRelationActionMap,
 } from "./ScrapeRelationChoices";
-import type { CollectionMode, InputKind, ScrapeApplyPreferences, SceneScrapeScene } from "./sceneScrapeUtils";
+import type { CollectionMode, InputKind, ScrapeApplyPreferences, VideoScrapeVideo } from "./videoScrapeUtils";
 import {
-  buildDefaultSceneApplyPlan,
+  buildDefaultVideoApplyPlan,
   buildFragmentDraft,
   DEFAULT_COLLECTION_MODES,
   findDefaultKind,
   findPreferredScraperId,
   getAttemptCandidates,
-  getSceneNameSearchInput,
-  getSceneLabel,
+  getVideoNameSearchInput,
+  getVideoLabel,
   loadScrapeApplyPreferences,
   parseJsonObject,
   saveScrapeApplyPreferences,
-  sortScrapersForScene,
+  sortScrapersForVideo,
   supportsScrapeKind,
-} from "./sceneScrapeUtils";
+} from "./videoScrapeUtils";
 
 interface Props {
   open: boolean;
   onClose: () => void;
-  scene: SceneScrapeScene;
+  video: VideoScrapeVideo;
   initialScraperId?: string;
   initialInputKind?: InputKind;
   autoRunKey?: string | number;
@@ -66,7 +66,7 @@ function upsertReplaceField(current: string[], field: string, enabled: boolean) 
   return current.filter((value) => value !== field);
 }
 
-export function SceneScrapeDialog({ open, onClose, scene, initialScraperId, initialInputKind, autoRunKey, onApplied }: Props) {
+export function VideoScrapeDialog({ open, onClose, video, initialScraperId, initialInputKind, autoRunKey, onApplied }: Props) {
   const queryClient = useQueryClient();
   const { config } = useAppConfig();
   const [preferences, setPreferences] = useState<ScrapeApplyPreferences>(() => loadScrapeApplyPreferences());
@@ -91,8 +91,8 @@ export function SceneScrapeDialog({ open, onClose, scene, initialScraperId, init
   });
 
   const { data: recentAttempts = [] } = useQuery({
-    queryKey: ["scrape-attempts", "scene", scene.id],
-    queryFn: () => scrapeAttempts.list({ entityType: "scene", entityId: scene.id, limit: 12 }),
+    queryKey: ["scrape-attempts", "video", video.id],
+    queryFn: () => scrapeAttempts.list({ entityType: "video", entityId: video.id, limit: 12 }),
     enabled: open,
   });
 
@@ -112,19 +112,19 @@ export function SceneScrapeDialog({ open, onClose, scene, initialScraperId, init
 
   const scraperPreferences = config?.scraping.scraperPreferences ?? [];
 
-  const sceneScrapers = useMemo(
-    () => sortScrapersForScene(scrapers.filter((scraper) => scraper.entityType.toLowerCase() === "scene"), scene.urls[0], scraperPreferences),
-    [scene.urls, scraperPreferences, scrapers],
+  const videoScrapers = useMemo(
+    () => sortScrapersForVideo(scrapers.filter((scraper) => scraper.entityType.toLowerCase() === "video"), video.urls[0], scraperPreferences),
+    [video.urls, scraperPreferences, scrapers],
   );
   const selectedScraper = useMemo(
-    () => sceneScrapers.find((scraper) => scraper.id === selectedScraperId),
-    [sceneScrapers, selectedScraperId],
+    () => videoScrapers.find((scraper) => scraper.id === selectedScraperId),
+    [videoScrapers, selectedScraperId],
   );
   const candidateResults = useMemo(() => getAttemptCandidates(selectedAttempt), [selectedAttempt]);
   const selectedCandidate = candidateResults[selectedCandidateIndex] ?? candidateResults[0] ?? null;
   const applyPlan = useMemo(
-    () => buildDefaultSceneApplyPlan(scene, selectedAttempt, selectedCandidate?.raw ?? null),
-    [scene, selectedAttempt, selectedCandidate],
+    () => buildDefaultVideoApplyPlan(video, selectedAttempt, selectedCandidate?.raw ?? null),
+    [video, selectedAttempt, selectedCandidate],
   );
   const currentData = applyPlan.currentData;
   const scrapedData = applyPlan.scrapedData;
@@ -163,9 +163,9 @@ export function SceneScrapeDialog({ open, onClose, scene, initialScraperId, init
       return;
     }
 
-    setUrl(scene.urls[0] ?? "");
-    setName(getSceneNameSearchInput(scene));
-    setFragmentJson(buildFragmentDraft(scene));
+    setUrl(video.urls[0] ?? "");
+    setName(getVideoNameSearchInput(video));
+    setFragmentJson(buildFragmentDraft(video));
     setSelectedAttempt(null);
     setSelectedCandidateIndex(0);
     setReplaceFields([]);
@@ -173,7 +173,7 @@ export function SceneScrapeDialog({ open, onClose, scene, initialScraperId, init
     setTagActions({});
     setPerformerActions({});
     setError(null);
-  }, [open, scene]);
+  }, [open, video]);
 
   useEffect(() => {
     if (!open) {
@@ -194,15 +194,15 @@ export function SceneScrapeDialog({ open, onClose, scene, initialScraperId, init
       return;
     }
 
-    if (initialScraperId && sceneScrapers.some((scraper) => scraper.id === initialScraperId)) {
+    if (initialScraperId && videoScrapers.some((scraper) => scraper.id === initialScraperId)) {
       setSelectedScraperId(initialScraperId);
       return;
     }
 
-    if (!selectedScraperId || !sceneScrapers.some((scraper) => scraper.id === selectedScraperId)) {
-      setSelectedScraperId(findPreferredScraperId(sceneScrapers, scene.urls[0], scraperPreferences));
+    if (!selectedScraperId || !videoScrapers.some((scraper) => scraper.id === selectedScraperId)) {
+      setSelectedScraperId(findPreferredScraperId(videoScrapers, video.urls[0], scraperPreferences));
     }
-  }, [initialScraperId, open, scene.urls, sceneScrapers, scraperPreferences, selectedScraperId]);
+  }, [initialScraperId, open, video.urls, videoScrapers, scraperPreferences, selectedScraperId]);
 
   useEffect(() => {
     if (!selectedAttempt) {
@@ -252,7 +252,7 @@ export function SceneScrapeDialog({ open, onClose, scene, initialScraperId, init
 
     setReplaceFields([...applyPlan.replaceFields]);
     setCollectionModes({ ...applyPlan.collectionModes });
-  }, [scene.id, selectedAttempt?.id, scrapedData, suggestedCollectionModesKey, suggestedReplaceKey]);
+  }, [video.id, selectedAttempt?.id, scrapedData, suggestedCollectionModesKey, suggestedReplaceKey]);
 
   useEffect(() => {
     if (!scrapedData) {
@@ -263,7 +263,7 @@ export function SceneScrapeDialog({ open, onClose, scene, initialScraperId, init
 
     setTagActions(buildRelationActionMap(scrapedData.tags, currentData.tags, existingTagNames, preferences.createMissingTags));
     setPerformerActions(buildRelationActionMap(scrapedData.performers, currentData.performers, existingPerformerNames, preferences.createMissingPerformers));
-  }, [relationDefaultsKey, scene.id, scrapedData, selectedAttempt?.id]);
+  }, [relationDefaultsKey, video.id, scrapedData, selectedAttempt?.id]);
 
   const runMutation = useMutation({
     mutationFn: async () => {
@@ -290,8 +290,8 @@ export function SceneScrapeDialog({ open, onClose, scene, initialScraperId, init
 
       return scrapeAttempts.create({
         scraperId: selectedScraper.id,
-        entityType: "scene",
-        entityId: scene.id,
+        entityType: "video",
+        entityId: video.id,
         inputKind,
         url: inputKind === "url" ? url.trim() : undefined,
         name: inputKind === "name" ? name.trim() : undefined,
@@ -301,7 +301,7 @@ export function SceneScrapeDialog({ open, onClose, scene, initialScraperId, init
     onSuccess: (attempt) => {
       setSelectedAttempt(attempt);
       setSelectedCandidateIndex(0);
-      queryClient.invalidateQueries({ queryKey: ["scrape-attempts", "scene", scene.id] });
+      queryClient.invalidateQueries({ queryKey: ["scrape-attempts", "video", video.id] });
     },
     onError: (mutationError: Error) => {
       setError(mutationError.message || "Failed to run scrape.");
@@ -328,7 +328,7 @@ export function SceneScrapeDialog({ open, onClose, scene, initialScraperId, init
         throw new Error("Run a scrape first.");
       }
 
-      return scrapeAttempts.applyScene(selectedAttempt.id, {
+      return scrapeAttempts.applyVideo(selectedAttempt.id, {
         replaceFields,
         collectionModes,
         createMissingTags: preferences.createMissingTags,
@@ -344,9 +344,9 @@ export function SceneScrapeDialog({ open, onClose, scene, initialScraperId, init
     onSuccess: async (attempt) => {
       setSelectedAttempt(attempt);
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["scene", scene.id] }),
-        queryClient.invalidateQueries({ queryKey: ["scenes"] }),
-        queryClient.invalidateQueries({ queryKey: ["scrape-attempts", "scene", scene.id] }),
+        queryClient.invalidateQueries({ queryKey: ["video", video.id] }),
+        queryClient.invalidateQueries({ queryKey: ["videos"] }),
+        queryClient.invalidateQueries({ queryKey: ["scrape-attempts", "video", video.id] }),
       ]);
       onApplied?.(attempt);
       onClose();
@@ -362,7 +362,7 @@ export function SceneScrapeDialog({ open, onClose, scene, initialScraperId, init
 
   const canRun = Boolean(selectedScraper) && supportsScrapeKind(selectedScraper, inputKind);
   const canApply = Boolean(selectedAttempt && scrapedData && selectedAttempt.status.toLowerCase() !== "failure");
-  const sceneLabel = getSceneLabel(scene);
+  const videoLabel = getVideoLabel(video);
   const collectionChangeCount = Object.values(collectionModes).filter((mode) => mode !== "skip").length;
   const rawPayload = selectedCandidate?.raw ? JSON.stringify(selectedCandidate.raw, null, 2) : selectedAttempt?.resultJson || "No result JSON";
   const scalarRows = [
@@ -388,7 +388,7 @@ export function SceneScrapeDialog({ open, onClose, scene, initialScraperId, init
               Scrape Review
             </h2>
             <p className="mt-0.5 text-xs text-secondary">
-              Run a scraper for {sceneLabel} and review the incoming metadata before it touches the scene.
+              Run a scraper for {videoLabel} and review the incoming metadata before it touches the video.
             </p>
           </div>
           <button onClick={onClose} className="text-muted hover:text-foreground" aria-label="Close scrape review dialog">
@@ -402,10 +402,10 @@ export function SceneScrapeDialog({ open, onClose, scene, initialScraperId, init
               <div className="rounded-2xl border border-border bg-card p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="text-xs uppercase tracking-[0.18em] text-muted">Scene</div>
-                    <div className="mt-1 text-sm font-semibold text-foreground">{sceneLabel}</div>
+                    <div className="text-xs uppercase tracking-[0.18em] text-muted">Video</div>
+                    <div className="mt-1 text-sm font-semibold text-foreground">{videoLabel}</div>
                     <div className="mt-2 break-all text-xs text-secondary">
-                      {scene.urls[0] ? scene.urls[0] : "No source URL stored yet."}
+                      {video.urls[0] ? video.urls[0] : "No source URL stored yet."}
                     </div>
                   </div>
                 </div>
@@ -418,8 +418,8 @@ export function SceneScrapeDialog({ open, onClose, scene, initialScraperId, init
                   onChange={(event) => setSelectedScraperId(event.target.value)}
                   className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground outline-none"
                 >
-                  {sceneScrapers.length === 0 ? <option value="">No scene scrapers found</option> : null}
-                  {sceneScrapers.map((scraper) => (
+                  {videoScrapers.length === 0 ? <option value="">No video scrapers found</option> : null}
+                  {videoScrapers.map((scraper) => (
                     <option key={scraper.id} value={scraper.id}>
                       {scraper.name}
                     </option>
@@ -459,7 +459,7 @@ export function SceneScrapeDialog({ open, onClose, scene, initialScraperId, init
                   <input
                     value={url}
                     onChange={(event) => setUrl(event.target.value)}
-                    placeholder="https://example.com/scene/..."
+                    placeholder="https://example.com/video/..."
                     className="w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-foreground outline-none"
                   />
                 ) : null}
@@ -508,7 +508,7 @@ export function SceneScrapeDialog({ open, onClose, scene, initialScraperId, init
                 <div className="space-y-2">
                   {recentAttempts.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-border bg-card/50 px-3 py-4 text-sm text-muted">
-                      No scrape attempts for this scene yet.
+                      No scrape attempts for this video yet.
                     </div>
                   ) : (
                     recentAttempts.map((attempt) => (
@@ -584,7 +584,7 @@ export function SceneScrapeDialog({ open, onClose, scene, initialScraperId, init
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <div className="text-sm font-semibold text-foreground">Search Matches</div>
-                        <div className="text-xs text-secondary">Choose the candidate that best matches the scene before applying any fields.</div>
+                        <div className="text-xs text-secondary">Choose the candidate that best matches the video before applying any fields.</div>
                       </div>
                       <div className="rounded-full border border-accent/30 bg-accent/10 px-3 py-1 text-xs font-medium text-accent">
                         {candidateResults.length} options
@@ -648,14 +648,14 @@ export function SceneScrapeDialog({ open, onClose, scene, initialScraperId, init
                           <ImageIcon className="h-3.5 w-3.5" />
                           Current
                         </div>
-                        <img src={currentData.image} alt={`${sceneLabel} current cover`} className="mt-3 aspect-video w-full rounded-xl bg-black/30 object-cover" />
+                        <img src={currentData.image} alt={`${videoLabel} current cover`} className="mt-3 aspect-video w-full rounded-xl bg-black/30 object-cover" />
                       </div>
                       <div className="rounded-2xl border border-accent/30 bg-accent/5 p-3">
                         <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.18em] text-accent">
                           <ImageIcon className="h-3.5 w-3.5" />
                           Scraped
                         </div>
-                        <img src={scrapedData.image} alt={`${sceneLabel} scraped cover`} className="mt-3 aspect-video w-full rounded-xl bg-black/30 object-cover" />
+                        <img src={scrapedData.image} alt={`${videoLabel} scraped cover`} className="mt-3 aspect-video w-full rounded-xl bg-black/30 object-cover" />
                       </div>
                     </div>
                   </section>
@@ -783,7 +783,7 @@ export function SceneScrapeDialog({ open, onClose, scene, initialScraperId, init
                   <div>
                     <div className="text-sm font-semibold text-foreground">Apply Defaults</div>
                     <div className="mt-1 text-xs text-secondary">
-                      These options persist for future single-scene and batch scrape runs.
+                      These options persist for future single-video and batch scrape runs.
                     </div>
                     <div className="mt-4 grid gap-3 md:grid-cols-2">
                       <label className="flex items-center gap-2 text-sm text-secondary">
@@ -820,7 +820,7 @@ export function SceneScrapeDialog({ open, onClose, scene, initialScraperId, init
                           onChange={(event) => setPreferences((current) => ({ ...current, markOrganized: event.target.checked }))}
                           className="h-4 w-4 rounded border-border bg-card text-accent focus:ring-0"
                         />
-                        Mark scene organized after apply
+                        Mark video organized after apply
                       </label>
                       <label className="flex items-center gap-2 text-sm text-secondary md:col-span-2">
                         <input

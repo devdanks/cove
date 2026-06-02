@@ -33,7 +33,7 @@ public class Performer : BaseEntity
     public string? ImageOverrideBlobId { get; set; }
 
     // Denormalized relationship counters for hot list/detail reads.
-    public int SceneCount { get; set; }
+    public int VideoCount { get; set; }
     public int ImageCount { get; set; }
     public int GalleryCount { get; set; }
     public int TagCount { get; set; }
@@ -42,7 +42,7 @@ public class Performer : BaseEntity
     public ICollection<PerformerUrl> Urls { get; set; } = [];
     public ICollection<PerformerAlias> Aliases { get; set; } = [];
     public ICollection<PerformerTag> PerformerTags { get; set; } = [];
-    public ICollection<ScenePerformer> ScenePerformers { get; set; } = [];
+    public ICollection<VideoPerformer> VideoPerformers { get; set; } = [];
     public ICollection<ImagePerformer> ImagePerformers { get; set; } = [];
     public ICollection<GalleryPerformer> GalleryPerformers { get; set; } = [];
     public ICollection<PerformerRemoteId> RemoteIds { get; set; } = [];
@@ -80,3 +80,4 @@ public class PerformerRemoteId
     public string RemoteId { get; set; } = string.Empty;
     public Performer? Performer { get; set; }
 }
+

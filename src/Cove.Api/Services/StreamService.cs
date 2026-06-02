@@ -29,17 +29,17 @@ public class StreamService(IServiceScopeFactory scopeFactory, IThumbnailService 
         [".rm"] = "application/vnd.rn-realmedia",
     };
 
-    public async Task<(Stream stream, string contentType, long? fileSize)?> GetSceneStream(int sceneId, CancellationToken ct = default)
+    public async Task<(Stream stream, string contentType, long? fileSize)?> GetVideoStream(int videoId, CancellationToken ct = default)
     {
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
 
-        var sourceSceneId = await ResolveSourceSceneIdAsync(db, sceneId, ct);
-        if (!sourceSceneId.HasValue) return null;
+        var sourceVideoId = await ResolveSourceVideoIdAsync(db, videoId, ct);
+        if (!sourceVideoId.HasValue) return null;
 
         var videoFile = await db.VideoFiles
             .Include(f => f.ParentFolder)
-            .FirstOrDefaultAsync(f => f.SceneId == sourceSceneId.Value, ct);
+            .FirstOrDefaultAsync(f => f.VideoId == sourceVideoId.Value, ct);
 
         if (videoFile == null) return null;
 
@@ -57,37 +57,37 @@ public class StreamService(IServiceScopeFactory scopeFactory, IThumbnailService 
         return (stream, contentType, fileInfo.Length);
     }
 
-    public async Task<(Stream stream, string contentType, bool useLongCache)?> GetSceneScreenshot(int sceneId, double? seconds, CancellationToken ct = default)
+    public async Task<(Stream stream, string contentType, bool useLongCache)?> GetVideoScreenshot(int videoId, double? seconds, CancellationToken ct = default)
     {
         using var scope = scopeFactory?.CreateScope();
         var db = scope?.ServiceProvider.GetService<CoveContext>();
-        var sceneSource = db is null ? new SceneSource(sceneId, null) : await ResolveSceneSourceAsync(db, sceneId, ct);
-        if (sceneSource is null) return null;
+        var videoSource = db is null ? new VideoSource(videoId, null) : await ResolveVideoSourceAsync(db, videoId, ct);
+        if (videoSource is null) return null;
 
-        var sourceSceneId = sceneSource.Value.SourceSceneId;
-        var effectiveSeconds = seconds ?? sceneSource.Value.ClipStartSec;
+        var sourceVideoId = videoSource.Value.SourceVideoId;
+        var effectiveSeconds = seconds ?? videoSource.Value.ClipStartSec;
 
         // For timestamped thumbnails, only serve from cache — never generate on demand.
         // Thumbnail generation is exclusively the job of the generate task.
         if (effectiveSeconds.HasValue)
         {
-            var tsPath = thumbnailService.GetTimestampedThumbnailPath(sourceSceneId, effectiveSeconds.Value);
+            var tsPath = thumbnailService.GetTimestampedThumbnailPath(sourceVideoId, effectiveSeconds.Value);
             if (File.Exists(tsPath))
             {
                 var stream = new FileStream(tsPath, FileMode.Open, FileAccess.Read, FileShare.Read, 8192, useAsync: true);
                 return (stream, "image/jpeg", true);
             }
 
-            var spriteFrame = await TryOpenSpriteFrameAsync(sourceSceneId, effectiveSeconds.Value, ct);
+            var spriteFrame = await TryOpenSpriteFrameAsync(sourceVideoId, effectiveSeconds.Value, ct);
             if (spriteFrame != null) return spriteFrame;
         }
 
         var customCoverBlobId = db is null
             ? null
-            : await db.Scenes
+            : await db.Videos
                 .AsNoTracking()
-                .Where(scene => scene.Id == sceneId)
-                .Select(scene => scene.ImageBlobId)
+                .Where(video => video.Id == videoId)
+                .Select(video => video.ImageBlobId)
                 .FirstOrDefaultAsync(ct);
 
         if (!string.IsNullOrWhiteSpace(customCoverBlobId))
@@ -100,49 +100,49 @@ public class StreamService(IServiceScopeFactory scopeFactory, IThumbnailService 
         }
 
         // Default cover thumbnail (no timestamp) — also only served from cache
-        var thumbPath = await thumbnailService.GetSceneThumbnailPathAsync(sourceSceneId, ct);
+        var thumbPath = await thumbnailService.GetVideoThumbnailPathAsync(sourceVideoId, ct);
         if (thumbPath == null) return null;
 
         var defaultStream = new FileStream(thumbPath, FileMode.Open, FileAccess.Read, FileShare.Read, 8192, useAsync: true);
         return (defaultStream, "image/jpeg", true);
     }
 
-    public async Task<(Stream stream, string contentType, bool useLongCache)?> GetSegmentAnimatedPreview(int sceneId, double seconds, CancellationToken ct = default)
+    public async Task<(Stream stream, string contentType, bool useLongCache)?> GetSegmentAnimatedPreview(int videoId, double seconds, CancellationToken ct = default)
     {
         using var scope = scopeFactory?.CreateScope();
         var db = scope?.ServiceProvider.GetService<CoveContext>();
-        var sourceSceneId = db is null ? sceneId : await ResolveSourceSceneIdAsync(db, sceneId, ct);
-        if (!sourceSceneId.HasValue) return null;
+        var sourceVideoId = db is null ? videoId : await ResolveSourceVideoIdAsync(db, videoId, ct);
+        if (!sourceVideoId.HasValue) return null;
 
-        var previewPath = thumbnailService.GetSegmentAnimatedPreviewPath(sourceSceneId.Value, seconds);
+        var previewPath = thumbnailService.GetSegmentAnimatedPreviewPath(sourceVideoId.Value, seconds);
         if (!File.Exists(previewPath))
-            return await TryOpenSpriteFrameAsync(sourceSceneId.Value, seconds, ct);
+            return await TryOpenSpriteFrameAsync(sourceVideoId.Value, seconds, ct);
 
         Stream stream = new FileStream(previewPath, FileMode.Open, FileAccess.Read, FileShare.Read, 8192, useAsync: true);
         return (stream, "image/webp", true);
     }
 
-    private static async Task<int?> ResolveSourceSceneIdAsync(CoveContext db, int sceneId, CancellationToken ct)
-        => (await ResolveSceneSourceAsync(db, sceneId, ct))?.SourceSceneId;
+    private static async Task<int?> ResolveSourceVideoIdAsync(CoveContext db, int videoId, CancellationToken ct)
+        => (await ResolveVideoSourceAsync(db, videoId, ct))?.SourceVideoId;
 
-    private static async Task<SceneSource?> ResolveSceneSourceAsync(CoveContext db, int sceneId, CancellationToken ct)
+    private static async Task<VideoSource?> ResolveVideoSourceAsync(CoveContext db, int videoId, CancellationToken ct)
     {
-        var scene = await db.Scenes.AsNoTracking()
-            .Where(item => item.Id == sceneId)
-            .Select(item => new { item.Id, item.ParentSceneId, item.ClipStartSec })
+        var video = await db.Videos.AsNoTracking()
+            .Where(item => item.Id == videoId)
+            .Select(item => new { item.Id, item.ParentVideoId, item.ClipStartSec })
             .FirstOrDefaultAsync(ct);
 
-        return scene is null
+        return video is null
             ? null
-            : new SceneSource(scene.ParentSceneId ?? scene.Id, scene.ClipStartSec);
+            : new VideoSource(video.ParentVideoId ?? video.Id, video.ClipStartSec);
     }
 
-    private readonly record struct SceneSource(int SourceSceneId, double? ClipStartSec);
+    private readonly record struct VideoSource(int SourceVideoId, double? ClipStartSec);
 
-    private async Task<(Stream stream, string contentType, bool useLongCache)?> TryOpenSpriteFrameAsync(int sceneId, double seconds, CancellationToken ct)
+    private async Task<(Stream stream, string contentType, bool useLongCache)?> TryOpenSpriteFrameAsync(int videoId, double seconds, CancellationToken ct)
     {
-        var vttPath = thumbnailService.GetSpriteVttPath(sceneId);
-        var spritePath = thumbnailService.GetSpritePath(sceneId);
+        var vttPath = thumbnailService.GetSpriteVttPath(videoId);
+        var spritePath = thumbnailService.GetSpritePath(videoId);
         if (!File.Exists(vttPath) || !File.Exists(spritePath)) return null;
 
         var frame = await FindSpriteFrameAsync(vttPath, seconds, ct);
@@ -304,3 +304,4 @@ public class StreamService(IServiceScopeFactory scopeFactory, IThumbnailService 
     private readonly record struct SpriteFrame(double StartSeconds, double EndSeconds, Rectangle Bounds);
     private sealed record SpriteFrameCache(DateTime LastWriteTimeUtc, long Length, IReadOnlyList<SpriteFrame> Frames);
 }
+

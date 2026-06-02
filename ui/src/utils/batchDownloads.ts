@@ -1,10 +1,10 @@
 import { system, type GenerateOptions } from "../api/client";
-import { loadScrapeApplyPreferences } from "../components/sceneScrapeUtils";
+import { loadScrapeApplyPreferences } from "../components/videoScrapeUtils";
 
-export type DownloadSelectionEntity = "Scene" | "Image" | "Gallery" | "Audio" | "Text";
+export type DownloadSelectionEntity = "Video" | "Image" | "Gallery" | "Audio" | "Text";
 
 export interface BatchDownloadOptions {
-  scrapeScenes?: boolean;
+  scrapeVideos?: boolean;
   scrapeMetadata?: boolean;
   createMissingTags?: boolean;
   createMissingPerformers?: boolean;
@@ -54,7 +54,7 @@ export const DEFAULT_BATCH_DOWNLOAD_GENERATE_OPTIONS: GenerateOptions = {
 };
 
 export const DEFAULT_BATCH_DOWNLOAD_OPTIONS: BatchDownloadOptions = {
-  scrapeScenes: false,
+  scrapeVideos: false,
   allowDuplicateDownloads: false,
   generate: DEFAULT_BATCH_DOWNLOAD_GENERATE_OPTIONS,
 };
@@ -89,10 +89,10 @@ export function saveStoredBatchDownloadOptions(storageKey: string, options: Batc
 
 export function normalizeBatchDownloadOptions(options: BatchDownloadOptions = DEFAULT_BATCH_DOWNLOAD_OPTIONS): BatchDownloadOptions {
   const preferences = loadScrapeApplyPreferences();
-  const scrapeMetadata = !!(options.scrapeMetadata ?? options.scrapeScenes);
+  const scrapeMetadata = !!(options.scrapeMetadata ?? options.scrapeVideos);
 
   return {
-    scrapeScenes: scrapeMetadata,
+    scrapeVideos: scrapeMetadata,
     scrapeMetadata,
     createMissingTags: options.createMissingTags ?? preferences.createMissingTags,
     createMissingPerformers: options.createMissingPerformers ?? preferences.createMissingPerformers,
@@ -168,7 +168,7 @@ export async function queueImportedUrlDownloads(
 
   const normalizedOptions = normalizeBatchDownloadOptions({
     ...options,
-    scrapeMetadata: options.scrapeMetadata ?? options.scrapeScenes ?? options.autoApplyMetadata,
+    scrapeMetadata: options.scrapeMetadata ?? options.scrapeVideos ?? options.autoApplyMetadata,
   });
 
   for (const sourceUrl of normalizeUrlLines(urls)) {
@@ -277,7 +277,7 @@ function deriveImportedItemTitle(url: string) {
 function buildBatchFollowUp(entity: DownloadSelectionEntity, options: BatchDownloadOptions) {
   const applyMetadata = entity !== "Gallery" && !!options.scrapeMetadata;
   return {
-    scrapeScenes: entity === "Scene" ? applyMetadata : false,
+    scrapeVideos: entity === "Video" ? applyMetadata : false,
     autoApplyMetadata: applyMetadata,
     createMissingTags: !!options.createMissingTags,
     createMissingPerformers: !!options.createMissingPerformers,

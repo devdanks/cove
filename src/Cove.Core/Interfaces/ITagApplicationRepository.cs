@@ -13,7 +13,7 @@ public sealed class TagApplicationFilter
 
 /// <summary>
 /// Generic repository for tag application CRUD, including cleanup of orphaned
-/// scene/image tag links when AI-sourced tag applications are removed.
+/// video/image tag links when AI-sourced tag applications are removed.
 /// Available to any extension that writes AI-generated or automated tag associations.
 /// </summary>
 public interface ITagApplicationRepository
@@ -24,7 +24,7 @@ public interface ITagApplicationRepository
 
     /// <summary>
     /// After removing tag applications for <paramref name="entityIds"/>, removes any
-    /// SceneTag or ImageTag join rows whose tag has no remaining application for that entity.
+    /// VideoTag or ImageTag join rows whose tag has no remaining application for that entity.
     /// Call this before SaveChangesAsync when replacing AI-generated tag applications.
     /// </summary>
     Task RemoveOrphanedTagLinksAsync(AffinityHostType hostType,
@@ -32,3 +32,4 @@ public interface ITagApplicationRepository
 
     Task<int> SaveChangesAsync(CancellationToken ct = default);
 }
+

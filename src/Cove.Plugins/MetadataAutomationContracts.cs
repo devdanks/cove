@@ -29,7 +29,7 @@ public enum ScraperRiskLevel
 
 public enum ScraperEntity
 {
-    Scene,
+    Video,
     Performer,
     Gallery,
     Image,
@@ -83,7 +83,7 @@ public interface IScraperHost
 {
     IHttpClientFactory HttpClients { get; }
     ILogger CreateLogger(string categoryName);
-    Task<SceneScrapeInput?> GetSceneAsync(int sceneId, CancellationToken ct = default);
+    Task<VideoScrapeInput?> GetVideoAsync(int videoId, CancellationToken ct = default);
     Task<PerformerScrapeInput?> GetPerformerAsync(int performerId, CancellationToken ct = default);
     Task<GalleryScrapeInput?> GetGalleryAsync(int galleryId, CancellationToken ct = default);
     Task<ImageScrapeInput?> GetImageAsync(int imageId, CancellationToken ct = default);
@@ -98,11 +98,11 @@ public interface IScraperProvider : IExtension
 {
     IReadOnlyList<ScraperDescriptor> GetScrapers();
 
-    Task<ScrapedSceneDto?> ScrapeSceneAsync(ScraperRequest<SceneScrapeInput> request, CancellationToken ct)
-        => Task.FromResult<ScrapedSceneDto?>(null);
+    Task<ScrapedVideoDto?> ScrapeVideoAsync(ScraperRequest<VideoScrapeInput> request, CancellationToken ct)
+        => Task.FromResult<ScrapedVideoDto?>(null);
 
-    Task<IReadOnlyList<ScrapedSceneDto>> SearchScenesAsync(ScraperRequest<string> request, CancellationToken ct)
-        => Task.FromResult<IReadOnlyList<ScrapedSceneDto>>([]);
+    Task<IReadOnlyList<ScrapedVideoDto>> SearchVideosAsync(ScraperRequest<string> request, CancellationToken ct)
+        => Task.FromResult<IReadOnlyList<ScrapedVideoDto>>([]);
 
     Task<ScrapedPerformerDto?> ScrapePerformerAsync(ScraperRequest<PerformerScrapeInput> request, CancellationToken ct)
         => Task.FromResult<ScrapedPerformerDto?>(null);
@@ -153,7 +153,7 @@ public enum DownloaderCapabilities
 
 public enum DownloaderEntity
 {
-    Scene,
+    Video,
     Image,
     Gallery,
     Audio,
@@ -191,7 +191,7 @@ public sealed record DownloaderResult(
     string LocalPath,
     string? OriginalFilename = null,
     IReadOnlyDictionary<string, string>? Headers = null,
-    ScrapedSceneDto? InlineSceneMetadata = null,
+    ScrapedVideoDto? InlineVideoMetadata = null,
     ScrapedGalleryDto? InlineGalleryMetadata = null,
     ScrapedImageDto? InlineImageMetadata = null);
 
@@ -222,7 +222,7 @@ public interface IDownloaderProvider : IExtension
 
 public enum AutoTagContentType
 {
-    Scene,
+    Video,
     Image,
     Gallery,
 }

@@ -18,29 +18,29 @@ public class EntityDetailCountControllerTests
         await using var context = CreateContext();
 
         var performer = new Performer { Name = "Performer" };
-        var scene = new Scene { Title = "Scene" };
+        var video = new Video { Title = "Video" };
         var image = new Image { Title = "Image" };
         var gallery = new Gallery { Title = "Gallery" };
         var group = new Group { Name = "Group" };
-        context.AddRange(performer, scene, image, gallery, group);
+        context.AddRange(performer, video, image, gallery, group);
         await context.SaveChangesAsync();
 
         context.AddRange(
-            new ScenePerformer { SceneId = scene.Id, PerformerId = performer.Id },
+            new VideoPerformer { VideoId = video.Id, PerformerId = performer.Id },
             new ImagePerformer { ImageId = image.Id, PerformerId = performer.Id },
             new GalleryPerformer { GalleryId = gallery.Id, PerformerId = performer.Id },
             new GroupItem
             {
                 GroupId = group.Id,
-                Kind = GroupItemKind.Scene,
-                HostType = "scene",
-                HostId = scene.Id,
-                SceneId = scene.Id,
+                Kind = GroupItemKind.Video,
+                HostType = "video",
+                HostId = video.Id,
+                VideoId = video.Id,
             });
         await context.SaveChangesAsync();
 
         var storedPerformer = await context.Performers.SingleAsync(candidate => candidate.Id == performer.Id);
-        storedPerformer.SceneCount = 0;
+        storedPerformer.VideoCount = 0;
         storedPerformer.ImageCount = 0;
         storedPerformer.GalleryCount = 0;
         await context.SaveChangesAsync();
@@ -56,7 +56,7 @@ public class EntityDetailCountControllerTests
         var detailResult = await controller.GetById(performer.Id, CancellationToken.None);
         var detail = Assert.IsType<OkObjectResult>(detailResult.Result).Value as PerformerDto;
         Assert.NotNull(detail);
-        Assert.Equal(1, detail!.SceneCount);
+        Assert.Equal(1, detail!.VideoCount);
         Assert.Equal(1, detail.ImageCount);
         Assert.Equal(1, detail.GalleryCount);
         Assert.Equal(1, detail.GroupCount);
@@ -69,22 +69,22 @@ public class EntityDetailCountControllerTests
 
         var studio = new Studio { Name = "Studio" };
         var childStudio = new Studio { Name = "Child", Parent = studio };
-        var scene = new Scene { Title = "Scene", Studio = studio };
+        var video = new Video { Title = "Video", Studio = studio };
         var image = new Image { Title = "Image", Studio = studio };
         var gallery = new Gallery { Title = "Gallery", Studio = studio };
         var group = new Group { Name = "Group", Studio = studio };
         var performerA = new Performer { Name = "A" };
         var performerB = new Performer { Name = "B" };
-        context.AddRange(studio, childStudio, scene, image, gallery, group, performerA, performerB);
+        context.AddRange(studio, childStudio, video, image, gallery, group, performerA, performerB);
         await context.SaveChangesAsync();
 
         context.AddRange(
-            new ScenePerformer { SceneId = scene.Id, PerformerId = performerA.Id },
-            new ScenePerformer { SceneId = scene.Id, PerformerId = performerB.Id });
+            new VideoPerformer { VideoId = video.Id, PerformerId = performerA.Id },
+            new VideoPerformer { VideoId = video.Id, PerformerId = performerB.Id });
         await context.SaveChangesAsync();
 
         var storedStudio = await context.Studios.SingleAsync(candidate => candidate.Id == studio.Id);
-        storedStudio.SceneCount = 0;
+        storedStudio.VideoCount = 0;
         storedStudio.ImageCount = 0;
         storedStudio.GalleryCount = 0;
         storedStudio.GroupCount = 0;
@@ -102,7 +102,7 @@ public class EntityDetailCountControllerTests
         var detailResult = await controller.GetById(studio.Id, CancellationToken.None);
         var detail = Assert.IsType<OkObjectResult>(detailResult.Result).Value as StudioDto;
         Assert.NotNull(detail);
-        Assert.Equal(1, detail!.SceneCount);
+        Assert.Equal(1, detail!.VideoCount);
         Assert.Equal(1, detail.ImageCount);
         Assert.Equal(1, detail.GalleryCount);
         Assert.Equal(1, detail.GroupCount);
@@ -118,19 +118,19 @@ public class EntityDetailCountControllerTests
         var gallery = new Gallery { Title = "Gallery" };
         var imageA = new Image { Title = "Image A" };
         var imageB = new Image { Title = "Image B" };
-        var scene = new Scene { Title = "Scene" };
-        context.AddRange(gallery, imageA, imageB, scene);
+        var video = new Video { Title = "Video" };
+        context.AddRange(gallery, imageA, imageB, video);
         await context.SaveChangesAsync();
 
         context.AddRange(
             new ImageGallery { GalleryId = gallery.Id, ImageId = imageA.Id },
             new ImageGallery { GalleryId = gallery.Id, ImageId = imageB.Id },
-            new SceneGallery { GalleryId = gallery.Id, SceneId = scene.Id });
+            new VideoGallery { GalleryId = gallery.Id, VideoId = video.Id });
         await context.SaveChangesAsync();
 
         var storedGallery = await context.Galleries.SingleAsync(candidate => candidate.Id == gallery.Id);
         storedGallery.ImageCount = 0;
-        storedGallery.SceneCount = 0;
+        storedGallery.VideoCount = 0;
         await context.SaveChangesAsync();
 
         var controller = new GalleriesController(
@@ -146,13 +146,13 @@ public class EntityDetailCountControllerTests
         var list = Assert.IsType<PaginatedResponse<GalleryDto>>(Assert.IsType<OkObjectResult>(listResult.Result).Value);
         var listGallery = Assert.Single(list.Items);
         Assert.Equal(2, listGallery.ImageCount);
-        Assert.Equal(1, listGallery.SceneCount);
+        Assert.Equal(1, listGallery.VideoCount);
         Assert.NotNull(listGallery.CoverPath);
 
         var detailResult = await controller.GetById(gallery.Id, CancellationToken.None);
         var detail = Assert.IsType<GalleryDto>(Assert.IsType<OkObjectResult>(detailResult.Result).Value);
         Assert.Equal(2, detail.ImageCount);
-        Assert.Equal(1, detail.SceneCount);
+        Assert.Equal(1, detail.VideoCount);
         Assert.NotNull(detail.CoverPath);
     }
 

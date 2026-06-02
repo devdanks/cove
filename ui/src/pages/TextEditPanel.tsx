@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { texts } from "../api/client";
-import type { SceneGroupInput, TextDocument, TextUpdate } from "../api/types";
+import type { VideoGroupInput, TextDocument, TextUpdate } from "../api/types";
 import { Field } from "../components/EditModal";
 import { PerformerContextTagEditor, buildPerformerContextTagIds, syncPerformerContextTags } from "../components/PerformerContextTags";
 import { CustomFieldsEditor, buildTagProvenanceById } from "../components/shared";
@@ -28,7 +28,7 @@ export function TextEditPanel({ text, onSaved }: Props) {
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>(text.tags.map((tag) => tag.id));
   const [selectedPerformerIds, setSelectedPerformerIds] = useState<number[]>(text.performers.map((performer) => performer.id));
   const [contextTagIdsByPerformer, setContextTagIdsByPerformer] = useState<Record<number, number[]>>(() => buildPerformerContextTagIds(text.contextTagApplications));
-  const [selectedGroups, setSelectedGroups] = useState<SceneGroupInput[]>(text.groups.map((group) => ({ groupId: group.id, sceneIndex: 0 })));
+  const [selectedGroups, setSelectedGroups] = useState<VideoGroupInput[]>(text.groups.map((group) => ({ groupId: group.id, videoIndex: 0 })));
   useEffect(() => {
     setTitle(text.title ?? "");
     setCode(text.code ?? "");
@@ -40,7 +40,7 @@ export function TextEditPanel({ text, onSaved }: Props) {
     setSelectedTagIds(text.tags.map((tag) => tag.id));
     setSelectedPerformerIds(text.performers.map((performer) => performer.id));
     setContextTagIdsByPerformer(buildPerformerContextTagIds(text.contextTagApplications));
-    setSelectedGroups(text.groups.map((group) => ({ groupId: group.id, sceneIndex: 0 })));
+    setSelectedGroups(text.groups.map((group) => ({ groupId: group.id, videoIndex: 0 })));
   }, [text]);
 
   const mutation = useMutation({
@@ -57,7 +57,7 @@ export function TextEditPanel({ text, onSaved }: Props) {
   });
 
   const setSelectedGroupIds = (groupIds: number[]) => {
-    setSelectedGroups(groupIds.map((groupId) => selectedGroups.find((group) => group.groupId === groupId) ?? { groupId, sceneIndex: 0 }));
+    setSelectedGroups(groupIds.map((groupId) => selectedGroups.find((group) => group.groupId === groupId) ?? { groupId, videoIndex: 0 }));
   };
   const tagProvenanceById = buildTagProvenanceById(text.tags, text.fieldProvenance);
 

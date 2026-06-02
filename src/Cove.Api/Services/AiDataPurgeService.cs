@@ -96,9 +96,9 @@ public sealed class AiDataPurgeService(
             : [];
         IReadOnlyCollection<int>? excludedFaceIds = faceIds.Count > 0 ? faceIds : null;
         var affectedRunKeys = await CollectAffectedRunKeysAsync(selector, runModels, faceIds, cancellationToken);
-        var affectedSceneIds = dryRun
+        var affectedVideoIds = dryRun
             ? []
-            : await CollectAffectedSceneIdsAsync(selector, runModels, faceIds, cancellationToken);
+            : await CollectAffectedVideoIdsAsync(selector, runModels, faceIds, cancellationToken);
         affectedRunKeys.UnionWith(await CollectSelectedAiRunKeysAsync(selector, cancellationToken));
 
         if (faceIds.Count > 0)
@@ -119,37 +119,37 @@ public sealed class AiDataPurgeService(
         if (affectedRunKeys.Count > 0)
             AddRemovedCount(removed, "aiRun", await PurgeUnreferencedAiRunsAsync(affectedRunKeys, dryRun, cancellationToken));
 
-        if (!dryRun && affectedSceneIds.Count > 0 && _segmentSpanResolver is not null)
+        if (!dryRun && affectedVideoIds.Count > 0 && _segmentSpanResolver is not null)
         {
-            foreach (var sceneId in affectedSceneIds)
+            foreach (var videoId in affectedVideoIds)
             {
-                _segmentSpanResolver.EvictScene(sceneId);
+                _segmentSpanResolver.EvictVideo(videoId);
             }
         }
 
         return new AiDataPurgeResultDto(removed);
     }
 
-    private async Task<HashSet<int>> CollectAffectedSceneIdsAsync(
+    private async Task<HashSet<int>> CollectAffectedVideoIdsAsync(
         AiDataSelector selector,
         IReadOnlyDictionary<string, string?> runModels,
         IReadOnlyCollection<int> faceIds,
         CancellationToken cancellationToken)
     {
-        var sceneIds = new HashSet<int>();
+        var videoIds = new HashSet<int>();
 
         if (selector.IncludesKind("segment"))
         {
-            var segmentCandidates = await QuerySceneSegmentCandidatesAsync(selector, runModels, cancellationToken);
-            sceneIds.UnionWith(segmentCandidates.Select(candidate => candidate.HostId));
+            var segmentCandidates = await QueryVideoSegmentCandidatesAsync(selector, runModels, cancellationToken);
+            videoIds.UnionWith(segmentCandidates.Select(candidate => candidate.HostId));
         }
 
         if (faceIds.Count > 0)
         {
             var faceIdArray = faceIds.ToArray();
-            var faceSegmentSceneIds = await _db.Segments
+            var faceSegmentVideoIds = await _db.Segments
                 .AsNoTracking()
-                .Where(segment => segment.HostType == SegmentHostType.Scene
+                .Where(segment => segment.HostType == SegmentHostType.Video
                     && segment.RefId.HasValue
                     && segment.Kind != null
                     && segment.Kind.ToLower() == "face"
@@ -157,25 +157,25 @@ public sealed class AiDataPurgeService(
                 .Select(segment => segment.HostId)
                 .Distinct()
                 .ToListAsync(cancellationToken);
-            sceneIds.UnionWith(faceSegmentSceneIds);
+            videoIds.UnionWith(faceSegmentVideoIds);
         }
 
-        return sceneIds;
+        return videoIds;
     }
 
-    private async Task<List<SceneSegmentCandidate>> QuerySceneSegmentCandidatesAsync(
+    private async Task<List<VideoSegmentCandidate>> QueryVideoSegmentCandidatesAsync(
         AiDataSelector selector,
         IReadOnlyDictionary<string, string?> runModels,
         CancellationToken cancellationToken)
     {
-        if (TryParseSegmentHostType(selector.HostType, out var hostType) && hostType != SegmentHostType.Scene)
+        if (TryParseSegmentHostType(selector.HostType, out var hostType) && hostType != SegmentHostType.Video)
         {
             return [];
         }
 
         var query = _db.ReadSet<Segment>()
             .AsNoTracking()
-            .Where(segment => segment.HostType == SegmentHostType.Scene);
+            .Where(segment => segment.HostType == SegmentHostType.Video);
 
         if (!string.IsNullOrWhiteSpace(selector.SourceKey))
             query = query.Where(segment => segment.SourceKey == selector.SourceKey);
@@ -187,7 +187,7 @@ public sealed class AiDataPurgeService(
             query = query.Where(segment => segment.HostId == selector.HostId.Value);
 
         var rows = await query
-            .Select(segment => new SceneSegmentCandidate(
+            .Select(segment => new VideoSegmentCandidate(
                 segment.HostId,
                 segment.SourceRunId,
                 ExtractModelKey(segment.Payload)))
@@ -818,24 +818,24 @@ public sealed class AiDataPurgeService(
             return;
         }
 
-        var scenePairs = affectedPairs.Where(pair => pair.HostType == AffinityHostType.Scene).ToArray();
-        if (scenePairs.Length > 0)
+        var videoPairs = affectedPairs.Where(pair => pair.HostType == AffinityHostType.Video).ToArray();
+        if (videoPairs.Length > 0)
         {
-            var sceneIds = scenePairs.Select(pair => pair.HostId).Distinct().ToArray();
-            var sceneTags = await _db.Set<SceneTag>()
-                .Where(sceneTag => sceneIds.Contains(sceneTag.SceneId))
+            var videoIds = videoPairs.Select(pair => pair.HostId).Distinct().ToArray();
+            var videoTags = await _db.Set<VideoTag>()
+                .Where(videoTag => videoIds.Contains(videoTag.VideoId))
                 .ToListAsync(cancellationToken);
             var remaining = await _db.TagApplications
-                .Where(application => application.HostType == AffinityHostType.Scene && sceneIds.Contains(application.HostId))
+                .Where(application => application.HostType == AffinityHostType.Video && videoIds.Contains(application.HostId))
                 .Select(application => new TagHostPair(application.HostType, application.HostId, application.TagId))
                 .Distinct()
                 .ToListAsync(cancellationToken);
             var remainingSet = remaining.ToHashSet();
-            var orphaned = scenePairs.Where(pair => !remainingSet.Contains(pair)).ToHashSet();
-            var toRemove = sceneTags.Where(sceneTag => orphaned.Contains(new TagHostPair(AffinityHostType.Scene, sceneTag.SceneId, sceneTag.TagId))).ToArray();
+            var orphaned = videoPairs.Where(pair => !remainingSet.Contains(pair)).ToHashSet();
+            var toRemove = videoTags.Where(videoTag => orphaned.Contains(new TagHostPair(AffinityHostType.Video, videoTag.VideoId, videoTag.TagId))).ToArray();
             if (toRemove.Length > 0)
             {
-                _db.Set<SceneTag>().RemoveRange(toRemove);
+                _db.Set<VideoTag>().RemoveRange(toRemove);
                 await _db.SaveChangesAsync(cancellationToken);
             }
         }
@@ -1223,7 +1223,7 @@ public sealed class AiDataPurgeService(
 
     private sealed record SegmentCandidate(int Id, int? FaceId, string? SourceRunId, string? Model);
 
-    private sealed record SceneSegmentCandidate(int HostId, string? SourceRunId, string? Model);
+    private sealed record VideoSegmentCandidate(int HostId, string? SourceRunId, string? Model);
 
     private sealed record FaceAppearanceCandidate(int FaceId, string? SourceRunId);
 

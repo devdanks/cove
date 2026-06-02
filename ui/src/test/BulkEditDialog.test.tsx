@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { BulkEditDialog, GROUP_BULK_FIELDS, SCENE_BULK_FIELDS } from "../components/BulkEditDialog";
+import { BulkEditDialog, GROUP_BULK_FIELDS, VIDEO_BULK_FIELDS } from "../components/BulkEditDialog";
 
 const mocks = vi.hoisted(() => ({
   tagsFind: vi.fn(),
@@ -53,7 +53,7 @@ describe("BulkEditDialog", () => {
     mocks.groupsFind.mockResolvedValue({ items: [{ id: 5, name: "Series One" }] });
   });
 
-  it("posts corrected mode keys and scene group payloads", async () => {
+  it("posts corrected mode keys and video group payloads", async () => {
     const user = userEvent.setup();
     const onApply = vi.fn();
 
@@ -61,9 +61,9 @@ describe("BulkEditDialog", () => {
       <BulkEditDialog
         open
         onClose={vi.fn()}
-        title="Edit Scenes"
+        title="Edit Videos"
         selectedCount={2}
-        fields={SCENE_BULK_FIELDS}
+        fields={VIDEO_BULK_FIELDS}
         onApply={onApply}
       />,
     );
@@ -86,7 +86,7 @@ describe("BulkEditDialog", () => {
     expect(onApply).toHaveBeenCalledWith({
       tagIds: [1],
       tagMode: "SET",
-      groupIds: [{ groupId: 5, sceneIndex: 0 }],
+      groupIds: [{ groupId: 5, videoIndex: 0 }],
       groupMode: "SET",
     });
   });
@@ -127,9 +127,9 @@ describe("BulkEditDialog", () => {
       <BulkEditDialog
         open
         onClose={vi.fn()}
-        title="Edit Scenes"
+        title="Edit Videos"
         selectedCount={2}
-        fields={SCENE_BULK_FIELDS}
+        fields={VIDEO_BULK_FIELDS}
         onApply={onApply}
       />,
     );

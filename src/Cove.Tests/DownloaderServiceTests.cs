@@ -64,7 +64,7 @@ public class DownloaderServiceTests
         Assert.Equal(2, downloaders.Count);
         var downloader = Assert.Single(downloaders, item => item.Id == "tests.fake-downloader/example");
         Assert.Equal("tests.fake-downloader/example", downloader.Id);
-        Assert.Equal("Scene", downloader.SupportedEntity);
+        Assert.Equal("Video", downloader.SupportedEntity);
         Assert.Contains("MultiQuality", downloader.Capabilities);
 
         var match = Assert.Single(matches);
@@ -93,7 +93,7 @@ public class DownloaderServiceTests
             {
                 Assert.Equal("tests.fake-downloader/example", match.DownloaderId);
                 Assert.Equal("Example Download", match.DownloaderName);
-                Assert.Equal("Scene", match.SupportedEntity);
+                Assert.Equal("Video", match.SupportedEntity);
             });
     }
 
@@ -181,7 +181,7 @@ public class DownloaderServiceTests
             new DownloaderRequest(
                 "tests.fake-downloader/example",
                 "https://example.com/watch/456",
-                DownloaderEntity.Scene,
+                DownloaderEntity.Video,
                 new DownloaderPermissions(["example.com"]),
                 "hd"),
             progress: null,
@@ -190,11 +190,11 @@ public class DownloaderServiceTests
         Assert.NotNull(result);
         Assert.True(Path.IsPathRooted(result!.LocalPath));
         Assert.True(File.Exists(result.LocalPath));
-        Assert.Equal("downloaded-scene.mp4", Path.GetFileName(result.LocalPath));
+        Assert.Equal("downloaded-video.mp4", Path.GetFileName(result.LocalPath));
     }
 
     [Fact]
-    public async Task DownloadAndIngestAsync_MovesFileIntoLibraryAndDelegatesSceneImport()
+    public async Task DownloadAndIngestAsync_MovesFileIntoLibraryAndDelegatesVideoImport()
     {
         var libraryRoot = Path.Combine(Path.GetTempPath(), "cove-downloader-tests", Guid.NewGuid().ToString("n"));
         Directory.CreateDirectory(libraryRoot);
@@ -214,11 +214,11 @@ public class DownloaderServiceTests
 
         try
         {
-            var (result, importedSceneId) = await service.DownloadAndIngestAsync(
+            var (result, importedVideoId) = await service.DownloadAndIngestAsync(
                 new DownloaderRequest(
                     "tests.fake-downloader/example",
                     "https://example.com/watch/789",
-                    DownloaderEntity.Scene,
+                    DownloaderEntity.Video,
                     new DownloaderPermissions(["example.com"]),
                     "hd"),
                 entityId: 42,
@@ -226,13 +226,13 @@ public class DownloaderServiceTests
                 CancellationToken.None);
 
             Assert.NotNull(result);
-            Assert.Equal(42, importedSceneId);
+            Assert.Equal(42, importedVideoId);
             Assert.NotNull(scanService.ImportedPath);
             Assert.True(File.Exists(result!.LocalPath));
             Assert.Equal(result.LocalPath, scanService.ImportedPath);
-            Assert.Equal(42, scanService.SceneId);
+            Assert.Equal(42, scanService.VideoId);
             Assert.StartsWith(
-                Path.Combine(Path.GetFullPath(libraryRoot), "_downloads", "scenes"),
+                Path.Combine(Path.GetFullPath(libraryRoot), "_downloads", "videos"),
                 result.LocalPath,
                 StringComparison.OrdinalIgnoreCase);
         }
@@ -245,13 +245,13 @@ public class DownloaderServiceTests
     }
 
     [Fact]
-    public async Task DownloadAndIngestAsync_AutoAppliesInlineSceneMetadataWhenRequested()
+    public async Task DownloadAndIngestAsync_AutoAppliesInlineVideoMetadataWhenRequested()
     {
         var libraryRoot = Path.Combine(Path.GetTempPath(), "cove-downloader-tests", Guid.NewGuid().ToString("n"));
         Directory.CreateDirectory(libraryRoot);
 
         var scanService = new FakeScanService();
-        var metadataApplyService = new FakeSceneMetadataApplyService();
+        var metadataApplyService = new FakeVideoMetadataApplyService();
         var service = CreateService(
             out var services,
             new CoveConfiguration
@@ -266,11 +266,11 @@ public class DownloaderServiceTests
 
         try
         {
-            var (_, importedSceneId) = await service.DownloadAndIngestAsync(
+            var (_, importedVideoId) = await service.DownloadAndIngestAsync(
                 new DownloaderRequest(
                     "tests.fake-downloader/example",
                     "https://example.com/watch/999",
-                    DownloaderEntity.Scene,
+                    DownloaderEntity.Video,
                     new DownloaderPermissions(["example.com"]),
                     "hd"),
                 entityId: 42,
@@ -278,10 +278,10 @@ public class DownloaderServiceTests
                 CancellationToken.None,
                 autoApplyMetadata: true);
 
-            Assert.Equal(42, importedSceneId);
-            Assert.Equal(42, metadataApplyService.SceneId);
+            Assert.Equal(42, importedVideoId);
+            Assert.Equal(42, metadataApplyService.VideoId);
             Assert.NotNull(metadataApplyService.Metadata);
-            Assert.Equal("Downloaded Scene", metadataApplyService.Metadata!.Title);
+            Assert.Equal("Downloaded Video", metadataApplyService.Metadata!.Title);
             Assert.Equal("https://example.com/watch/999", Assert.Single(metadataApplyService.Metadata.Urls));
         }
         finally
@@ -293,9 +293,9 @@ public class DownloaderServiceTests
     }
 
     [Fact]
-    public void ConvertScrapeResultToSceneMetadata_ReturnsMetadataWhenOnlyUrlsArePresent()
+    public void ConvertScrapeResultToVideoMetadata_ReturnsMetadataWhenOnlyUrlsArePresent()
     {
-        var metadata = DownloaderService.ConvertScrapeResultToSceneMetadata(
+        var metadata = DownloaderService.ConvertScrapeResultToVideoMetadata(
             new Dictionary<string, object>
             {
                 ["urls"] = new[]
@@ -486,7 +486,7 @@ public class DownloaderServiceTests
                 new DownloaderRequest(
                     "tests.fake-downloader/example",
                     "https://example.com/watch/override",
-                    DownloaderEntity.Scene,
+                    DownloaderEntity.Video,
                     new DownloaderPermissions(["example.com"]),
                     "hd"),
                 entityId: null,
@@ -515,7 +515,7 @@ public class DownloaderServiceTests
     {
         var libraryRoot = Path.Combine(Path.GetTempPath(), "cove-downloader-tests", Guid.NewGuid().ToString("n"));
         Directory.CreateDirectory(libraryRoot);
-        Scene? existingScene = null;
+        Video? existingVideo = null;
         var scanService = new FakeScanService();
 
         var service = CreateService(
@@ -527,16 +527,16 @@ public class DownloaderServiceTests
             scanService,
             seedDatabase: db =>
             {
-                existingScene = new Scene
+                existingVideo = new Video
                 {
-                    Title = "Existing Scene",
+                    Title = "Existing Video",
                 };
 
-                db.Scenes.Add(existingScene);
-                db.Set<SceneUrl>().Add(new SceneUrl { Scene = existingScene, Url = "https://example.com/watch/existing" });
+                db.Videos.Add(existingVideo);
+                db.Set<VideoUrl>().Add(new VideoUrl { Video = existingVideo, Url = "https://example.com/watch/existing" });
                 db.VideoFiles.Add(new VideoFile
                 {
-                    Scene = existingScene,
+                    Video = existingVideo,
                     Basename = "existing.mp4",
                     ParentFolder = new Folder { Path = "C:\\library" },
                 });
@@ -548,10 +548,10 @@ public class DownloaderServiceTests
                 new DownloaderRequest(
                     "tests.fake-downloader/example",
                     "https://example.com/watch/new-url",
-                    DownloaderEntity.Scene,
+                    DownloaderEntity.Video,
                     new DownloaderPermissions(["example.com"]),
                     "hd"),
-                entityId: existingScene!.Id,
+                entityId: existingVideo!.Id,
                 progress: null,
                 CancellationToken.None));
 
@@ -570,7 +570,7 @@ public class DownloaderServiceTests
     {
         var libraryRoot = Path.Combine(Path.GetTempPath(), "cove-downloader-tests", Guid.NewGuid().ToString("n"));
         Directory.CreateDirectory(libraryRoot);
-        Scene? existingScene = null;
+        Video? existingVideo = null;
         var scanService = new FakeScanService();
 
         var service = CreateService(
@@ -582,16 +582,16 @@ public class DownloaderServiceTests
             scanService,
             seedDatabase: db =>
             {
-                existingScene = new Scene
+                existingVideo = new Video
                 {
-                    Title = "Downloaded Scene",
+                    Title = "Downloaded Video",
                 };
 
-                db.Scenes.Add(existingScene);
-                db.Set<SceneUrl>().Add(new SceneUrl { Scene = existingScene, Url = "https://example.com/watch/existing" });
+                db.Videos.Add(existingVideo);
+                db.Set<VideoUrl>().Add(new VideoUrl { Video = existingVideo, Url = "https://example.com/watch/existing" });
                 db.VideoFiles.Add(new VideoFile
                 {
-                    Scene = existingScene,
+                    Video = existingVideo,
                     Basename = "existing.mp4",
                     ParentFolder = new Folder { Path = "C:\\library" },
                 });
@@ -603,7 +603,7 @@ public class DownloaderServiceTests
                 new DownloaderRequest(
                     "tests.fake-downloader/example",
                     "https://example.com/watch/existing",
-                    DownloaderEntity.Scene,
+                    DownloaderEntity.Video,
                     new DownloaderPermissions(["example.com"]),
                     "hd"),
                 entityId: null,
@@ -621,7 +621,7 @@ public class DownloaderServiceTests
     }
 
     [Fact]
-    public async Task DownloadAndIngestAsync_ThrowsWhenCanonicalSceneUrlAlreadyExists()
+    public async Task DownloadAndIngestAsync_ThrowsWhenCanonicalVideoUrlAlreadyExists()
     {
         var libraryRoot = Path.Combine(Path.GetTempPath(), "cove-downloader-tests", Guid.NewGuid().ToString("n"));
         Directory.CreateDirectory(libraryRoot);
@@ -636,13 +636,13 @@ public class DownloaderServiceTests
             scanService,
             seedDatabase: db =>
             {
-                var existingScene = new Scene
+                var existingVideo = new Video
                 {
-                    Title = "Canonical Scene",
+                    Title = "Canonical Video",
                 };
 
-                db.Scenes.Add(existingScene);
-                db.Set<SceneUrl>().Add(new SceneUrl { Scene = existingScene, Url = "https://www.example.com/watch/existing/?b=Two&utm_source=feed&a=One#ignored" });
+                db.Videos.Add(existingVideo);
+                db.Set<VideoUrl>().Add(new VideoUrl { Video = existingVideo, Url = "https://www.example.com/watch/existing/?b=Two&utm_source=feed&a=One#ignored" });
             });
 
         try
@@ -651,7 +651,7 @@ public class DownloaderServiceTests
                 new DownloaderRequest(
                     "tests.fake-downloader/example",
                     "http://example.com/watch/existing?a=one&b=two",
-                    DownloaderEntity.Scene,
+                    DownloaderEntity.Video,
                     new DownloaderPermissions(["example.com"]),
                     "hd"),
                 entityId: null,
@@ -659,7 +659,7 @@ public class DownloaderServiceTests
                 CancellationToken.None));
 
             Assert.Contains("already downloaded", error.Message, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("Canonical Scene", error.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("Canonical Video", error.Message, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -685,16 +685,16 @@ public class DownloaderServiceTests
             scanService,
             seedDatabase: db =>
             {
-                var existingScene = new Scene
+                var existingVideo = new Video
                 {
-                    Title = "Downloaded Scene",
+                    Title = "Downloaded Video",
                 };
 
-                db.Scenes.Add(existingScene);
-                db.Set<SceneUrl>().Add(new SceneUrl { Scene = existingScene, Url = "https://example.com/watch/existing" });
+                db.Videos.Add(existingVideo);
+                db.Set<VideoUrl>().Add(new VideoUrl { Video = existingVideo, Url = "https://example.com/watch/existing" });
                 db.VideoFiles.Add(new VideoFile
                 {
-                    Scene = existingScene,
+                    Video = existingVideo,
                     Basename = "existing.mp4",
                     ParentFolder = new Folder { Path = "C:\\library" },
                 });
@@ -702,11 +702,11 @@ public class DownloaderServiceTests
 
         try
         {
-            var (result, importedSceneId) = await service.DownloadAndIngestAsync(
+            var (result, importedVideoId) = await service.DownloadAndIngestAsync(
                 new DownloaderRequest(
                     "tests.fake-downloader/example",
                     "https://example.com/watch/existing",
-                    DownloaderEntity.Scene,
+                    DownloaderEntity.Video,
                     new DownloaderPermissions(["example.com"]),
                     "hd"),
                 entityId: null,
@@ -715,7 +715,7 @@ public class DownloaderServiceTests
                 allowDuplicateDownload: true);
 
             Assert.NotNull(result);
-            Assert.Equal(1, importedSceneId);
+            Assert.Equal(1, importedVideoId);
             Assert.NotNull(scanService.ImportedPath);
         }
         finally
@@ -733,7 +733,7 @@ public class DownloaderServiceTests
         Directory.CreateDirectory(libraryRoot);
 
         var scanService = new FakeScanService();
-        var metadataApplyService = new FakeSceneMetadataApplyService();
+        var metadataApplyService = new FakeVideoMetadataApplyService();
         var service = CreateService(
             out var services,
             new CoveConfiguration
@@ -752,7 +752,7 @@ public class DownloaderServiceTests
                     {
                         DownloaderId = "tests.fake-downloader/example",
                         Url = "https://example.com/watch/batch-one",
-                        Entity = "Scene",
+                        Entity = "Video",
                         Title = "Batch One",
                         CreateEntityIfMissing = true,
                         QualityId = "hd",
@@ -762,7 +762,7 @@ public class DownloaderServiceTests
                     {
                         DownloaderId = "tests.fake-downloader/example",
                         Url = "https://example.com/watch/batch-two",
-                        Entity = "Scene",
+                        Entity = "Video",
                         Title = "Batch Two",
                         CreateEntityIfMissing = true,
                         QualityId = "hd",
@@ -771,7 +771,7 @@ public class DownloaderServiceTests
                 ],
                 new DownloaderBatchFollowUpDto
                 {
-                    ScrapeScenes = true,
+                    ScrapeVideos = true,
                     Generate = new GenerateOptionsDto
                     {
                         Thumbnails = true,
@@ -808,7 +808,7 @@ public class DownloaderServiceTests
         Directory.CreateDirectory(libraryRoot);
 
         var scanService = new FakeScanService();
-        var metadataApplyService = new FakeSceneMetadataApplyService();
+        var metadataApplyService = new FakeVideoMetadataApplyService();
         var service = CreateService(
             out var services,
             new CoveConfiguration
@@ -820,16 +820,16 @@ public class DownloaderServiceTests
             metadataApplyService,
             seedDatabase: db =>
             {
-                var existingScene = new Scene
+                var existingVideo = new Video
                 {
                     Title = "Already Downloaded",
                 };
 
-                db.Scenes.Add(existingScene);
-                db.Set<SceneUrl>().Add(new SceneUrl { Scene = existingScene, Url = "https://example.com/watch/existing" });
+                db.Videos.Add(existingVideo);
+                db.Set<VideoUrl>().Add(new VideoUrl { Video = existingVideo, Url = "https://example.com/watch/existing" });
                 db.VideoFiles.Add(new VideoFile
                 {
-                    Scene = existingScene,
+                    Video = existingVideo,
                     Basename = "existing.mp4",
                     ParentFolder = new Folder { Path = "C:\\library" },
                 });
@@ -842,14 +842,14 @@ public class DownloaderServiceTests
                     new DownloaderBatchItemDto
                     {
                         Url = "https://example.com/watch/new-import",
-                        Entity = "Scene",
+                        Entity = "Video",
                         Title = "Imported From Batch",
                         CreateEntityIfMissing = true,
                     },
                     new DownloaderBatchItemDto
                     {
                         Url = "https://example.com/watch/existing",
-                        Entity = "Scene",
+                        Entity = "Video",
                         Title = "Should Not Exist",
                         CreateEntityIfMissing = true,
                     },
@@ -866,11 +866,11 @@ public class DownloaderServiceTests
 
             using var scope = services.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
-            var importedScene = await db.Scenes.SingleAsync(scene => scene.Title == "Imported From Batch");
-            Assert.NotEqual(0, importedScene.Id);
-            Assert.Equal(importedScene.Id, scanService.SceneId);
-            Assert.True(await db.Set<SceneUrl>().AnyAsync(item => item.SceneId == importedScene.Id && item.Url == "https://example.com/watch/new-import"));
-            Assert.False(await db.Scenes.AnyAsync(scene => scene.Title == "Should Not Exist"));
+            var importedVideo = await db.Videos.SingleAsync(video => video.Title == "Imported From Batch");
+            Assert.NotEqual(0, importedVideo.Id);
+            Assert.Equal(importedVideo.Id, scanService.VideoId);
+            Assert.True(await db.Set<VideoUrl>().AnyAsync(item => item.VideoId == importedVideo.Id && item.Url == "https://example.com/watch/new-import"));
+            Assert.False(await db.Videos.AnyAsync(video => video.Title == "Should Not Exist"));
         }
         finally
         {
@@ -887,7 +887,7 @@ public class DownloaderServiceTests
         Directory.CreateDirectory(libraryRoot);
 
         var scanService = new FakeScanService();
-        var metadataApplyService = new FakeSceneMetadataApplyService();
+        var metadataApplyService = new FakeVideoMetadataApplyService();
         var service = CreateService(
             out var services,
             new CoveConfiguration
@@ -905,14 +905,14 @@ public class DownloaderServiceTests
                     new DownloaderBatchItemDto
                     {
                         Url = "https://www.example.com/watch/batch-dupe?utm_source=mail&b=two&a=one",
-                        Entity = "Scene",
+                        Entity = "Video",
                         Title = "Batch Dupe One",
                         CreateEntityIfMissing = true,
                     },
                     new DownloaderBatchItemDto
                     {
                         Url = "http://example.com/watch/batch-dupe?a=one&b=two#fragment",
-                        Entity = "Scene",
+                        Entity = "Video",
                         Title = "Batch Dupe Two",
                         CreateEntityIfMissing = true,
                     },
@@ -1125,17 +1125,17 @@ public class DownloaderServiceTests
     }
 
     [Fact]
-    public async Task PreflightBatchAsync_SkipsExistingSceneUrlsBeforeQueueing()
+    public async Task PreflightBatchAsync_SkipsExistingVideoUrlsBeforeQueueing()
     {
         var service = CreateService(
             out var services,
             seedDatabase: db =>
             {
-                var existingScene = new Scene { Title = "Already In Cove" };
-                db.Scenes.Add(existingScene);
-                db.Set<SceneUrl>().Add(new SceneUrl
+                var existingVideo = new Video { Title = "Already In Cove" };
+                db.Videos.Add(existingVideo);
+                db.Set<VideoUrl>().Add(new VideoUrl
                 {
-                    Scene = existingScene,
+                    Video = existingVideo,
                     Url = "https://www.example.com/watch/existing?utm_source=mail&b=two&a=one",
                 });
             });
@@ -1147,14 +1147,14 @@ public class DownloaderServiceTests
                     new DownloaderBatchItemDto
                     {
                         Url = "http://example.com/watch/existing?a=one&b=two#fragment",
-                        Entity = "Scene",
+                        Entity = "Video",
                         Title = "Should Skip",
                         CreateEntityIfMissing = true,
                     },
                     new DownloaderBatchItemDto
                     {
                         Url = "https://example.com/watch/new",
-                        Entity = "Scene",
+                        Entity = "Video",
                         Title = "Should Queue",
                         CreateEntityIfMissing = true,
                     },
@@ -1179,11 +1179,11 @@ public class DownloaderServiceTests
         out ServiceProvider services,
         CoveConfiguration? config = null,
         IScanService? scanService = null,
-        ISceneMetadataApplyService? sceneMetadataApplyService = null,
+        IVideoMetadataApplyService? videoMetadataApplyService = null,
         Action<CoveContext>? seedDatabase = null,
         bool includeForumProvider = false)
     {
-        return CreateService(out services, out _, config, scanService, sceneMetadataApplyService, seedDatabase, includeForumProvider);
+        return CreateService(out services, out _, config, scanService, videoMetadataApplyService, seedDatabase, includeForumProvider);
     }
 
     private static DownloaderService CreateService(
@@ -1191,7 +1191,7 @@ public class DownloaderServiceTests
         out FakeDownloaderProvider downloaderProvider,
         CoveConfiguration? config = null,
         IScanService? scanService = null,
-        ISceneMetadataApplyService? sceneMetadataApplyService = null,
+        IVideoMetadataApplyService? videoMetadataApplyService = null,
         Action<CoveContext>? seedDatabase = null,
         bool includeForumProvider = false)
     {
@@ -1221,8 +1221,8 @@ public class DownloaderServiceTests
             provider.GetRequiredService<ExtensionManager>()));
         if (scanService != null)
             serviceCollection.AddSingleton(scanService);
-        if (sceneMetadataApplyService != null)
-            serviceCollection.AddSingleton(sceneMetadataApplyService);
+        if (videoMetadataApplyService != null)
+            serviceCollection.AddSingleton(videoMetadataApplyService);
         services = serviceCollection.BuildServiceProvider();
 
         if (seedDatabase != null)
@@ -1245,7 +1245,7 @@ public class DownloaderServiceTests
     private sealed class FakeScanService : IScanService
     {
         public string? ImportedPath { get; private set; }
-        public int? SceneId { get; private set; }
+        public int? VideoId { get; private set; }
         public int? ImageId { get; private set; }
         public int? GalleryId { get; private set; }
         public int? AudioId { get; private set; }
@@ -1260,11 +1260,11 @@ public class DownloaderServiceTests
             return $"job-{ScanStartCount}";
         }
 
-        public Task<int> ImportDownloadedSceneAsync(string path, int? sceneId, CancellationToken ct = default)
+        public Task<int> ImportDownloadedVideoAsync(string path, int? videoId, CancellationToken ct = default)
         {
             ImportedPath = path;
-            SceneId = sceneId;
-            return Task.FromResult(sceneId ?? 1);
+            VideoId = videoId;
+            return Task.FromResult(videoId ?? 1);
         }
 
         public Task<int> ImportDownloadedImageAsync(string path, int? imageId, CancellationToken ct = default)
@@ -1319,7 +1319,7 @@ public class DownloaderServiceTests
                 new DownloaderDescriptor(
                     "tests.fake-downloader/example",
                     "Example Download",
-                    DownloaderEntity.Scene,
+                    DownloaderEntity.Video,
                     ["example.com"],
                     DownloaderCapabilities.MultiQuality | DownloaderCapabilities.InlineMetadata),
                 new DownloaderDescriptor(
@@ -1344,7 +1344,7 @@ public class DownloaderServiceTests
             }
 
             return Task.FromResult<IReadOnlyList<DownloaderUrlMatch>>([
-                new DownloaderUrlMatch("tests.fake-downloader/example", url, [new DownloaderQualityOption("hd", "HD")], "Example scene"),
+                new DownloaderUrlMatch("tests.fake-downloader/example", url, [new DownloaderQualityOption("hd", "HD")], "Example video"),
                 new DownloaderUrlMatch("tests.fake-downloader/audio", url, null, "Example audio"),
             ]);
         }
@@ -1362,7 +1362,7 @@ public class DownloaderServiceTests
                 "tests.fake-downloader/example",
                 url,
                 [new DownloaderQualityOption("hd", "HD")],
-                "Example scene"));
+                "Example video"));
         }
 
         public async Task<DownloaderResult?> DownloadAsync(DownloaderRequest request, IDownloaderHost host, CancellationToken ct)
@@ -1371,7 +1371,7 @@ public class DownloaderServiceTests
 
             var filename = request.Entity == DownloaderEntity.Audio
                 ? $"downloaded-audio-{request.Url.Split('/', StringSplitOptions.RemoveEmptyEntries).LastOrDefault() ?? "file"}.mp3"
-                : "downloaded-scene.mp4";
+                : "downloaded-video.mp4";
             var filePath = Path.Combine(host.TempDirectory, filename);
             await File.WriteAllTextAsync(filePath, "fake media payload", ct);
 
@@ -1379,9 +1379,9 @@ public class DownloaderServiceTests
             return new DownloaderResult(
                 filename,
                 filename,
-                InlineSceneMetadata: request.Entity == DownloaderEntity.Scene ? new ScrapedSceneDto
+                InlineVideoMetadata: request.Entity == DownloaderEntity.Video ? new ScrapedVideoDto
                 {
-                    Title = "Downloaded Scene",
+                    Title = "Downloaded Video",
                     Urls = [request.Url],
                 } : null);
         }
@@ -1409,7 +1409,7 @@ public class DownloaderServiceTests
                 new DownloaderDescriptor(
                     "tests.fake-forum/native-video",
                     "Forum Native Video",
-                    DownloaderEntity.Scene,
+                    DownloaderEntity.Video,
                     ["forum.example.net"],
                     DownloaderCapabilities.None)
             ];
@@ -1501,16 +1501,17 @@ public class DownloaderServiceTests
         }
     }
 
-    private sealed class FakeSceneMetadataApplyService : ISceneMetadataApplyService
+    private sealed class FakeVideoMetadataApplyService : IVideoMetadataApplyService
     {
-        public int? SceneId { get; private set; }
-        public ScrapedSceneDto? Metadata { get; private set; }
+        public int? VideoId { get; private set; }
+        public ScrapedVideoDto? Metadata { get; private set; }
 
-        public Task<bool> ApplyAsync(int sceneId, ScrapedSceneDto metadata, DownloaderMetadataApplyOptions? options = null, CancellationToken ct = default)
+        public Task<bool> ApplyAsync(int videoId, ScrapedVideoDto metadata, DownloaderMetadataApplyOptions? options = null, CancellationToken ct = default)
         {
-            SceneId = sceneId;
+            VideoId = videoId;
             Metadata = metadata;
             return Task.FromResult(true);
         }
     }
 }
+

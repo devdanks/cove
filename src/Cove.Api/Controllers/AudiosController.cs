@@ -156,7 +156,7 @@ public class AudiosController(CoveContext db, CustomFieldService customFields, I
     [HttpGet("{id:int}/history")]
     [RequiresPermission(Permissions.AudiosRead)]
     [RequiresEntityAccess(EntityKinds.Audio, Permissions.AudiosRead)]
-    public async Task<ActionResult<SceneHistoryDto>> GetHistory(int id, CancellationToken ct)
+    public async Task<ActionResult<VideoHistoryDto>> GetHistory(int id, CancellationToken ct)
     {
         var history = await EngagementService.GetHistoryAsync(AffinityHostType.Audio, id, ct);
         return history is null ? NotFound() : Ok(history);
@@ -852,7 +852,7 @@ public class AudiosController(CoveContext db, CustomFieldService customFields, I
             .Select(item => new GroupSummaryDto(item.GroupId, item.Group!.Name, 0))
             .ToListAsync(ct);
 
-    private async Task ReplaceWholeAudioGroupItemsAsync(int audioId, IReadOnlyCollection<SceneGroupInputDto> groups, string? audioTitle, CancellationToken ct)
+    private async Task ReplaceWholeAudioGroupItemsAsync(int audioId, IReadOnlyCollection<VideoGroupInputDto> groups, string? audioTitle, CancellationToken ct)
     {
         var existing = await db.GroupItems
             .Where(item => item.HostType == "audio" && item.HostId == audioId && item.Kind == GroupItemKind.Audio)

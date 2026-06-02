@@ -1,12 +1,12 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Clapperboard, ExternalLink, Info, ListVideo, MoreVertical, Network, Sparkles } from "lucide-react";
-import { faces, performers, scenes, segmentDisplayProfiles, segmentLibrary, tags } from "../api/client";
+import { faces, performers, videos, segmentDisplayProfiles, segmentLibrary, tags } from "../api/client";
 import type { Face, ResolvedSpan, ResolvedSpanDetail, ResolvedSpanInterval, SegmentDerivedQueryDescriptor, SegmentSpanOperator, TagProvenance } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { canWriteEntity } from "../auth/visibility";
 import { DetailSkeleton } from "../components/DetailSkeleton";
-import { SceneCard } from "../components/EntityCards";
+import { VideoCard } from "../components/EntityCards";
 import { FloatingActionMenu } from "../components/FloatingActionMenu";
 import { MediaDetailLayout } from "../components/MediaDetailLayout/MediaDetailLayout";
 import { SegmentVisualSimilarityPanel, useSegmentVisualSimilarityAvailable } from "../components/VisualSimilarityPanel";
@@ -14,10 +14,10 @@ import { VideoPlayer } from "../components/VideoPlayer";
 import { ProvenanceBadge, TagBadge } from "../components/shared";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
-import { buildSubSceneCreate } from "../utils/subSceneCreation";
+import { buildSubVideoCreate } from "../utils/subVideoCreation";
 
 interface Props {
-  sceneId: number;
+  videoId: number;
   spanKey: string;
   profileId?: number;
   derivedQueryDescriptor?: SegmentDerivedQueryDescriptor;
@@ -26,14 +26,14 @@ interface Props {
 
 type ResolvedSpanTab = "overview" | "context" | "intervals" | "similar";
 
-export function ResolvedSpanPlayPage({ sceneId, spanKey, profileId, derivedQueryDescriptor, onNavigate }: Props) {
-  const { backLabel, goBack } = useBackNavigation({ page: "scene", id: sceneId }, onNavigate);
+export function ResolvedSpanPlayPage({ videoId, spanKey, profileId, derivedQueryDescriptor, onNavigate }: Props) {
+  const { backLabel, goBack } = useBackNavigation({ page: "video", id: videoId }, onNavigate);
   const { data: detail, isLoading } = useQuery({
-    queryKey: ["scene", sceneId, "span", spanKey, profileId],
-    queryFn: () => scenes.segments.spanDetail(sceneId, spanKey, profileId),
+    queryKey: ["video", videoId, "span", spanKey, profileId],
+    queryFn: () => videos.segments.spanDetail(videoId, spanKey, profileId),
   });
 
-  const title = detail?.span.tagName || detail?.span.kind || detail?.sceneTitle || (detail ? `Span ${detail.span.spanKey}` : null);
+  const title = detail?.span.tagName || detail?.span.kind || detail?.videoTitle || (detail ? `Span ${detail.span.spanKey}` : null);
   useDocumentTitle(title);
 
   if (isLoading) {
@@ -111,9 +111,9 @@ function ResolvedSpanPlayerCard({
     staleTime: 60_000,
   });
 
-  const sceneSpansQuery = useQuery({
-    queryKey: ["scene", detail.sceneId, "segments", "spans", detail.profileId],
-    queryFn: () => scenes.segments.spans(detail.sceneId, detail.profileId),
+  const videoSpansQuery = useQuery({
+    queryKey: ["video", detail.videoId, "segments", "spans", detail.profileId],
+    queryFn: () => videos.segments.spans(detail.videoId, detail.profileId),
     staleTime: 60_000,
   });
 
@@ -190,17 +190,17 @@ function ResolvedSpanPlayerCard({
     [faceQueries],
   );
 
-  const { data: currentScene, isLoading: currentSceneLoading } = useQuery({
-    queryKey: ["scene", detail.sceneId],
-    queryFn: () => scenes.get(detail.sceneId),
+  const { data: currentVideo, isLoading: currentVideoLoading } = useQuery({
+    queryKey: ["video", detail.videoId],
+    queryFn: () => videos.get(detail.videoId),
     staleTime: 60_000,
   });
-  const currentFile = currentScene?.files[0];
+  const currentFile = currentVideo?.files[0];
   const contextFollowTagId = detail.span.tagId ?? derivedQueryDescriptor?.operands.find((operand) => (operand.tagIds?.length ?? 0) > 0)?.tagIds?.[0];
   const contextFollowTagName = detail.span.tagName ?? (contextFollowTagId != null ? tagNamesById.get(contextFollowTagId) : undefined);
   const spanContext = useMemo(
-    () => buildSpanContext(sceneSpansQuery.data?.spans ?? [], detail.span, contextFollowTagId, contextFollowTagName),
-    [contextFollowTagId, contextFollowTagName, detail.span, sceneSpansQuery.data?.spans],
+    () => buildSpanContext(videoSpansQuery.data?.spans ?? [], detail.span, contextFollowTagId, contextFollowTagName),
+    [contextFollowTagId, contextFollowTagName, detail.span, videoSpansQuery.data?.spans],
   );
 
   useEffect(() => {
@@ -248,43 +248,43 @@ function ResolvedSpanPlayerCard({
     }
   }, [activeIntervalIndex, intervals]);
 
-  const spanTitle = detail.span.tagName || detail.span.kind || detail.sceneTitle || `Span ${detail.span.spanKey}`;
-  const canCreateSubScene = canWriteEntity("scene", hasPermission) && !!currentScene && !!currentFile;
-  const createSubSceneMutation = useMutation({
+  const spanTitle = detail.span.tagName || detail.span.kind || detail.videoTitle || `Span ${detail.span.spanKey}`;
+  const canCreateSubVideo = canWriteEntity("video", hasPermission) && !!currentVideo && !!currentFile;
+  const createSubVideoMutation = useMutation({
     mutationFn: async () => {
-      if (!currentScene) {
-        throw new Error("Scene not loaded");
+      if (!currentVideo) {
+        throw new Error("Video not loaded");
       }
 
-      return scenes.createSubScene(detail.sceneId, buildSubSceneCreate(currentScene, {
+      return videos.createSubVideo(detail.videoId, buildSubVideoCreate(currentVideo, {
         startSec: detail.span.startSec,
         endSec: detail.span.endSec,
       }, {
         title: spanTitle,
       }));
     },
-    onSuccess: (newScene) => {
-      queryClient.invalidateQueries({ queryKey: ["scenes"] });
-      queryClient.invalidateQueries({ queryKey: ["scene", detail.sceneId] });
-      onNavigate({ page: "scene", id: newScene.id });
+    onSuccess: (newVideo) => {
+      queryClient.invalidateQueries({ queryKey: ["videos"] });
+      queryClient.invalidateQueries({ queryKey: ["video", detail.videoId] });
+      onNavigate({ page: "video", id: newVideo.id });
     },
   });
 
   const playerMedia = (
     <div className="flex min-h-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden bg-black">
-      {currentSceneLoading ? (
+      {currentVideoLoading ? (
         <div className="flex flex-1 items-center justify-center bg-black text-sm text-secondary">
           Loading resolved span playback...
         </div>
       ) : currentFile ? (
         <div className="flex min-h-0 min-w-0 max-w-full flex-1 overflow-hidden bg-black">
           <VideoPlayer
-            streamUrl={scenes.streamUrl(detail.sceneId)}
-            posterUrl={scenes.screenshotUrl(detail.sceneId)}
+            streamUrl={videos.streamUrl(detail.videoId)}
+            posterUrl={videos.screenshotUrl(detail.videoId)}
             format={currentFile.format}
             duration={currentFile.duration}
             resumeTime={resumeTime}
-            sceneId={detail.sceneId}
+            videoId={detail.videoId}
             detections={[]}
             segments={rawSegmentsQuery.data ?? []}
             faces={spanFaces}
@@ -294,12 +294,12 @@ function ResolvedSpanPlayerCard({
             autostart={autostart}
             autostartToken={autostartToken}
             playbackTracking={{
-              hostType: "scene",
-              hostId: detail.sceneId,
+              hostType: "video",
+              hostId: detail.videoId,
               surface: "resolvedSpan",
-              scopeKey: `scene:${detail.sceneId}:span:${detail.span.spanKey}`,
-              itemHostType: "scene",
-              itemHostId: detail.sceneId,
+              scopeKey: `video:${detail.videoId}:span:${detail.span.spanKey}`,
+              itemHostType: "video",
+              itemHostId: detail.videoId,
               clipStartSec: currentInterval.startSec,
               clipEndSec: currentInterval.endSec,
               context: {
@@ -313,14 +313,14 @@ function ResolvedSpanPlayerCard({
         </div>
       ) : (
         <div className="flex flex-1 items-center justify-center bg-black text-sm text-secondary">
-          No playable scene file is available for this resolved span.
+          No playable video file is available for this resolved span.
         </div>
       )}
     </div>
   );
 
   const hasVisualSimilarity = useSegmentVisualSimilarityAvailable({
-    sceneId: detail.sceneId,
+    videoId: detail.videoId,
     intervals: intervals.map((interval) => ({ startSec: interval.startSec, endSec: interval.endSec })),
   });
 
@@ -388,10 +388,10 @@ function ResolvedSpanPlayerCard({
       <div className="mt-5 grid gap-2 sm:grid-cols-2">
         <button
           type="button"
-          onClick={() => onNavigate({ page: "scene", id: detail.sceneId, seekTo: detail.span.startSec })}
+          onClick={() => onNavigate({ page: "video", id: detail.videoId, seekTo: detail.span.startSec })}
           className="w-full rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent"
         >
-          Open scene at span start
+          Open video at span start
         </button>
       </div>
     </div>
@@ -399,12 +399,12 @@ function ResolvedSpanPlayerCard({
 
   const contextContent = (
     <div className="space-y-4">
-      {currentScene ? (
+      {currentVideo ? (
         <div className="max-w-sm">
-          <SceneCard scene={currentScene} onClick={() => onNavigate({ page: "scene", id: detail.sceneId, seekTo: detail.span.startSec })} onNavigate={onNavigate} />
+          <VideoCard video={currentVideo} onClick={() => onNavigate({ page: "video", id: detail.videoId, seekTo: detail.span.startSec })} onNavigate={onNavigate} />
         </div>
       ) : (
-        <div className="rounded-xl border border-border bg-card/70 px-3 py-3 text-sm text-secondary">Loading parent scene...</div>
+        <div className="rounded-xl border border-border bg-card/70 px-3 py-3 text-sm text-secondary">Loading parent video...</div>
       )}
       {!isDerivedQuery ? (
         <div>
@@ -438,14 +438,14 @@ function ResolvedSpanPlayerCard({
         </div>
       ) : null}
       <div className="space-y-4">
-        {sceneSpansQuery.isLoading ? (
+        {videoSpansQuery.isLoading ? (
           <div className="rounded-xl border border-border bg-card/70 px-3 py-3 text-sm text-secondary">Loading timeline context...</div>
         ) : (
           <>
-            <ResolvedSpanContextSection title="Previous Segments" items={spanContext.previous} sceneId={detail.sceneId} profileId={detail.profileId} onNavigate={onNavigate} emptyMessage="This is the first span in the scene." />
-            <ResolvedSpanContextSection title="Next Segments" items={spanContext.next} sceneId={detail.sceneId} profileId={detail.profileId} onNavigate={onNavigate} emptyMessage="This is the last span in the scene." />
-            <ResolvedSpanContextSection title="Intersecting Segments" items={spanContext.intersecting} sceneId={detail.sceneId} profileId={detail.profileId} onNavigate={onNavigate} emptyMessage="No other spans overlap this time range." />
-            <ResolvedSpanContextSection title="Next With Same Tag" items={spanContext.nextSameTag ? [spanContext.nextSameTag] : []} sceneId={detail.sceneId} profileId={detail.profileId} onNavigate={onNavigate} emptyMessage={contextFollowTagName ? `No later ${contextFollowTagName} span is in this scene.` : "This span does not have a tag to follow."} compact />
+            <ResolvedSpanContextSection title="Previous Segments" items={spanContext.previous} videoId={detail.videoId} profileId={detail.profileId} onNavigate={onNavigate} emptyMessage="This is the first span in the video." />
+            <ResolvedSpanContextSection title="Next Segments" items={spanContext.next} videoId={detail.videoId} profileId={detail.profileId} onNavigate={onNavigate} emptyMessage="This is the last span in the video." />
+            <ResolvedSpanContextSection title="Intersecting Segments" items={spanContext.intersecting} videoId={detail.videoId} profileId={detail.profileId} onNavigate={onNavigate} emptyMessage="No other spans overlap this time range." />
+            <ResolvedSpanContextSection title="Next With Same Tag" items={spanContext.nextSameTag ? [spanContext.nextSameTag] : []} videoId={detail.videoId} profileId={detail.profileId} onNavigate={onNavigate} emptyMessage={contextFollowTagName ? `No later ${contextFollowTagName} span is in this video.` : "This span does not have a tag to follow."} compact />
           </>
         )}
       </div>
@@ -454,7 +454,7 @@ function ResolvedSpanPlayerCard({
 
   const similarContent = (
     <SegmentVisualSimilarityPanel
-      sceneId={detail.sceneId}
+      videoId={detail.videoId}
       intervals={intervals.map((interval) => ({ startSec: interval.startSec, endSec: interval.endSec }))}
       onNavigate={onNavigate}
     />
@@ -485,13 +485,13 @@ function ResolvedSpanPlayerCard({
         <>
           <button
             type="button"
-            onClick={() => onNavigate({ page: "scene", id: detail.sceneId, seekTo: detail.span.startSec })}
+            onClick={() => onNavigate({ page: "video", id: detail.videoId, seekTo: detail.span.startSec })}
             className="inline-flex items-center justify-center rounded p-1 text-secondary transition hover:bg-card hover:text-foreground"
-            title="Open parent scene"
+            title="Open parent video"
           >
             <ExternalLink className="h-4 w-4" />
           </button>
-          {canCreateSubScene ? (
+          {canCreateSubVideo ? (
             <div className="relative" ref={opsMenuRef}>
               <button
                 type="button"
@@ -505,13 +505,13 @@ function ResolvedSpanPlayerCard({
                   <button
                     type="button"
                     onClick={() => {
-                      createSubSceneMutation.mutate();
+                      createSubVideoMutation.mutate();
                       setShowOpsMenu(false);
                     }}
-                    disabled={createSubSceneMutation.isPending}
+                    disabled={createSubVideoMutation.isPending}
                     className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-surface disabled:opacity-60"
                   >
-                    <Clapperboard className="h-3.5 w-3.5" /> {createSubSceneMutation.isPending ? "Creating scene" : "Make scene"}
+                    <Clapperboard className="h-3.5 w-3.5" /> {createSubVideoMutation.isPending ? "Creating video" : "Make video"}
                   </button>
               </FloatingActionMenu>
             </div>
@@ -622,7 +622,7 @@ function SourceChip({ children }: { children: ReactNode }) {
 function ResolvedSpanContextSection({
   title,
   items,
-  sceneId,
+  videoId,
   profileId,
   onNavigate,
   emptyMessage,
@@ -630,7 +630,7 @@ function ResolvedSpanContextSection({
 }: {
   title: string;
   items: ResolvedSpan[];
-  sceneId: number;
+  videoId: number;
   profileId: number;
   onNavigate: (r: any) => void;
   emptyMessage: string;
@@ -647,7 +647,7 @@ function ResolvedSpanContextSection({
             <button
               key={item.spanKey}
               type="button"
-              onClick={() => onNavigate({ page: "scene-span", id: sceneId, spanKey: item.spanKey, profileId })}
+              onClick={() => onNavigate({ page: "video-span", id: videoId, spanKey: item.spanKey, profileId })}
               className="min-w-0 rounded-lg border border-border bg-surface/70 px-3 py-2 text-left transition-colors hover:border-accent/70 hover:bg-surface"
             >
               <div className="truncate text-sm font-medium text-foreground">{formatResolvedSpanTitle(item)}</div>
@@ -660,9 +660,9 @@ function ResolvedSpanContextSection({
   );
 }
 
-function buildSpanContext(sceneSpans: ResolvedSpan[], current: ResolvedSpan, followTagId?: number, followTagName?: string) {
+function buildSpanContext(videoSpans: ResolvedSpan[], current: ResolvedSpan, followTagId?: number, followTagName?: string) {
   const currentEnd = current.endSec ?? current.startSec;
-  const spans = [...sceneSpans.filter((span) => span.spanKey !== current.spanKey), current]
+  const spans = [...videoSpans.filter((span) => span.spanKey !== current.spanKey), current]
     .sort((left, right) => left.startSec - right.startSec || left.endSec - right.endSec || left.spanKey.localeCompare(right.spanKey));
   const currentIndex = Math.max(0, spans.findIndex((span) => span.spanKey === current.spanKey));
   const isCurrent = (span: ResolvedSpan) => span.spanKey === current.spanKey;
@@ -789,3 +789,4 @@ function formatTime(value: number) {
 
   return `${minutes}:${String(seconds).padStart(2, "0")}.${fractional}`;
 }
+

@@ -1,12 +1,12 @@
-import { scenes } from "../api/client";
-import type { DownloaderMatch, Scene, ScrapeAttempt, ScraperSummary } from "../api/types";
+import { videos } from "../api/client";
+import type { DownloaderMatch, Video, ScrapeAttempt, ScraperSummary } from "../api/types";
 
 export type InputKind = "url" | "name" | "fragment";
 export type BatchInputKind = Exclude<InputKind, "fragment">;
 export type CollectionMode = "skip" | "merge" | "replace";
 
-export type SceneScrapeScene = Pick<
-  Scene,
+export type VideoScrapeVideo = Pick<
+  Video,
   "id" | "title" | "code" | "details" | "director" | "date" | "organized" | "studioName" | "urls" | "tags" | "performers" | "files" | "updatedAt"
 >;
 
@@ -16,7 +16,7 @@ export interface ScraperPreference {
   scraperId: string;
 }
 
-export interface SceneReviewData {
+export interface VideoReviewData {
   title?: string;
   code?: string;
   details?: string;
@@ -38,9 +38,9 @@ export interface ScrapeApplyPreferences {
   hydratePerformers: boolean;
 }
 
-export interface SceneApplyPlan {
-  currentData: SceneReviewData;
-  scrapedData: SceneReviewData | null;
+export interface VideoApplyPlan {
+  currentData: VideoReviewData;
+  scrapedData: VideoReviewData | null;
   replaceFields: string[];
   collectionModes: Record<string, CollectionMode>;
 }
@@ -60,7 +60,7 @@ export const DEFAULT_SCRAPE_APPLY_PREFERENCES: ScrapeApplyPreferences = {
   hydratePerformers: false,
 };
 
-const SCRAPE_PREFERENCES_STORAGE_KEY = "cove.sceneScrapePreferences";
+const SCRAPE_PREFERENCES_STORAGE_KEY = "cove.videoScrapePreferences";
 
 export function resolveScrapeApplyDefaults(defaults?: Partial<ScrapeApplyPreferences> | null): ScrapeApplyPreferences {
   return {
@@ -212,7 +212,7 @@ export function getNamedList(object: Record<string, unknown> | null, ...names: s
   return items.filter((item, index) => items.findIndex((candidate) => candidate.toLowerCase() === item.toLowerCase()) === index);
 }
 
-export function normalizeSceneDate(value?: string | null) {
+export function normalizeVideoDate(value?: string | null) {
   const trimmed = value?.trim();
   if (!trimmed) {
     return undefined;
@@ -239,7 +239,7 @@ export function normalizeSceneDate(value?: string | null) {
   return `${year}-${month}-${day}`;
 }
 
-export function normalizeAttemptData(attempt?: ScrapeAttempt | null, rawOverride?: Record<string, unknown> | null): SceneReviewData | null {
+export function normalizeAttemptData(attempt?: ScrapeAttempt | null, rawOverride?: Record<string, unknown> | null): VideoReviewData | null {
   const raw = rawOverride ?? parseJsonObject(attempt?.resultJson);
   if (!raw) {
     return null;
@@ -249,7 +249,7 @@ export function normalizeAttemptData(attempt?: ScrapeAttempt | null, rawOverride
     code: getString(raw, "Code"),
     details: getString(raw, "Details", "Description", "Synopsis"),
     director: getString(raw, "Director"),
-    date: normalizeSceneDate(getString(raw, "Date", "ReleaseDate")),
+    date: normalizeVideoDate(getString(raw, "Date", "ReleaseDate")),
     image: getString(raw, "Image", "ImageUrl", "ImageURL"),
     studio: getNamedList(raw, "Studio", "StudioName")[0] ?? getString(raw, "Studio", "StudioName"),
     urls: getStringList(raw, "URLs", "Url", "URL"),
@@ -259,52 +259,52 @@ export function normalizeAttemptData(attempt?: ScrapeAttempt | null, rawOverride
   };
 }
 
-export function getAttemptCandidates(attempt?: ScrapeAttempt | null): SceneReviewData[] {
+export function getAttemptCandidates(attempt?: ScrapeAttempt | null): VideoReviewData[] {
   const candidatePayloads = parseJsonObjectArray(attempt?.candidateResultsJson);
   if (candidatePayloads.length > 0) {
     return candidatePayloads
       .map((payload) => normalizeAttemptData(undefined, payload))
-      .filter((candidate): candidate is SceneReviewData => candidate !== null);
+      .filter((candidate): candidate is VideoReviewData => candidate !== null);
   }
 
   const single = normalizeAttemptData(attempt);
   return single ? [single] : [];
 }
 
-export function normalizeSceneSnapshot(scene: SceneScrapeScene, attempt?: ScrapeAttempt | null): SceneReviewData {
+export function normalizeVideoSnapshot(video: VideoScrapeVideo, attempt?: ScrapeAttempt | null): VideoReviewData {
   const snapshot = parseJsonObject(attempt?.entitySnapshotJson);
   return {
-    title: getString(snapshot, "title") ?? scene.title,
-    code: getString(snapshot, "code") ?? scene.code,
-    details: getString(snapshot, "details") ?? scene.details,
-    director: getString(snapshot, "director") ?? scene.director,
-    date: normalizeSceneDate(getString(snapshot, "date") ?? scene.date),
-    image: getString(snapshot, "image", "imageUrl", "imageURL") ?? scenes.screenshotUrl(scene.id, scene.updatedAt),
-    studio: getString(snapshot, "studio") ?? scene.studioName,
-    urls: getStringList(snapshot, "urls").length > 0 ? getStringList(snapshot, "urls") : scene.urls,
-    tags: getNamedList(snapshot, "tags").length > 0 ? getNamedList(snapshot, "tags") : scene.tags.map((tag) => tag.name),
+    title: getString(snapshot, "title") ?? video.title,
+    code: getString(snapshot, "code") ?? video.code,
+    details: getString(snapshot, "details") ?? video.details,
+    director: getString(snapshot, "director") ?? video.director,
+    date: normalizeVideoDate(getString(snapshot, "date") ?? video.date),
+    image: getString(snapshot, "image", "imageUrl", "imageURL") ?? videos.screenshotUrl(video.id, video.updatedAt),
+    studio: getString(snapshot, "studio") ?? video.studioName,
+    urls: getStringList(snapshot, "urls").length > 0 ? getStringList(snapshot, "urls") : video.urls,
+    tags: getNamedList(snapshot, "tags").length > 0 ? getNamedList(snapshot, "tags") : video.tags.map((tag) => tag.name),
     performers:
       getNamedList(snapshot, "performers").length > 0
         ? getNamedList(snapshot, "performers")
-        : scene.performers.map((performer) => performer.name),
+        : video.performers.map((performer) => performer.name),
     raw: snapshot,
   };
 }
 
-export function buildFragmentDraft(scene: SceneScrapeScene) {
+export function buildFragmentDraft(video: VideoScrapeVideo) {
   return JSON.stringify(
     {
-      title: scene.title ?? "",
-      name: scene.title ?? scene.files[0]?.basename ?? "",
-      filename: scene.files[0]?.basename ?? "",
-      path: scene.files[0]?.path ?? "",
-      code: scene.code ?? "",
-      details: scene.details ?? "",
-      director: scene.director ?? "",
-      date: scene.date ?? "",
-      url: scene.urls[0] ?? "",
-      urls: scene.urls,
-      studio: scene.studioName ?? "",
+      title: video.title ?? "",
+      name: video.title ?? video.files[0]?.basename ?? "",
+      filename: video.files[0]?.basename ?? "",
+      path: video.files[0]?.path ?? "",
+      code: video.code ?? "",
+      details: video.details ?? "",
+      director: video.director ?? "",
+      date: video.date ?? "",
+      url: video.urls[0] ?? "",
+      urls: video.urls,
+      studio: video.studioName ?? "",
     },
     null,
     2,
@@ -499,12 +499,12 @@ export function listsEqual(left: string[], right: string[]) {
   return normalizedLeft.every((item, index) => item === normalizedRight[index]);
 }
 
-export function buildDefaultSceneApplyPlan(
-  scene: SceneScrapeScene,
+export function buildDefaultVideoApplyPlan(
+  video: VideoScrapeVideo,
   attempt?: ScrapeAttempt | null,
   selectedPayload?: Record<string, unknown> | null,
-): SceneApplyPlan {
-  const currentData = normalizeSceneSnapshot(scene, attempt);
+): VideoApplyPlan {
+  const currentData = normalizeVideoSnapshot(video, attempt);
   const scrapedData = normalizeAttemptData(attempt, selectedPayload);
 
   if (!scrapedData) {
@@ -537,8 +537,8 @@ export function buildDefaultSceneApplyPlan(
   };
 }
 
-function getScraperSpecificity(scraper: ScraperSummary, sceneUrl?: string) {
-  const normalizedUrl = sceneUrl?.trim().toLowerCase();
+function getScraperSpecificity(scraper: ScraperSummary, videoUrl?: string) {
+  const normalizedUrl = videoUrl?.trim().toLowerCase();
   if (!normalizedUrl) {
     return 0;
   }
@@ -559,8 +559,8 @@ function getScraperSpecificity(scraper: ScraperSummary, sceneUrl?: string) {
   }, 0);
 }
 
-function getConfiguredScraperId(scrapers: ScraperSummary[], sceneUrl: string | undefined, scraperPreferences: ScraperPreference[]) {
-  const site = getScraperSiteKey(sceneUrl);
+function getConfiguredScraperId(scrapers: ScraperSummary[], videoUrl: string | undefined, scraperPreferences: ScraperPreference[]) {
+  const site = getScraperSiteKey(videoUrl);
   if (!site) {
     return "";
   }
@@ -574,8 +574,8 @@ function getConfiguredScraperId(scrapers: ScraperSummary[], sceneUrl: string | u
   return configuredScraperId && scrapers.some((scraper) => scraper.id === configuredScraperId) ? configuredScraperId : "";
 }
 
-export function sortScrapersForScene(scrapers: ScraperSummary[], sceneUrl: string | undefined, scraperPreferences: ScraperPreference[] = []) {
-  const configuredScraperId = getConfiguredScraperId(scrapers, sceneUrl, scraperPreferences);
+export function sortScrapersForVideo(scrapers: ScraperSummary[], videoUrl: string | undefined, scraperPreferences: ScraperPreference[] = []) {
+  const configuredScraperId = getConfiguredScraperId(scrapers, videoUrl, scraperPreferences);
 
   return [...scrapers].sort((left, right) => {
     const leftConfigured = configuredScraperId !== "" && left.id === configuredScraperId;
@@ -584,7 +584,7 @@ export function sortScrapersForScene(scrapers: ScraperSummary[], sceneUrl: strin
       return leftConfigured ? -1 : 1;
     }
 
-    const specificityDelta = getScraperSpecificity(right, sceneUrl) - getScraperSpecificity(left, sceneUrl);
+    const specificityDelta = getScraperSpecificity(right, videoUrl) - getScraperSpecificity(left, videoUrl);
     if (specificityDelta !== 0) {
       return specificityDelta;
     }
@@ -593,12 +593,12 @@ export function sortScrapersForScene(scrapers: ScraperSummary[], sceneUrl: strin
   });
 }
 
-export function findPreferredScraperId(scrapers: ScraperSummary[], sceneUrl: string | undefined, scraperPreferences: ScraperPreference[] = []) {
+export function findPreferredScraperId(scrapers: ScraperSummary[], videoUrl: string | undefined, scraperPreferences: ScraperPreference[] = []) {
   if (scrapers.length === 0) {
     return "";
   }
 
-  return sortScrapersForScene(scrapers, sceneUrl, scraperPreferences)[0]?.id ?? "";
+  return sortScrapersForVideo(scrapers, videoUrl, scraperPreferences)[0]?.id ?? "";
 }
 
 export function findDefaultKind(scraper: ScraperSummary | undefined, preferred: InputKind): InputKind {
@@ -630,16 +630,16 @@ export function sortDownloaderMatches(matches: DownloaderMatch[]) {
   });
 }
 
-export function getSceneScrapeInput(scene: SceneScrapeScene, inputKind: BatchInputKind) {
+export function getVideoScrapeInput(video: VideoScrapeVideo, inputKind: BatchInputKind) {
   if (inputKind === "url") {
-    return scene.urls[0]?.trim() ?? "";
+    return video.urls[0]?.trim() ?? "";
   }
 
-  return getSceneNameSearchInput(scene);
+  return getVideoNameSearchInput(video);
 }
 
-export function getSceneNameSearchInput(scene: SceneScrapeScene) {
-  const raw = scene.title?.trim() || scene.files[0]?.basename?.trim() || "";
+export function getVideoNameSearchInput(video: VideoScrapeVideo) {
+  const raw = video.title?.trim() || video.files[0]?.basename?.trim() || "";
   if (!raw) {
     return "";
   }
@@ -652,6 +652,6 @@ export function getSceneNameSearchInput(scene: SceneScrapeScene) {
   return sanitized || raw;
 }
 
-export function getSceneLabel(scene: SceneScrapeScene) {
-  return scene.title || scene.files[0]?.basename || `Scene ${scene.id}`;
+export function getVideoLabel(video: VideoScrapeVideo) {
+  return video.title || video.files[0]?.basename || `Video ${video.id}`;
 }

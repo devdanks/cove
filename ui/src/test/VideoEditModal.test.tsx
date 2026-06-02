@@ -2,17 +2,17 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { SceneEditModal } from "../pages/SceneEditModal";
-import type { Scene } from "../api/types";
+import { VideoEditModal } from "../pages/VideoEditModal";
+import type { Video } from "../api/types";
 
 const mocks = vi.hoisted(() => ({
-  scenesUpdate: vi.fn(),
+  videosUpdate: vi.fn(),
   tagApplicationsCreate: vi.fn(),
   tagApplicationsDelete: vi.fn(),
 }));
 
 vi.mock("../api/client", () => ({
-  scenes: { update: mocks.scenesUpdate },
+  videos: { update: mocks.videosUpdate },
   tagApplications: {
     create: mocks.tagApplicationsCreate,
     delete: mocks.tagApplicationsDelete,
@@ -51,7 +51,7 @@ vi.mock("../state/AppConfigContext", () => ({
   }),
 }));
 
-function renderModal(scene: Scene) {
+function renderModal(video: Video) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -61,23 +61,23 @@ function renderModal(scene: Scene) {
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <SceneEditModal scene={scene} open onClose={vi.fn()} />
+      <VideoEditModal video={video} open onClose={vi.fn()} />
     </QueryClientProvider>,
   );
 }
 
-describe("SceneEditModal", () => {
+describe("VideoEditModal", () => {
   beforeEach(() => {
-    mocks.scenesUpdate.mockResolvedValue({});
+    mocks.videosUpdate.mockResolvedValue({});
     mocks.tagApplicationsCreate.mockResolvedValue({});
     mocks.tagApplicationsDelete.mockResolvedValue(undefined);
   });
 
   it("includes edited captions in the save payload", async () => {
     const user = userEvent.setup();
-    const scene: Scene = {
+    const video: Video = {
       id: 42,
-      title: "Sample Scene",
+      title: "Sample Video",
       code: "SCN-42",
       details: "Existing details",
       captions: "English",
@@ -95,14 +95,14 @@ describe("SceneEditModal", () => {
       updatedAt: "2026-05-02T00:00:00Z",
     };
 
-    renderModal(scene);
+    renderModal(video);
 
     const captionsInput = screen.getByPlaceholderText("Subtitle languages or notes");
     await user.clear(captionsInput);
     await user.type(captionsInput, "English, French");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
-    await waitFor(() => expect(mocks.scenesUpdate).toHaveBeenCalledWith(42, expect.objectContaining({ captions: "English, French" })));
+    await waitFor(() => expect(mocks.videosUpdate).toHaveBeenCalledWith(42, expect.objectContaining({ captions: "English, French" })));
     expect(mocks.tagApplicationsCreate).not.toHaveBeenCalled();
     expect(mocks.tagApplicationsDelete).not.toHaveBeenCalled();
   });

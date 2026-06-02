@@ -168,8 +168,8 @@ public interface IEventExtension : IExtension
 
 /// <summary>An entity lifecycle event dispatched to extensions.</summary>
 public record ExtensionEvent(
-    string EventType,  // "scene.created", "performer.updated", "tag.deleted", etc.
-    string EntityType, // "scene", "performer", "studio", "tag", "gallery", "image", "group"
+    string EventType,  // "video.created", "performer.updated", "tag.deleted", etc.
+    string EntityType, // "video", "performer", "studio", "tag", "gallery", "image", "group"
     int EntityId,
     Dictionary<string, object?>? Data = null
 );
@@ -311,7 +311,7 @@ public record ExtensionAction(
     string ExtensionId,
     /// <summary>"toolbar", "context-menu", "bulk"</summary>
     string ActionType,
-    /// <summary>Entity types this action applies to (empty = all). E.g. ["scene", "performer"]</summary>
+    /// <summary>Entity types this action applies to (empty = all). E.g. ["video", "performer"]</summary>
     string[] EntityTypes,
     /// <summary>Icon name (lucide icon).</summary>
     string? Icon = null,
@@ -595,7 +595,7 @@ public record UISlotContribution(
 public record UITabContribution(
     string Key,
     string Label,
-    /// <summary>"scene", "performer", "studio", "tag", "gallery", "image", "group", "settings"</summary>
+    /// <summary>"video", "performer", "studio", "tag", "gallery", "image", "group", "settings"</summary>
     string PageType,
     string ExtensionId,
     string ComponentName,
@@ -610,7 +610,7 @@ public record UITabContribution(
 /// <summary>Add a panel/pane region contribution to a page layout.</summary>
 public record UIPaneContribution(
     string Id,
-    /// <summary>"scene", "performer", "studio", "tag", "gallery", "image", "group", "settings", "home"</summary>
+    /// <summary>"video", "performer", "studio", "tag", "gallery", "image", "group", "settings", "home"</summary>
     string PageType,
     /// <summary>Host-defined zone key where this pane should render (e.g. "sidebar-right", "hero", "details").</summary>
     string Zone,
@@ -629,7 +629,7 @@ public record UIFeatureDefinition(
 
 /// <summary>Override a host component by stable key (selectors, cards, toolbars, list rows, etc.).</summary>
 public record UIComponentOverride(
-    /// <summary>Host-defined component key (e.g. "scene.selector", "performer.card", "search.bar").</summary>
+    /// <summary>Host-defined component key (e.g. "video.selector", "performer.card", "search.bar").</summary>
     string TargetComponent,
     string ExtensionId,
     string ComponentName,
@@ -707,7 +707,7 @@ public record UISettingsPanel(
 /// Use TargetPage = "*" to override the entire app shell.
 /// </summary>
 public record UIPageOverride(
-    /// <summary>The built-in page key to replace (e.g. "scenes", "home", "settings", or "*" for full shell).</summary>
+    /// <summary>The built-in page key to replace (e.g. "videos", "home", "settings", or "*" for full shell).</summary>
     string TargetPage,
     string ExtensionId,
     string ComponentName,
@@ -719,7 +719,7 @@ public record UIPageOverride(
 /// Override or wrap a dialog/modal component.
 /// </summary>
 public record UIDialogOverride(
-    /// <summary>Dialog identifier (e.g. "scene-edit", "performer-edit", "confirm-delete").</summary>
+    /// <summary>Dialog identifier (e.g. "video-edit", "performer-edit", "confirm-delete").</summary>
     string DialogId,
     string ExtensionId,
     string ComponentName,
@@ -843,3 +843,4 @@ public class UIRegistry
         ListSorts = [.. _listSorts],
     };
 }
+

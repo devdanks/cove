@@ -7,21 +7,21 @@ using Cove.Data.Services;
 
 namespace Cove.Data.Repositories;
 
-public class SceneRepository : ISceneRepository
+public class VideoRepository : IVideoRepository
 {
     private readonly CoveContext _db;
-    public SceneRepository(CoveContext db) => _db = db;
+    public VideoRepository(CoveContext db) => _db = db;
 
-    public async Task<Scene?> GetByIdAsync(int id, CancellationToken ct = default)
-        => await _db.Scenes.FindAsync([id], ct);
+    public async Task<Video?> GetByIdAsync(int id, CancellationToken ct = default)
+        => await _db.Videos.FindAsync([id], ct);
 
-    public async Task<Scene?> GetByIdWithRelationsAsync(int id, CancellationToken ct = default)
-        => await _db.Scenes
+    public async Task<Video?> GetByIdWithRelationsAsync(int id, CancellationToken ct = default)
+        => await _db.Videos
             .Include(s => s.Studio)
             .Include(s => s.Urls)
-            .Include(s => s.SceneTags).ThenInclude(st => st.Tag).ThenInclude(tag => tag!.TagGroup)
-            .Include(s => s.ScenePerformers).ThenInclude(sp => sp.Performer)
-            .Include(s => s.SceneGalleries).ThenInclude(sg => sg.Gallery)
+            .Include(s => s.VideoTags).ThenInclude(st => st.Tag).ThenInclude(tag => tag!.TagGroup)
+            .Include(s => s.VideoPerformers).ThenInclude(sp => sp.Performer)
+            .Include(s => s.VideoGalleries).ThenInclude(sg => sg.Gallery)
             .Include(s => s.GroupItems).ThenInclude(item => item.Group)
             .Include(s => s.Files).ThenInclude(f => f.Fingerprints)
             .Include(s => s.Files).ThenInclude(f => f.Captions)
@@ -30,36 +30,44 @@ public class SceneRepository : ISceneRepository
             .AsSplitQuery()
             .FirstOrDefaultAsync(s => s.Id == id, ct);
 
-    public async Task<IReadOnlyList<Scene>> GetAllAsync(CancellationToken ct = default)
-        => await _db.Scenes.AsNoTracking().ToListAsync(ct);
+    public async Task<IReadOnlyList<Video>> GetAllAsync(CancellationToken ct = default)
+        => await _db.Videos.AsNoTracking().ToListAsync(ct);
 
-    public async Task<Scene> AddAsync(Scene entity, CancellationToken ct = default)
+    public async Task<Video> AddAsync(Video entity, CancellationToken ct = default)
     {
-        _db.Scenes.Add(entity);
+        _db.Videos.Add(entity);
         await _db.SaveChangesAsync(ct);
         return entity;
     }
 
-    public async Task UpdateAsync(Scene entity, CancellationToken ct = default)
+    public async Task UpdateAsync(Video entity, CancellationToken ct = default)
     {
-        _db.Scenes.Update(entity);
+        _db.Videos.Update(entity);
         await _db.SaveChangesAsync(ct);
     }
 
     public async Task DeleteAsync(int id, CancellationToken ct = default)
     {
-        var entity = await _db.Scenes.FindAsync([id], ct);
+        var entity = await _db.Videos.FindAsync([id], ct);
         if (entity != null)
         {
-            _db.Scenes.Remove(entity);
+            _db.Videos.Remove(entity);
             await _db.SaveChangesAsync(ct);
         }
     }
 
     public async Task<int> CountAsync(CancellationToken ct = default)
-        => await _db.Scenes.CountAsync(ct);
+        => await _db.Videos.CountAsync(ct);
 
-    public async Task<(IReadOnlyList<Scene> Items, int TotalCount)> FindAsync(SceneFilter? filter, FindFilter? findFilter, CancellationToken ct = default)
+    public async Task<IReadOnlyList<VideoPerformer>> GetVideoPerformersAsync(IReadOnlyList<int> videoIds, CancellationToken ct = default)
+        => await _db.Set<VideoPerformer>()
+            .AsNoTracking()
+            .Include(static vp => vp.Performer)
+                .ThenInclude(static p => p!.RemoteIds)
+            .Where(vp => videoIds.Contains(vp.VideoId) && vp.Performer != null)
+            .ToListAsync(ct);
+
+    public async Task<(IReadOnlyList<Video> Items, int TotalCount)> FindAsync(VideoFilter? filter, FindFilter? findFilter, CancellationToken ct = default)
     {
         ExpandedHierarchicalTagCriterion? expandedTags = null;
         if (filter?.TagsCriterion?.Depth == -1)
@@ -69,20 +77,20 @@ public class SceneRepository : ISceneRepository
         }
 
         var currentPrincipal = _db.CurrentPrincipalForReadOptimization;
-        var readScopePlan = await ReadScopeListOptimization.TryBuildPlanAsync<Scene>(
+        var readScopePlan = await ReadScopeListOptimization.TryBuildPlanAsync<Video>(
             _db,
-            EntityKinds.Scene,
-            currentPrincipal?.Has(PermissionKeys.ScenesRead) == true,
-            currentPrincipal?.ReadGrantedEntityKinds.Contains(EntityKinds.Scene) == true,
+            EntityKinds.Video,
+            currentPrincipal?.Has(PermissionKeys.VideosRead) == true,
+            currentPrincipal?.ReadGrantedEntityKinds.Contains(EntityKinds.Video) == true,
             ct);
 
         // Build a lightweight filter-only query (no Includes) for COUNT and filter predicates
-        var filterQuery = (readScopePlan ?? new ReadScopeRootPlan<Scene>(false, null)).Apply(_db.Scenes.AsQueryable());
+        var filterQuery = (readScopePlan ?? new ReadScopeRootPlan<Video>(false, null)).Apply(_db.Videos.AsQueryable());
 
         // Apply all filters to the lightweight query
         filterQuery = ApplyFilters(filterQuery, filter, expandedTags?.ValueGroups);
 
-        filterQuery = ApplySceneSearch(filterQuery, findFilter?.Q);
+        filterQuery = ApplyVideoSearch(filterQuery, findFilter?.Q);
 
         // COUNT runs on the lightweight query â€” no JOINs from Includes
         var perPage = findFilter?.PerPage ?? 25;
@@ -91,7 +99,7 @@ public class SceneRepository : ISceneRepository
         if (perPage <= 0)
         {
             var count = await filterQuery.CountAsync(ct);
-            return (Array.Empty<Scene>(), count);
+            return (Array.Empty<Video>(), count);
         }
 
         // Run COUNT first on the lightweight query (no Includes = faster)
@@ -113,17 +121,18 @@ public class SceneRepository : ISceneRepository
             .ToListAsync(ct);
 
         if (pagedIds.Count == 0)
-            return (Array.Empty<Scene>(), totalCount);
+            return (Array.Empty<Video>(), totalCount);
 
         // Load full entities only for the paged IDs
-        var items = await _db.Scenes
+        var items = await _db.Videos
             .Include(s => s.Studio)
             .Include(s => s.Urls)
-            .Include(s => s.SceneTags).ThenInclude(st => st.Tag).ThenInclude(tag => tag!.TagGroup)
-            .Include(s => s.ScenePerformers).ThenInclude(sp => sp.Performer)
-            .Include(s => s.SceneGalleries).ThenInclude(sg => sg.Gallery)
+            .Include(s => s.VideoTags).ThenInclude(st => st.Tag).ThenInclude(tag => tag!.TagGroup)
+            .Include(s => s.VideoPerformers).ThenInclude(sp => sp.Performer)
+            .Include(s => s.VideoGalleries).ThenInclude(sg => sg.Gallery)
             .Include(s => s.GroupItems).ThenInclude(item => item.Group)
-            .Include(s => s.Files)
+            .Include(s => s.Files).ThenInclude(f => f.Fingerprints)
+            .Include(s => s.LikeHistory)
             .Include(s => s.RemoteIds)
             .AsSplitQuery()
             .Where(s => pagedIds.Contains(s.Id))
@@ -137,14 +146,16 @@ public class SceneRepository : ISceneRepository
         return (sorted, totalCount);
     }
 
-    private IQueryable<Scene> ApplyFilters(IQueryable<Scene> query, SceneFilter? filter, IReadOnlyList<int[]>? hierarchicalTagGroups = null)
+    private IQueryable<Video> ApplyFilters(IQueryable<Video> query, VideoFilter? filter, IReadOnlyList<int[]>? hierarchicalTagGroups = null)
     {
         if (filter == null) return query;
         var currentUserId = EngagementQueryHelpers.CurrentUserId(_db);
+            if (filter.Ids?.Count > 0)
+                query = query.Where(s => filter.Ids.Contains(s.Id));
             if (!string.IsNullOrEmpty(filter.Title))
                 query = query.Where(s => s.Title != null && EF.Functions.ILike(s.Title, $"%{filter.Title}%"));
             if (filter.Rating.HasValue)
-                query = EngagementQueryHelpers.ApplyRatingMinimum(_db, query, currentUserId, RatingHostType.Scene, filter.Rating.Value);
+                query = EngagementQueryHelpers.ApplyRatingMinimum(_db, query, currentUserId, RatingHostType.Video, filter.Rating.Value);
             if (filter.Organized.HasValue)
                 query = query.Where(s => s.Organized == filter.Organized.Value);
             if (filter.IsVr.HasValue)
@@ -154,19 +165,19 @@ public class SceneRepository : ISceneRepository
             if (filter.GroupId.HasValue)
                 query = query.Where(s => s.GroupItems.Any(item => item.GroupId == filter.GroupId.Value));
             if (filter.GalleryId.HasValue)
-                query = query.Where(s => s.SceneGalleries.Any(sg => sg.GalleryId == filter.GalleryId.Value));
+                query = query.Where(s => s.VideoGalleries.Any(sg => sg.GalleryId == filter.GalleryId.Value));
             if (filter.TagIds?.Count > 0)
-                query = ApplySceneTagAny(query, filter.TagIds);
+                query = ApplyVideoTagAny(query, filter.TagIds);
             if (filter.PerformerIds?.Count > 0)
                 query = query.Where(s => s.PerformerIds.Any(id => filter.PerformerIds.Contains(id)));
 
             // Advanced criteria
-            query = EngagementQueryHelpers.ApplyRatingCriterion(_db, query, currentUserId, RatingHostType.Scene, filter.RatingCriterion);
-            query = EngagementQueryHelpers.ApplyAffinityIntCriterion(_db, query, currentUserId, AffinityHostType.Scene, nameof(UserEntityAffinity.LikeCount), filter.LikeCounterCriterion);
-            query = EngagementQueryHelpers.ApplyAffinityIntCriterion(_db, query, currentUserId, AffinityHostType.Scene, nameof(UserEntityAffinity.ViewCount), filter.PlayCountCriterion);
+            query = EngagementQueryHelpers.ApplyRatingCriterion(_db, query, currentUserId, RatingHostType.Video, filter.RatingCriterion);
+            query = EngagementQueryHelpers.ApplyAffinityIntCriterion(_db, query, currentUserId, AffinityHostType.Video, nameof(UserEntityAffinity.LikeCount), filter.LikeCounterCriterion);
+            query = EngagementQueryHelpers.ApplyAffinityIntCriterion(_db, query, currentUserId, AffinityHostType.Video, nameof(UserEntityAffinity.ViewCount), filter.PlayCountCriterion);
 
             if (filter.PerformerCountCriterion != null)
-                query = ApplyIntCriterion(query, filter.PerformerCountCriterion, s => s.ScenePerformers.Count);
+                query = ApplyIntCriterion(query, filter.PerformerCountCriterion, s => s.VideoPerformers.Count);
 
             if (filter.DurationCriterion != null)
                 query = ApplyIntCriterion(query, filter.DurationCriterion, s => (int)s.MaxDuration);
@@ -183,7 +194,7 @@ public class SceneRepository : ISceneRepository
             if (filter.FileCountCriterion != null)
                 query = ApplyIntCriterion(query, filter.FileCountCriterion, s => s.FileCount);
 
-            query = ApplySceneTagCriterion(query, filter.TagsCriterion, hierarchicalTagGroups);
+            query = ApplyVideoTagCriterion(query, filter.TagsCriterion, hierarchicalTagGroups);
             query = ApplyTagDurationCriterion(query, filter.TagDurationCriterion);
             query = ApplyMultiIdCriterion(query, filter.PerformersCriterion, s => s.PerformerIds);
 
@@ -256,8 +267,8 @@ public class SceneRepository : ISceneRepository
 
             if (filter.PerformerFavoriteCriterion != null)
                 query = filter.PerformerFavoriteCriterion.Value
-                    ? query.Where(s => s.ScenePerformers.Any(sp => sp.Performer!.Favorite))
-                    : query.Where(s => !s.ScenePerformers.Any(sp => sp.Performer!.Favorite));
+                    ? query.Where(s => s.VideoPerformers.Any(sp => sp.Performer!.Favorite))
+                    : query.Where(s => !s.VideoPerformers.Any(sp => sp.Performer!.Favorite));
 
             if (filter.RemoteIdCriterion != null)
             {
@@ -285,15 +296,15 @@ public class SceneRepository : ISceneRepository
 
             // Resume time criterion
             if (filter.ResumeTimeCriterion != null)
-                query = EngagementQueryHelpers.ApplyAffinityDoubleAsIntCriterion(_db, query, currentUserId, AffinityHostType.Scene, nameof(UserEntityAffinity.LastPositionSec), filter.ResumeTimeCriterion);
+                query = EngagementQueryHelpers.ApplyAffinityDoubleAsIntCriterion(_db, query, currentUserId, AffinityHostType.Video, nameof(UserEntityAffinity.LastPositionSec), filter.ResumeTimeCriterion);
 
             // Play duration criterion
             if (filter.PlayDurationCriterion != null)
-                query = EngagementQueryHelpers.ApplyAffinityDoubleAsIntCriterion(_db, query, currentUserId, AffinityHostType.Scene, nameof(UserEntityAffinity.TotalConsumedSec), filter.PlayDurationCriterion);
+                query = EngagementQueryHelpers.ApplyAffinityDoubleAsIntCriterion(_db, query, currentUserId, AffinityHostType.Video, nameof(UserEntityAffinity.TotalConsumedSec), filter.PlayDurationCriterion);
 
             // Galleries criterion
             if (filter.GalleriesCriterion != null)
-                query = ApplyMultiIdCriterion(query, filter.GalleriesCriterion, s => s.SceneGalleries.Select(sg => sg.GalleryId));
+                query = ApplyMultiIdCriterion(query, filter.GalleriesCriterion, s => s.VideoGalleries.Select(sg => sg.GalleryId));
 
             // URL criterion
             if (filter.UrlCriterion != null)
@@ -312,11 +323,11 @@ public class SceneRepository : ISceneRepository
             // Timestamp criteria
             query = FilterHelpers.ApplyTimestamp(query, filter.CreatedAtCriterion, s => s.CreatedAt);
             query = FilterHelpers.ApplyTimestamp(query, filter.UpdatedAtCriterion, s => s.UpdatedAt);
-            query = EngagementQueryHelpers.ApplyAffinityTimestampCriterion(_db, query, currentUserId, AffinityHostType.Scene, nameof(UserEntityAffinity.LastConsumedAt), filter.LastPlayedAtCriterion);
+            query = EngagementQueryHelpers.ApplyAffinityTimestampCriterion(_db, query, currentUserId, AffinityHostType.Video, nameof(UserEntityAffinity.LastConsumedAt), filter.LastPlayedAtCriterion);
 
             query = ApplyPerformerOccurrenceTagCriterion(query, filter.PerformerTagsCriterion, GetIncludedPerformerIds(filter));
 
-            // Performer age criterion (age at time of scene based on scene date and performer birthdate)
+            // Performer age criterion (age at time of video based on video date and performer birthdate)
             query = ApplyPerformerAgeCriterion(query, filter.PerformerAgeCriterion);
 
             // Captions criterion (filter by caption content)
@@ -326,7 +337,7 @@ public class SceneRepository : ISceneRepository
             if (filter.InteractiveSpeedCriterion != null)
                 query = ApplyIntCriterion(query, filter.InteractiveSpeedCriterion, s => s.InteractiveSpeed ?? 0);
 
-            query = query.ApplyCustomFieldCriteria(_db, CustomFieldEntityTypes.Scene, filter.CustomFieldCriterion, filter.CustomFieldCriteria);
+            query = query.ApplyCustomFieldCriteria(_db, CustomFieldEntityTypes.Video, filter.CustomFieldCriterion, filter.CustomFieldCriteria);
 
             // Orientation criterion: landscape, portrait, or square based on file dimensions
             if (filter.OrientationCriterion != null)
@@ -344,7 +355,7 @@ public class SceneRepository : ISceneRepository
         return query;
     }
 
-    private IQueryable<Scene> ApplySceneSearch(IQueryable<Scene> query, string? search)
+    private IQueryable<Video> ApplyVideoSearch(IQueryable<Video> query, string? search)
     {
         var textQuery = FullTextSearchHelpers.Apply(_db, query, search,
             s => s.Title,
@@ -357,51 +368,51 @@ public class SceneRepository : ISceneRepository
         if (string.IsNullOrWhiteSpace(normalized)) return textQuery;
         var normalizedLower = normalized.ToLowerInvariant();
         // Tags (and tag aliases) match on whole words rather than substrings so a search like
-        // "1F" does not also pull in scenes tagged "1F1M". Space-padding both sides makes the
+        // "1F" does not also pull in videos tagged "1F1M". Space-padding both sides makes the
         // term match only when it appears as a complete space-delimited word, and works on both
         // PostgreSQL and the SQLite test provider.
         var tagWordTerm = $" {normalizedLower} ";
 
         var relationalQuery = query.Where(s =>
             (s.Studio != null && s.Studio.Name.ToLower().Contains(normalizedLower)) ||
-            s.ScenePerformers.Any(sp => sp.Performer != null && (
+            s.VideoPerformers.Any(sp => sp.Performer != null && (
                 sp.Performer.Name.ToLower().Contains(normalizedLower) ||
                 sp.Performer.Aliases.Any(alias => alias.Alias.ToLower().Contains(normalizedLower)))) ||
-            s.SceneTags.Any(st => st.Tag != null && (
+            s.VideoTags.Any(st => st.Tag != null && (
                 (" " + st.Tag.Name.ToLower() + " ").Contains(tagWordTerm) ||
                 st.Tag.Aliases.Any(alias => (" " + alias.Alias.ToLower() + " ").Contains(tagWordTerm)))) ||
-            s.SceneGalleries.Any(sg => sg.Gallery != null && sg.Gallery.Title != null && sg.Gallery.Title.ToLower().Contains(normalizedLower)) ||
+            s.VideoGalleries.Any(sg => sg.Gallery != null && sg.Gallery.Title != null && sg.Gallery.Title.ToLower().Contains(normalizedLower)) ||
             s.GroupItems.Any(item => item.Group != null && item.Group.Name.ToLower().Contains(normalizedLower)));
 
         return textQuery.Concat(relationalQuery).Distinct();
     }
 
-    private IQueryable<Scene> ApplySorting(IQueryable<Scene> query, string sort, bool desc, int? seed = null)
+    private IQueryable<Video> ApplySorting(IQueryable<Video> query, string sort, bool desc, int? seed = null)
     {
         if (sort == "random")
-            return SeededRandomOrdering.OrderBy(query, seed, scene => scene.Id, desc);
+            return SeededRandomOrdering.OrderBy(query, seed, video => video.Id, desc);
 
         return ApplySortingSwitch(query, sort, desc);
     }
 
-    private IQueryable<Scene> ApplySortingSwitch(IQueryable<Scene> query, string sort, bool desc)
+    private IQueryable<Video> ApplySortingSwitch(IQueryable<Video> query, string sort, bool desc)
     {
         if (FilterHelpers.TryParseCustomFieldSort(sort, out _, out _))
-            return query.ApplyCustomFieldSort(_db, CustomFieldEntityTypes.Scene, sort, desc);
+            return query.ApplyCustomFieldSort(_db, CustomFieldEntityTypes.Video, sort, desc);
 
         return sort switch
         {
             "title" => desc ? query.OrderByDescending(s => s.Title) : query.OrderBy(s => s.Title),
             // Null dates sort to bottom: treat null as MinValue so they come last when desc
             "date" => desc ? query.OrderByDescending(s => s.Date ?? DateOnly.MinValue) : query.OrderBy(s => s.Date ?? DateOnly.MinValue),
-            "rating" => EngagementQueryHelpers.ApplyRatingSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Scene, desc),
-            "play_count" => EngagementQueryHelpers.ApplyAffinityIntSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Scene, nameof(UserEntityAffinity.ViewCount), desc),
-            "like_counter" => EngagementQueryHelpers.ApplyAffinityIntSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Scene, nameof(UserEntityAffinity.LikeCount), desc),
+            "rating" => EngagementQueryHelpers.ApplyRatingSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Video, desc),
+            "play_count" => EngagementQueryHelpers.ApplyAffinityIntSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Video, nameof(UserEntityAffinity.ViewCount), desc),
+            "like_counter" => EngagementQueryHelpers.ApplyAffinityIntSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Video, nameof(UserEntityAffinity.LikeCount), desc),
             "last_like_at" => ApplyLastFavoriteSort(query, desc),
             "organized" => desc ? query.OrderByDescending(s => s.Organized) : query.OrderBy(s => s.Organized),
-            "last_played_at" => EngagementQueryHelpers.ApplyAffinityTimestampSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Scene, nameof(UserEntityAffinity.LastConsumedAt), desc),
-            "play_duration" => EngagementQueryHelpers.ApplyAffinityDoubleSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Scene, nameof(UserEntityAffinity.TotalConsumedSec), desc),
-            "resume_time" => EngagementQueryHelpers.ApplyAffinityDoubleSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Scene, nameof(UserEntityAffinity.LastPositionSec), desc),
+            "last_played_at" => EngagementQueryHelpers.ApplyAffinityTimestampSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Video, nameof(UserEntityAffinity.LastConsumedAt), desc),
+            "play_duration" => EngagementQueryHelpers.ApplyAffinityDoubleSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Video, nameof(UserEntityAffinity.TotalConsumedSec), desc),
+            "resume_time" => EngagementQueryHelpers.ApplyAffinityDoubleSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), AffinityHostType.Video, nameof(UserEntityAffinity.LastPositionSec), desc),
             "random" => query.OrderBy(s => s.Id),
             "duration" => desc ? query.OrderByDescending(s => s.MaxDuration) : query.OrderBy(s => s.MaxDuration),
             "file_size" => desc ? query.OrderByDescending(s => s.MaxFileSize) : query.OrderBy(s => s.MaxFileSize),
@@ -414,11 +425,11 @@ public class SceneRepository : ISceneRepository
             "phash" => ApplyPhashSort(query, desc),
             "perceptual_similarity" => ApplyPhashSort(query, desc),
             "tag_count" => desc
-                ? query.OrderByDescending(s => s.SceneTags.Count)
-                : query.OrderBy(s => s.SceneTags.Count),
+                ? query.OrderByDescending(s => s.VideoTags.Count)
+                : query.OrderBy(s => s.VideoTags.Count),
             "performer_count" => desc
-                ? query.OrderByDescending(s => s.ScenePerformers.Count)
-                : query.OrderBy(s => s.ScenePerformers.Count),
+                ? query.OrderByDescending(s => s.VideoPerformers.Count)
+                : query.OrderBy(s => s.VideoPerformers.Count),
             "performer_age" => ApplyPerformerAgeSort(query, desc),
             "studio" => ApplyStudioSort(query, desc),
             "code" => ApplyStudioCodeSort(query, desc),
@@ -428,80 +439,80 @@ public class SceneRepository : ISceneRepository
         };
     }
 
-    private static IQueryable<Scene> ApplyLastFavoriteSort(IQueryable<Scene> query, bool desc)
+    private static IQueryable<Video> ApplyLastFavoriteSort(IQueryable<Video> query, bool desc)
     {
-        var sortQuery = query.Select(scene => new
+        var sortQuery = query.Select(video => new
         {
-            Scene = scene,
-            LastFavoriteAt = scene.LikeHistory.Select(history => (DateTime?)history.OccurredAt).Max(),
+            Video = video,
+            LastFavoriteAt = video.LikeHistory.Select(history => (DateTime?)history.OccurredAt).Max(),
         });
 
         return desc
-            ? sortQuery.OrderBy(item => item.LastFavoriteAt == null ? 1 : 0).ThenByDescending(item => item.LastFavoriteAt).Select(item => item.Scene)
-            : sortQuery.OrderBy(item => item.LastFavoriteAt == null ? 1 : 0).ThenBy(item => item.LastFavoriteAt).Select(item => item.Scene);
+            ? sortQuery.OrderBy(item => item.LastFavoriteAt == null ? 1 : 0).ThenByDescending(item => item.LastFavoriteAt).Select(item => item.Video)
+            : sortQuery.OrderBy(item => item.LastFavoriteAt == null ? 1 : 0).ThenBy(item => item.LastFavoriteAt).Select(item => item.Video);
     }
 
-    private IQueryable<Scene> ApplyBitrateCriterion(IQueryable<Scene> query, IntCriterion criterion)
+    private IQueryable<Video> ApplyBitrateCriterion(IQueryable<Video> query, IntCriterion criterion)
     {
         var val = (long)criterion.Value;
         var val2 = (long)(criterion.Value2 ?? criterion.Value);
-        var bitRateQuery = query.Select(scene => new
+        var bitRateQuery = query.Select(video => new
         {
-            Scene = scene,
+            Video = video,
             BitRateKbps = ((_db.VideoFiles
-                .Where(file => file.SceneId == (scene.ParentSceneId ?? scene.Id))
+                .Where(file => file.VideoId == (video.ParentVideoId ?? video.Id))
                 .Max(file => (long?)file.BitRate) ?? 0L) / 1000L),
         });
 
         return criterion.Modifier switch
         {
-            CriterionModifier.Equals => bitRateQuery.Where(item => item.BitRateKbps == val).Select(item => item.Scene),
-            CriterionModifier.NotEquals => bitRateQuery.Where(item => item.BitRateKbps != val).Select(item => item.Scene),
-            CriterionModifier.GreaterThan => bitRateQuery.Where(item => item.BitRateKbps > val).Select(item => item.Scene),
-            CriterionModifier.LessThan => bitRateQuery.Where(item => item.BitRateKbps < val).Select(item => item.Scene),
-            CriterionModifier.Between => bitRateQuery.Where(item => item.BitRateKbps >= val && item.BitRateKbps <= val2).Select(item => item.Scene),
-            CriterionModifier.NotBetween => bitRateQuery.Where(item => item.BitRateKbps < val || item.BitRateKbps > val2).Select(item => item.Scene),
+            CriterionModifier.Equals => bitRateQuery.Where(item => item.BitRateKbps == val).Select(item => item.Video),
+            CriterionModifier.NotEquals => bitRateQuery.Where(item => item.BitRateKbps != val).Select(item => item.Video),
+            CriterionModifier.GreaterThan => bitRateQuery.Where(item => item.BitRateKbps > val).Select(item => item.Video),
+            CriterionModifier.LessThan => bitRateQuery.Where(item => item.BitRateKbps < val).Select(item => item.Video),
+            CriterionModifier.Between => bitRateQuery.Where(item => item.BitRateKbps >= val && item.BitRateKbps <= val2).Select(item => item.Video),
+            CriterionModifier.NotBetween => bitRateQuery.Where(item => item.BitRateKbps < val || item.BitRateKbps > val2).Select(item => item.Video),
             _ => query,
         };
     }
 
-    private IQueryable<Scene> ApplyBitrateSort(IQueryable<Scene> query, bool desc)
+    private IQueryable<Video> ApplyBitrateSort(IQueryable<Video> query, bool desc)
     {
-        var bitRateQuery = query.Select(scene => new
+        var bitRateQuery = query.Select(video => new
         {
-            Scene = scene,
+            Video = video,
             BitRate = _db.VideoFiles
-                .Where(file => file.SceneId == (scene.ParentSceneId ?? scene.Id))
+                .Where(file => file.VideoId == (video.ParentVideoId ?? video.Id))
                 .Max(file => (long?)file.BitRate) ?? 0L,
         });
 
         return desc
-            ? bitRateQuery.OrderByDescending(item => item.BitRate).ThenByDescending(item => item.Scene.Id).Select(item => item.Scene)
-            : bitRateQuery.OrderBy(item => item.BitRate).ThenBy(item => item.Scene.Id).Select(item => item.Scene);
+            ? bitRateQuery.OrderByDescending(item => item.BitRate).ThenByDescending(item => item.Video.Id).Select(item => item.Video)
+            : bitRateQuery.OrderBy(item => item.BitRate).ThenBy(item => item.Video.Id).Select(item => item.Video);
     }
 
-    private static IQueryable<Scene> ApplyFileModTimeSort(IQueryable<Scene> query, bool desc)
+    private static IQueryable<Video> ApplyFileModTimeSort(IQueryable<Video> query, bool desc)
     {
         return desc
-            ? query.OrderBy(scene => scene.MaxFileModTime == null ? 1 : 0).ThenByDescending(scene => scene.MaxFileModTime)
-            : query.OrderBy(scene => scene.MaxFileModTime == null ? 1 : 0).ThenBy(scene => scene.MaxFileModTime);
+            ? query.OrderBy(video => video.MaxFileModTime == null ? 1 : 0).ThenByDescending(video => video.MaxFileModTime)
+            : query.OrderBy(video => video.MaxFileModTime == null ? 1 : 0).ThenBy(video => video.MaxFileModTime);
     }
 
-    private static IQueryable<Scene> ApplyPathSort(IQueryable<Scene> query, bool desc)
+    private static IQueryable<Video> ApplyPathSort(IQueryable<Video> query, bool desc)
     {
         return desc
-            ? query.OrderBy(scene => scene.MaxPath == null ? 1 : 0).ThenByDescending(scene => scene.MaxPath)
-            : query.OrderBy(scene => scene.MinPath == null ? 1 : 0).ThenBy(scene => scene.MinPath);
+            ? query.OrderBy(video => video.MaxPath == null ? 1 : 0).ThenByDescending(video => video.MaxPath)
+            : query.OrderBy(video => video.MinPath == null ? 1 : 0).ThenBy(video => video.MinPath);
     }
 
-    private static IQueryable<Scene> ApplyPhashSort(IQueryable<Scene> query, bool desc)
+    private static IQueryable<Video> ApplyPhashSort(IQueryable<Video> query, bool desc)
     {
         if (desc)
         {
-            var descendingQuery = query.Select(scene => new
+            var descendingQuery = query.Select(video => new
             {
-                Scene = scene,
-                Phash = scene.Files
+                Video = video,
+                Phash = video.Files
                     .SelectMany(file => file.Fingerprints
                         .Where(fingerprint => fingerprint.Type == "phash" && fingerprint.Value != "")
                         .Select(fingerprint => fingerprint.Value))
@@ -512,13 +523,13 @@ public class SceneRepository : ISceneRepository
             return descendingQuery
                 .OrderBy(item => item.Phash == null ? 1 : 0)
                 .ThenByDescending(item => item.Phash)
-                .Select(item => item.Scene);
+                .Select(item => item.Video);
         }
 
-        var ascendingQuery = query.Select(scene => new
+        var ascendingQuery = query.Select(video => new
         {
-            Scene = scene,
-            Phash = scene.Files
+            Video = video,
+            Phash = video.Files
                 .SelectMany(file => file.Fingerprints
                     .Where(fingerprint => fingerprint.Type == "phash" && fingerprint.Value != "")
                     .Select(fingerprint => fingerprint.Value))
@@ -529,76 +540,76 @@ public class SceneRepository : ISceneRepository
         return ascendingQuery
             .OrderBy(item => item.Phash == null ? 1 : 0)
             .ThenBy(item => item.Phash)
-            .Select(item => item.Scene);
+            .Select(item => item.Video);
     }
 
-    private static IQueryable<Scene> ApplyStudioSort(IQueryable<Scene> query, bool desc)
+    private static IQueryable<Video> ApplyStudioSort(IQueryable<Video> query, bool desc)
     {
-        var sortQuery = query.Select(scene => new
+        var sortQuery = query.Select(video => new
         {
-            Scene = scene,
-            StudioName = scene.Studio != null ? scene.Studio.Name : null,
+            Video = video,
+            StudioName = video.Studio != null ? video.Studio.Name : null,
         });
 
         return desc
-            ? sortQuery.OrderBy(item => item.StudioName == null ? 1 : 0).ThenByDescending(item => item.StudioName).Select(item => item.Scene)
-            : sortQuery.OrderBy(item => item.StudioName == null ? 1 : 0).ThenBy(item => item.StudioName).Select(item => item.Scene);
+            ? sortQuery.OrderBy(item => item.StudioName == null ? 1 : 0).ThenByDescending(item => item.StudioName).Select(item => item.Video)
+            : sortQuery.OrderBy(item => item.StudioName == null ? 1 : 0).ThenBy(item => item.StudioName).Select(item => item.Video);
     }
 
-    private static IQueryable<Scene> ApplyStudioCodeSort(IQueryable<Scene> query, bool desc)
+    private static IQueryable<Video> ApplyStudioCodeSort(IQueryable<Video> query, bool desc)
     {
-        var sortQuery = query.Select(scene => new
+        var sortQuery = query.Select(video => new
         {
-            Scene = scene,
-            Code = scene.Code,
+            Video = video,
+            Code = video.Code,
         });
 
         return desc
-            ? sortQuery.OrderBy(item => item.Code == null ? 1 : 0).ThenByDescending(item => item.Code).Select(item => item.Scene)
-            : sortQuery.OrderBy(item => item.Code == null ? 1 : 0).ThenBy(item => item.Code).Select(item => item.Scene);
+            ? sortQuery.OrderBy(item => item.Code == null ? 1 : 0).ThenByDescending(item => item.Code).Select(item => item.Video)
+            : sortQuery.OrderBy(item => item.Code == null ? 1 : 0).ThenBy(item => item.Code).Select(item => item.Video);
     }
 
-    private static IQueryable<Scene> ApplyPerformerAgeSort(IQueryable<Scene> query, bool desc)
+    private static IQueryable<Video> ApplyPerformerAgeSort(IQueryable<Video> query, bool desc)
     {
         if (desc)
         {
-            var descendingQuery = query.Select(scene => new
+            var descendingQuery = query.Select(video => new
             {
-                Scene = scene,
-                PerformerAge = scene.ScenePerformers
-                    .Where(sp => scene.Date != null && sp.Performer!.Birthdate != null)
+                Video = video,
+                PerformerAge = video.VideoPerformers
+                    .Where(sp => video.Date != null && sp.Performer!.Birthdate != null)
                     .Select(sp => (int?)(
-                        scene.Date!.Value.Year - sp.Performer!.Birthdate!.Value.Year
-                        - ((scene.Date!.Value.Month < sp.Performer!.Birthdate!.Value.Month
-                            || (scene.Date!.Value.Month == sp.Performer!.Birthdate!.Value.Month && scene.Date!.Value.Day < sp.Performer!.Birthdate!.Value.Day)) ? 1 : 0)))
+                        video.Date!.Value.Year - sp.Performer!.Birthdate!.Value.Year
+                        - ((video.Date!.Value.Month < sp.Performer!.Birthdate!.Value.Month
+                            || (video.Date!.Value.Month == sp.Performer!.Birthdate!.Value.Month && video.Date!.Value.Day < sp.Performer!.Birthdate!.Value.Day)) ? 1 : 0)))
                     .Max(),
             });
 
             return descendingQuery
                 .OrderBy(item => item.PerformerAge == null ? 1 : 0)
                 .ThenByDescending(item => item.PerformerAge)
-                .Select(item => item.Scene);
+                .Select(item => item.Video);
         }
 
-        var ascendingQuery = query.Select(scene => new
+        var ascendingQuery = query.Select(video => new
         {
-            Scene = scene,
-            PerformerAge = scene.ScenePerformers
-                .Where(sp => scene.Date != null && sp.Performer!.Birthdate != null)
+            Video = video,
+            PerformerAge = video.VideoPerformers
+                .Where(sp => video.Date != null && sp.Performer!.Birthdate != null)
                 .Select(sp => (int?)(
-                    scene.Date!.Value.Year - sp.Performer!.Birthdate!.Value.Year
-                    - ((scene.Date!.Value.Month < sp.Performer!.Birthdate!.Value.Month
-                        || (scene.Date!.Value.Month == sp.Performer!.Birthdate!.Value.Month && scene.Date!.Value.Day < sp.Performer!.Birthdate!.Value.Day)) ? 1 : 0)))
+                    video.Date!.Value.Year - sp.Performer!.Birthdate!.Value.Year
+                    - ((video.Date!.Value.Month < sp.Performer!.Birthdate!.Value.Month
+                        || (video.Date!.Value.Month == sp.Performer!.Birthdate!.Value.Month && video.Date!.Value.Day < sp.Performer!.Birthdate!.Value.Day)) ? 1 : 0)))
                 .Min(),
         });
 
         return ascendingQuery
             .OrderBy(item => item.PerformerAge == null ? 1 : 0)
             .ThenBy(item => item.PerformerAge)
-            .Select(item => item.Scene);
+            .Select(item => item.Video);
     }
 
-    private static IQueryable<Scene> ApplyPathCriterion(IQueryable<Scene> query, StringCriterion? criterion)
+    private static IQueryable<Video> ApplyPathCriterion(IQueryable<Video> query, StringCriterion? criterion)
     {
         if (criterion == null) return query;
 
@@ -620,7 +631,7 @@ public class SceneRepository : ISceneRepository
         };
     }
 
-    private static IQueryable<Scene> ApplyFingerprintCriterion(IQueryable<Scene> query, StringCriterion? criterion, string fingerprintType)
+    private static IQueryable<Video> ApplyFingerprintCriterion(IQueryable<Video> query, StringCriterion? criterion, string fingerprintType)
     {
         if (criterion == null) return query;
 
@@ -629,27 +640,27 @@ public class SceneRepository : ISceneRepository
 
         return criterion.Modifier switch
         {
-            CriterionModifier.Equals => query.Where(scene => scene.Files.Any(file =>
+            CriterionModifier.Equals => query.Where(video => video.Files.Any(file =>
                 file.Fingerprints.Any(fingerprint => fingerprint.Type == fingerprintType && fingerprint.Value == value))),
-            CriterionModifier.NotEquals => query.Where(scene => !scene.Files.Any(file =>
+            CriterionModifier.NotEquals => query.Where(video => !video.Files.Any(file =>
                 file.Fingerprints.Any(fingerprint => fingerprint.Type == fingerprintType && fingerprint.Value == value))),
-            CriterionModifier.Includes => query.Where(scene => scene.Files.Any(file =>
+            CriterionModifier.Includes => query.Where(video => video.Files.Any(file =>
                 file.Fingerprints.Any(fingerprint => fingerprint.Type == fingerprintType && EF.Functions.ILike(fingerprint.Value, pattern)))),
-            CriterionModifier.Excludes => query.Where(scene => !scene.Files.Any(file =>
+            CriterionModifier.Excludes => query.Where(video => !video.Files.Any(file =>
                 file.Fingerprints.Any(fingerprint => fingerprint.Type == fingerprintType && EF.Functions.ILike(fingerprint.Value, pattern)))),
-            CriterionModifier.MatchesRegex => query.Where(scene => scene.Files.Any(file =>
+            CriterionModifier.MatchesRegex => query.Where(video => video.Files.Any(file =>
                 file.Fingerprints.Any(fingerprint => fingerprint.Type == fingerprintType && Regex.IsMatch(fingerprint.Value, value, RegexOptions.IgnoreCase)))),
-            CriterionModifier.NotMatchesRegex => query.Where(scene => !scene.Files.Any(file =>
+            CriterionModifier.NotMatchesRegex => query.Where(video => !video.Files.Any(file =>
                 file.Fingerprints.Any(fingerprint => fingerprint.Type == fingerprintType && Regex.IsMatch(fingerprint.Value, value, RegexOptions.IgnoreCase)))),
-            CriterionModifier.IsNull => query.Where(scene => !scene.Files.Any(file =>
+            CriterionModifier.IsNull => query.Where(video => !video.Files.Any(file =>
                 file.Fingerprints.Any(fingerprint => fingerprint.Type == fingerprintType && fingerprint.Value != ""))),
-            CriterionModifier.NotNull => query.Where(scene => scene.Files.Any(file =>
+            CriterionModifier.NotNull => query.Where(video => video.Files.Any(file =>
                 file.Fingerprints.Any(fingerprint => fingerprint.Type == fingerprintType && fingerprint.Value != ""))),
             _ => query,
         };
     }
 
-    private static IQueryable<Scene> ApplyFingerprintCriterion(IQueryable<Scene> query, FingerprintCriterion? criterion)
+    private static IQueryable<Video> ApplyFingerprintCriterion(IQueryable<Video> query, FingerprintCriterion? criterion)
     {
         if (criterion == null || string.IsNullOrWhiteSpace(criterion.Type)) return query;
 
@@ -663,42 +674,42 @@ public class SceneRepository : ISceneRepository
             criterion.Type);
     }
 
-    private IQueryable<Scene> ApplyDuplicatedPhashCriterion(IQueryable<Scene> query, BoolCriterion criterion)
+    private IQueryable<Video> ApplyDuplicatedPhashCriterion(IQueryable<Video> query, BoolCriterion criterion)
     {
-        var duplicatedQuery = query.Where(scene => scene.Files
+        var duplicatedQuery = query.Where(video => video.Files
             .SelectMany(file => file.Fingerprints
                 .Where(fingerprint => fingerprint.Type == "phash" && fingerprint.Value != "")
                 .Select(fingerprint => fingerprint.Value))
             .Any(phash => _db.VideoFiles.Any(otherFile =>
-                otherFile.SceneId.HasValue
-                && otherFile.SceneId.Value != scene.Id
+                otherFile.VideoId.HasValue
+                && otherFile.VideoId.Value != video.Id
                 && otherFile.Fingerprints.Any(otherFingerprint => otherFingerprint.Type == "phash" && otherFingerprint.Value == phash))));
 
-        return criterion.Value ? duplicatedQuery : query.Where(scene => !duplicatedQuery.Select(item => item.Id).Contains(scene.Id));
+        return criterion.Value ? duplicatedQuery : query.Where(video => !duplicatedQuery.Select(item => item.Id).Contains(video.Id));
     }
 
-    private IQueryable<Scene> ApplyDuplicatedTitleCriterion(IQueryable<Scene> query, BoolCriterion criterion)
+    private IQueryable<Video> ApplyDuplicatedTitleCriterion(IQueryable<Video> query, BoolCriterion criterion)
     {
-        var duplicatedQuery = query.Where(scene => scene.Title != null && scene.Title != ""
-            && _db.Scenes.Any(other => other.Id != scene.Id
+        var duplicatedQuery = query.Where(video => video.Title != null && video.Title != ""
+            && _db.Videos.Any(other => other.Id != video.Id
                 && other.Title != null
-                && other.Title.ToLower() == scene.Title.ToLower()));
+                && other.Title.ToLower() == video.Title.ToLower()));
 
-        return criterion.Value ? duplicatedQuery : query.Where(scene => !duplicatedQuery.Select(item => item.Id).Contains(scene.Id));
+        return criterion.Value ? duplicatedQuery : query.Where(video => !duplicatedQuery.Select(item => item.Id).Contains(video.Id));
     }
 
-    private IQueryable<Scene> ApplyDuplicatedRemoteIdCriterion(IQueryable<Scene> query, BoolCriterion criterion)
+    private IQueryable<Video> ApplyDuplicatedRemoteIdCriterion(IQueryable<Video> query, BoolCriterion criterion)
     {
-        var duplicatedQuery = query.Where(scene => scene.RemoteIds.Any(remoteId =>
+        var duplicatedQuery = query.Where(video => video.RemoteIds.Any(remoteId =>
             remoteId.RemoteId != ""
-            && _db.Set<SceneRemoteId>().Any(other => other.Id != remoteId.Id
+            && _db.Set<VideoRemoteId>().Any(other => other.Id != remoteId.Id
                 && other.Endpoint == remoteId.Endpoint
                 && other.RemoteId == remoteId.RemoteId)));
 
-        return criterion.Value ? duplicatedQuery : query.Where(scene => !duplicatedQuery.Select(item => item.Id).Contains(scene.Id));
+        return criterion.Value ? duplicatedQuery : query.Where(video => !duplicatedQuery.Select(item => item.Id).Contains(video.Id));
     }
 
-    private static IQueryable<Scene> ApplyVideoCodecCriterion(IQueryable<Scene> query, StringCriterion? criterion)
+    private static IQueryable<Video> ApplyVideoCodecCriterion(IQueryable<Video> query, StringCriterion? criterion)
     {
         if (criterion == null) return query;
 
@@ -719,7 +730,7 @@ public class SceneRepository : ISceneRepository
         };
     }
 
-    private static IQueryable<Scene> ApplyAudioCodecCriterion(IQueryable<Scene> query, StringCriterion? criterion)
+    private static IQueryable<Video> ApplyAudioCodecCriterion(IQueryable<Video> query, StringCriterion? criterion)
     {
         if (criterion == null) return query;
 
@@ -740,7 +751,7 @@ public class SceneRepository : ISceneRepository
         };
     }
 
-    private static IQueryable<Scene> ApplyPerformerAgeCriterion(IQueryable<Scene> query, IntCriterion? criterion)
+    private static IQueryable<Video> ApplyPerformerAgeCriterion(IQueryable<Video> query, IntCriterion? criterion)
     {
         if (criterion == null) return query;
 
@@ -749,27 +760,27 @@ public class SceneRepository : ISceneRepository
 
         return criterion.Modifier switch
         {
-            CriterionModifier.Equals => query.Where(s => s.Date != null && s.ScenePerformers.Any(sp =>
+            CriterionModifier.Equals => query.Where(s => s.Date != null && s.VideoPerformers.Any(sp =>
                 sp.Performer!.Birthdate != null &&
                 (s.Date.Value.Year - sp.Performer.Birthdate.Value.Year
                     - ((s.Date.Value.Month < sp.Performer.Birthdate.Value.Month
                         || (s.Date.Value.Month == sp.Performer.Birthdate.Value.Month && s.Date.Value.Day < sp.Performer.Birthdate.Value.Day)) ? 1 : 0)) == value)),
-            CriterionModifier.NotEquals => query.Where(s => s.Date != null && s.ScenePerformers.Any(sp =>
+            CriterionModifier.NotEquals => query.Where(s => s.Date != null && s.VideoPerformers.Any(sp =>
                 sp.Performer!.Birthdate != null &&
                 (s.Date.Value.Year - sp.Performer.Birthdate.Value.Year
                     - ((s.Date.Value.Month < sp.Performer.Birthdate.Value.Month
                         || (s.Date.Value.Month == sp.Performer.Birthdate.Value.Month && s.Date.Value.Day < sp.Performer.Birthdate.Value.Day)) ? 1 : 0)) != value)),
-            CriterionModifier.GreaterThan => query.Where(s => s.Date != null && s.ScenePerformers.Any(sp =>
+            CriterionModifier.GreaterThan => query.Where(s => s.Date != null && s.VideoPerformers.Any(sp =>
                 sp.Performer!.Birthdate != null &&
                 (s.Date.Value.Year - sp.Performer.Birthdate.Value.Year
                     - ((s.Date.Value.Month < sp.Performer.Birthdate.Value.Month
                         || (s.Date.Value.Month == sp.Performer.Birthdate.Value.Month && s.Date.Value.Day < sp.Performer.Birthdate.Value.Day)) ? 1 : 0)) > value)),
-            CriterionModifier.LessThan => query.Where(s => s.Date != null && s.ScenePerformers.Any(sp =>
+            CriterionModifier.LessThan => query.Where(s => s.Date != null && s.VideoPerformers.Any(sp =>
                 sp.Performer!.Birthdate != null &&
                 (s.Date.Value.Year - sp.Performer.Birthdate.Value.Year
                     - ((s.Date.Value.Month < sp.Performer.Birthdate.Value.Month
                         || (s.Date.Value.Month == sp.Performer.Birthdate.Value.Month && s.Date.Value.Day < sp.Performer.Birthdate.Value.Day)) ? 1 : 0)) < value)),
-            CriterionModifier.Between => query.Where(s => s.Date != null && s.ScenePerformers.Any(sp =>
+            CriterionModifier.Between => query.Where(s => s.Date != null && s.VideoPerformers.Any(sp =>
                 sp.Performer!.Birthdate != null &&
                 (s.Date.Value.Year - sp.Performer.Birthdate.Value.Year
                     - ((s.Date.Value.Month < sp.Performer.Birthdate.Value.Month
@@ -784,7 +795,7 @@ public class SceneRepository : ISceneRepository
     private static string NormalizePathValue(string value) => value.Replace("\\", "/");
 
     // Helper methods for criterion-based filtering
-    private static IQueryable<Scene> ApplyIntCriterion(IQueryable<Scene> query, IntCriterion? criterion, System.Linq.Expressions.Expression<Func<Scene, int>> selector)
+    private static IQueryable<Video> ApplyIntCriterion(IQueryable<Video> query, IntCriterion? criterion, System.Linq.Expressions.Expression<Func<Video, int>> selector)
     {
         if (criterion == null) return query;
         var val = criterion.Value;
@@ -794,19 +805,19 @@ public class SceneRepository : ISceneRepository
 
         return criterion.Modifier switch
         {
-            CriterionModifier.Equals => query.Where(System.Linq.Expressions.Expression.Lambda<Func<Scene, bool>>(
+            CriterionModifier.Equals => query.Where(System.Linq.Expressions.Expression.Lambda<Func<Video, bool>>(
                 System.Linq.Expressions.Expression.Equal(body, System.Linq.Expressions.Expression.Constant(val)), param)),
-            CriterionModifier.NotEquals => query.Where(System.Linq.Expressions.Expression.Lambda<Func<Scene, bool>>(
+            CriterionModifier.NotEquals => query.Where(System.Linq.Expressions.Expression.Lambda<Func<Video, bool>>(
                 System.Linq.Expressions.Expression.NotEqual(body, System.Linq.Expressions.Expression.Constant(val)), param)),
-            CriterionModifier.GreaterThan => query.Where(System.Linq.Expressions.Expression.Lambda<Func<Scene, bool>>(
+            CriterionModifier.GreaterThan => query.Where(System.Linq.Expressions.Expression.Lambda<Func<Video, bool>>(
                 System.Linq.Expressions.Expression.GreaterThan(body, System.Linq.Expressions.Expression.Constant(val)), param)),
-            CriterionModifier.LessThan => query.Where(System.Linq.Expressions.Expression.Lambda<Func<Scene, bool>>(
+            CriterionModifier.LessThan => query.Where(System.Linq.Expressions.Expression.Lambda<Func<Video, bool>>(
                 System.Linq.Expressions.Expression.LessThan(body, System.Linq.Expressions.Expression.Constant(val)), param)),
-            CriterionModifier.Between => query.Where(System.Linq.Expressions.Expression.Lambda<Func<Scene, bool>>(
+            CriterionModifier.Between => query.Where(System.Linq.Expressions.Expression.Lambda<Func<Video, bool>>(
                 System.Linq.Expressions.Expression.AndAlso(
                     System.Linq.Expressions.Expression.GreaterThanOrEqual(body, System.Linq.Expressions.Expression.Constant(val)),
                     System.Linq.Expressions.Expression.LessThanOrEqual(body, System.Linq.Expressions.Expression.Constant(val2))), param)),
-            CriterionModifier.NotBetween => query.Where(System.Linq.Expressions.Expression.Lambda<Func<Scene, bool>>(
+            CriterionModifier.NotBetween => query.Where(System.Linq.Expressions.Expression.Lambda<Func<Video, bool>>(
                 System.Linq.Expressions.Expression.OrElse(
                     System.Linq.Expressions.Expression.LessThan(body, System.Linq.Expressions.Expression.Constant(val)),
                     System.Linq.Expressions.Expression.GreaterThan(body, System.Linq.Expressions.Expression.Constant(val2))), param)),
@@ -874,25 +885,25 @@ public class SceneRepository : ISceneRepository
         return expanded.ToArray();
     }
 
-    private static IQueryable<Scene> ApplyMultiIdCriterion(
-        IQueryable<Scene> query,
+    private static IQueryable<Video> ApplyMultiIdCriterion(
+        IQueryable<Video> query,
         MultiIdCriterion? criterion,
-        System.Linq.Expressions.Expression<Func<Scene, IEnumerable<int>>> idsSelector,
+        System.Linq.Expressions.Expression<Func<Video, IEnumerable<int>>> idsSelector,
         IReadOnlyList<int[]>? valueGroups = null)
         => MultiIdCriterionQueryHelper.Apply(query, criterion, idsSelector, valueGroups);
 
-    private IQueryable<Scene> ApplySceneTagCriterion(IQueryable<Scene> query, MultiIdCriterion? criterion, IReadOnlyList<int[]>? valueGroups = null)
+    private IQueryable<Video> ApplyVideoTagCriterion(IQueryable<Video> query, MultiIdCriterion? criterion, IReadOnlyList<int[]>? valueGroups = null)
     {
         if (criterion == null)
             return query;
 
-        var effectiveTags = EffectiveHostTagQuery.ForHostType(_db, AffinityHostType.Scene);
+        var effectiveTags = EffectiveHostTagQuery.ForHostType(_db, AffinityHostType.Video);
 
         if (criterion.Modifier == CriterionModifier.IsNull)
-            return query.Where(scene => !effectiveTags.Any(tag => tag.HostId == scene.Id));
+            return query.Where(video => !effectiveTags.Any(tag => tag.HostId == video.Id));
 
         if (criterion.Modifier == CriterionModifier.NotNull)
-            return query.Where(scene => effectiveTags.Any(tag => tag.HostId == scene.Id));
+            return query.Where(video => effectiveTags.Any(tag => tag.HostId == video.Id));
 
         var groups = valueGroups?.Where(group => group.Length > 0).ToArray()
             ?? criterion.Value.Where(tagId => tagId > 0).Select(tagId => new[] { tagId }).ToArray();
@@ -902,65 +913,65 @@ public class SceneRepository : ISceneRepository
         var ids = groups.SelectMany(group => group).Distinct().ToArray();
         return criterion.Modifier switch
         {
-            CriterionModifier.Excludes => ApplySceneTagNone(query, ids),
-            CriterionModifier.ExcludesAll => ApplySceneTagExcludesAll(query, groups),
-            CriterionModifier.IncludesAll => ApplySceneTagIncludesAll(query, groups),
-            _ => ApplySceneTagAny(query, ids),
+            CriterionModifier.Excludes => ApplyVideoTagNone(query, ids),
+            CriterionModifier.ExcludesAll => ApplyVideoTagExcludesAll(query, groups),
+            CriterionModifier.IncludesAll => ApplyVideoTagIncludesAll(query, groups),
+            _ => ApplyVideoTagAny(query, ids),
         };
     }
 
-    private IQueryable<Scene> ApplySceneTagIncludesAll(IQueryable<Scene> query, IReadOnlyList<int[]> groups)
+    private IQueryable<Video> ApplyVideoTagIncludesAll(IQueryable<Video> query, IReadOnlyList<int[]> groups)
     {
         foreach (var group in groups)
         {
-            query = ApplySceneTagAny(query, group);
+            query = ApplyVideoTagAny(query, group);
         }
 
         return query;
     }
 
-    private IQueryable<Scene> ApplySceneTagExcludesAll(IQueryable<Scene> query, IReadOnlyList<int[]> groups)
+    private IQueryable<Video> ApplyVideoTagExcludesAll(IQueryable<Video> query, IReadOnlyList<int[]> groups)
     {
         var matchingAll = query;
         foreach (var group in groups)
         {
-            matchingAll = ApplySceneTagAny(matchingAll, group);
+            matchingAll = ApplyVideoTagAny(matchingAll, group);
         }
 
-        return query.Where(scene => !matchingAll.Select(match => match.Id).Contains(scene.Id));
+        return query.Where(video => !matchingAll.Select(match => match.Id).Contains(video.Id));
     }
 
-    private IQueryable<Scene> ApplySceneTagAny(IQueryable<Scene> query, IReadOnlyCollection<int> tagIds)
+    private IQueryable<Video> ApplyVideoTagAny(IQueryable<Video> query, IReadOnlyCollection<int> tagIds)
     {
         var ids = tagIds.Where(tagId => tagId > 0).Distinct().ToArray();
         if (ids.Length == 0)
             return query;
 
-        var effectiveTags = EffectiveHostTagQuery.ForHostType(_db, AffinityHostType.Scene);
-        return query.Where(scene => effectiveTags.Any(tag => tag.HostId == scene.Id && ids.Contains(tag.TagId)));
+        var effectiveTags = EffectiveHostTagQuery.ForHostType(_db, AffinityHostType.Video);
+        return query.Where(video => effectiveTags.Any(tag => tag.HostId == video.Id && ids.Contains(tag.TagId)));
     }
 
-    private IQueryable<Scene> ApplySceneTagNone(IQueryable<Scene> query, IReadOnlyCollection<int> tagIds)
+    private IQueryable<Video> ApplyVideoTagNone(IQueryable<Video> query, IReadOnlyCollection<int> tagIds)
     {
         var ids = tagIds.Where(tagId => tagId > 0).Distinct().ToArray();
         if (ids.Length == 0)
             return query;
 
-        var effectiveTags = EffectiveHostTagQuery.ForHostType(_db, AffinityHostType.Scene);
-        return query.Where(scene => !effectiveTags.Any(tag => tag.HostId == scene.Id && ids.Contains(tag.TagId)));
+        var effectiveTags = EffectiveHostTagQuery.ForHostType(_db, AffinityHostType.Video);
+        return query.Where(video => !effectiveTags.Any(tag => tag.HostId == video.Id && ids.Contains(tag.TagId)));
     }
 
-    private IQueryable<Scene> ApplyEffectiveTagCountCriterion(IQueryable<Scene> query, IntCriterion criterion)
+    private IQueryable<Video> ApplyEffectiveTagCountCriterion(IQueryable<Video> query, IntCriterion criterion)
     {
-        var effectiveTags = EffectiveHostTagQuery.ForHostType(_db, AffinityHostType.Scene);
-        return ApplyIntCriterion(query, criterion, scene => effectiveTags
-            .Where(tag => tag.HostId == scene.Id)
+        var effectiveTags = EffectiveHostTagQuery.ForHostType(_db, AffinityHostType.Video);
+        return ApplyIntCriterion(query, criterion, video => effectiveTags
+            .Where(tag => tag.HostId == video.Id)
             .Select(tag => tag.TagId)
             .Distinct()
             .Count());
     }
 
-    private static int[] GetIncludedPerformerIds(SceneFilter filter)
+    private static int[] GetIncludedPerformerIds(VideoFilter filter)
     {
         var ids = new HashSet<int>();
         if (filter.PerformerIds is { Count: > 0 })
@@ -979,7 +990,7 @@ public class SceneRepository : ISceneRepository
         return ids.ToArray();
     }
 
-    private IQueryable<Scene> ApplyPerformerOccurrenceTagCriterion(IQueryable<Scene> query, MultiIdCriterion? criterion, IReadOnlyCollection<int> performerIds)
+    private IQueryable<Video> ApplyPerformerOccurrenceTagCriterion(IQueryable<Video> query, MultiIdCriterion? criterion, IReadOnlyCollection<int> performerIds)
     {
         if (criterion == null)
             return query;
@@ -990,7 +1001,7 @@ public class SceneRepository : ISceneRepository
             return query;
 
         var scopedApplications = _db.TagApplications.AsNoTracking()
-            .Where(application => application.HostType == AffinityHostType.Scene
+            .Where(application => application.HostType == AffinityHostType.Video
                 && application.ContextType == "performer"
                 && application.ContextId != null);
 
@@ -1004,43 +1015,43 @@ public class SceneRepository : ISceneRepository
         {
             query = criterion.Modifier switch
             {
-                CriterionModifier.Excludes => query.Where(scene => !scopedApplications.Any(application => application.HostId == scene.Id && tagIds.Contains(application.TagId))),
+                CriterionModifier.Excludes => query.Where(video => !scopedApplications.Any(application => application.HostId == video.Id && tagIds.Contains(application.TagId))),
                 CriterionModifier.ExcludesAll => ApplyPerformerOccurrenceTagExcludesAll(query, scopedApplications, tagIds),
                 CriterionModifier.IncludesAll => ApplyPerformerOccurrenceTagIncludesAll(query, scopedApplications, tagIds),
-                _ => query.Where(scene => scopedApplications.Any(application => application.HostId == scene.Id && tagIds.Contains(application.TagId))),
+                _ => query.Where(video => scopedApplications.Any(application => application.HostId == video.Id && tagIds.Contains(application.TagId))),
             };
         }
 
         if (excludedTagIds.Length > 0)
         {
-            query = query.Where(scene => !scopedApplications.Any(application => application.HostId == scene.Id && excludedTagIds.Contains(application.TagId)));
+            query = query.Where(video => !scopedApplications.Any(application => application.HostId == video.Id && excludedTagIds.Contains(application.TagId)));
         }
 
         return query;
     }
 
-    private static IQueryable<Scene> ApplyPerformerOccurrenceTagIncludesAll(IQueryable<Scene> query, IQueryable<TagApplication> applications, IReadOnlyCollection<int> tagIds)
+    private static IQueryable<Video> ApplyPerformerOccurrenceTagIncludesAll(IQueryable<Video> query, IQueryable<TagApplication> applications, IReadOnlyCollection<int> tagIds)
     {
         foreach (var tagId in tagIds)
         {
-            query = query.Where(scene => applications.Any(application => application.HostId == scene.Id && application.TagId == tagId));
+            query = query.Where(video => applications.Any(application => application.HostId == video.Id && application.TagId == tagId));
         }
 
         return query;
     }
 
-    private static IQueryable<Scene> ApplyPerformerOccurrenceTagExcludesAll(IQueryable<Scene> query, IQueryable<TagApplication> applications, IReadOnlyCollection<int> tagIds)
+    private static IQueryable<Video> ApplyPerformerOccurrenceTagExcludesAll(IQueryable<Video> query, IQueryable<TagApplication> applications, IReadOnlyCollection<int> tagIds)
     {
         var matchingAll = query;
         foreach (var tagId in tagIds)
         {
-            matchingAll = matchingAll.Where(scene => applications.Any(application => application.HostId == scene.Id && application.TagId == tagId));
+            matchingAll = matchingAll.Where(video => applications.Any(application => application.HostId == video.Id && application.TagId == tagId));
         }
 
-        return query.Where(scene => !matchingAll.Select(match => match.Id).Contains(scene.Id));
+        return query.Where(video => !matchingAll.Select(match => match.Id).Contains(video.Id));
     }
 
-    private IQueryable<Scene> ApplyTagDurationCriterion(IQueryable<Scene> query, TagDurationCriterion? criterion)
+    private IQueryable<Video> ApplyTagDurationCriterion(IQueryable<Video> query, TagDurationCriterion? criterion)
     {
         foreach (var clause in GetTagDurationClauses(criterion))
         {
@@ -1065,7 +1076,7 @@ public class SceneRepository : ISceneRepository
     private static bool IsTagDurationClauseValid(TagDurationClause clause)
         => clause.TagId > 0 && clause.Value.HasValue;
 
-    private IQueryable<Scene> ApplyTagDurationClause(IQueryable<Scene> query, TagDurationClause criterion)
+    private IQueryable<Video> ApplyTagDurationClause(IQueryable<Video> query, TagDurationClause criterion)
     {
         if (!IsTagDurationClauseValid(criterion))
             return query;
@@ -1074,7 +1085,7 @@ public class SceneRepository : ISceneRepository
         var value2 = criterion.Value2 ?? value;
 
         var applications = _db.TagApplications.AsNoTracking()
-            .Where(application => application.HostType == AffinityHostType.Scene && application.TagId == criterion.TagId);
+            .Where(application => application.HostType == AffinityHostType.Video && application.TagId == criterion.TagId);
 
         var contextMode = criterion.ContextMode?.Trim().ToLowerInvariant();
         if (contextMode == "host")
@@ -1107,12 +1118,13 @@ public class SceneRepository : ISceneRepository
 
         return criterion.Modifier switch
         {
-            CriterionModifier.Equals => query.Where(scene => durationQuery.Any(row => row.HostId == scene.Id && row.Value != null && row.Value == value)),
-            CriterionModifier.NotEquals => query.Where(scene => durationQuery.Any(row => row.HostId == scene.Id && row.Value != null && row.Value != value)),
-            CriterionModifier.LessThan => query.Where(scene => durationQuery.Any(row => row.HostId == scene.Id && row.Value != null && row.Value < value)),
-            CriterionModifier.Between => query.Where(scene => durationQuery.Any(row => row.HostId == scene.Id && row.Value != null && row.Value >= value && row.Value <= value2)),
-            CriterionModifier.NotBetween => query.Where(scene => durationQuery.Any(row => row.HostId == scene.Id && row.Value != null && (row.Value < value || row.Value > value2))),
-            _ => query.Where(scene => durationQuery.Any(row => row.HostId == scene.Id && row.Value != null && row.Value > value)),
+            CriterionModifier.Equals => query.Where(video => durationQuery.Any(row => row.HostId == video.Id && row.Value != null && row.Value == value)),
+            CriterionModifier.NotEquals => query.Where(video => durationQuery.Any(row => row.HostId == video.Id && row.Value != null && row.Value != value)),
+            CriterionModifier.GreaterThan => query.Where(video => durationQuery.Any(row => row.HostId == video.Id && row.Value != null && row.Value > value)),
+            CriterionModifier.LessThan => query.Where(video => durationQuery.Any(row => row.HostId == video.Id && row.Value != null && row.Value < value)),
+            CriterionModifier.Between => query.Where(video => durationQuery.Any(row => row.HostId == video.Id && row.Value != null && row.Value >= value && row.Value <= value2)),
+            CriterionModifier.NotBetween => query.Where(video => durationQuery.Any(row => row.HostId == video.Id && row.Value != null && (row.Value < value || row.Value > value2))),
+            _ => query,
         };
     }
 }

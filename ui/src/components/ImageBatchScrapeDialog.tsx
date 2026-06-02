@@ -5,14 +5,14 @@ import { scrapeAttempts, system } from "../api/client";
 import type { Image } from "../api/types";
 import { useAppConfig } from "../state/AppConfigContext";
 import { getImageDisplayTitle } from "../utils/imageDisplay";
-import type { BatchInputKind, ScrapeApplyPreferences } from "./sceneScrapeUtils";
+import type { BatchInputKind, ScrapeApplyPreferences } from "./videoScrapeUtils";
 import {
   findDefaultKind,
   findPreferredScraperId,
   loadScrapeApplyPreferences,
   saveScrapeApplyPreferences,
   supportsScrapeKind,
-} from "./sceneScrapeUtils";
+} from "./videoScrapeUtils";
 
 interface Props {
   open: boolean;

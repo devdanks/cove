@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { Building2, Check, FileAudio, FileText, Film, FolderOpen, Hash, Image as ImageIcon, Layers, Tag as TagIcon, User, Users, Volume2, VolumeX } from "lucide-react";
-import { entityImages, galleries as galleryApi, images as imageApi, scenes as sceneApi } from "../api/client";
-import type { Audio, Face, Gallery, Group, Image, Performer, Scene, SegmentRecord, Studio, Tag, TagGraphNode, TextDocument } from "../api/types";
+import { entityImages, galleries as galleryApi, images as imageApi, videos as videoApi } from "../api/client";
+import type { Audio, Face, Gallery, Group, Image, Performer, Video, SegmentRecord, Studio, Tag, TagGraphNode, TextDocument } from "../api/types";
 import type { Route } from "../router/location";
 import { getAudioDisplayTitle, getTextDisplayTitle } from "../utils/audioTextDisplay";
 import { getImageDisplayTitle } from "../utils/imageDisplay";
@@ -12,25 +12,25 @@ import { getEntityCardMinWidthPx } from "../hooks/useEntityCardSize";
 import { useListPageCardSizeContext } from "./ListPageCardSizeContext";
 import { formatDuration, formatFileSize, getResolutionLabel } from "./shared";
 import type { DetailListDisplayMode } from "./DetailListToolbar";
-import { AudioTile, FaceTile, GalleryTile, GroupTile, ImageTile, PerformerTile, SceneCard, SegmentTile, StudioTile, TagTile, TextTile } from "./EntityCards";
+import { AudioTile, FaceTile, GalleryTile, GroupTile, ImageTile, PerformerTile, VideoCard, SegmentTile, StudioTile, TagTile, TextTile } from "./EntityCards";
 import { FeedCardFrame, FeedChipButton, FeedChipOverflowMenu, FeedIdentityBadge, FeedMetadataPill, FeedPortraitMediaFrame, getFeedMediaStyle } from "./FeedCardFrame";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "./RouteCardLinkOverlay";
 import { VirtualizedInfiniteList } from "./VirtualizedInfiniteList";
 import { VirtualizedEntityGrid, VirtualizedWallColumns, type InfiniteEntityLoadingState } from "./VirtualizedEntityLayouts";
 import { WallMediaCard } from "./WallMediaCard";
-import { SceneTagger } from "./SceneTagger";
+import { VideoTagger } from "./VideoTagger";
 import { PerformerTagger } from "./PerformerTagger";
 import { StudioTagger } from "./StudioTagger";
 import { TagTagger } from "./TagTagger";
 import { ScraperEntityTagger } from "./ScraperEntityTagger";
 import { TagGraphView } from "./TagGraphView";
 
-export type RelatedEntityType = "scenes" | "images" | "performers" | "galleries" | "studios" | "tags" | "groups" | "audios" | "texts" | "segments" | "faces";
+export type RelatedEntityType = "videos" | "images" | "performers" | "galleries" | "studios" | "tags" | "groups" | "audios" | "texts" | "segments" | "faces";
 
-type RelatedEntityItem = Scene | Image | Performer | Gallery | Studio | Tag | Group | Audio | TextDocument | SegmentRecord | Face;
+type RelatedEntityItem = Video | Image | Performer | Gallery | Studio | Tag | Group | Audio | TextDocument | SegmentRecord | Face;
 
 const RELATED_ENTITY_DISPLAY_MODES: Record<RelatedEntityType, DetailListDisplayMode[]> = {
-  scenes: ["grid", "list", "wall", "tagger", "feed", "vertical"],
+  videos: ["grid", "list", "wall", "tagger", "feed", "vertical"],
   images: ["grid", "list", "wall", "tagger", "feed"],
   performers: ["grid", "list", "wall", "tagger"],
   galleries: ["grid", "list", "wall", "tagger"],
@@ -44,7 +44,7 @@ const RELATED_ENTITY_DISPLAY_MODES: Record<RelatedEntityType, DetailListDisplayM
 };
 
 const ENTITY_CARD_SIZE_TYPE: Partial<Record<RelatedEntityType, string>> = {
-  scenes: "scenes",
+  videos: "videos",
   images: "images",
   performers: "performers",
   galleries: "galleries",
@@ -57,7 +57,7 @@ const ENTITY_CARD_SIZE_TYPE: Partial<Record<RelatedEntityType, string>> = {
 };
 
 const ENTITY_LABELS: Record<RelatedEntityType, string> = {
-  scenes: "Scene",
+  videos: "Video",
   images: "Image",
   performers: "Performer",
   galleries: "Gallery",
@@ -94,7 +94,7 @@ interface RelatedEntityListViewProps<TItem extends RelatedEntityItem> extends In
   selecting?: boolean;
   onToggle?: (id: number) => void;
   onNavigate: (route: any) => void;
-  onSceneQuickView?: (id: number) => void;
+  onVideoQuickView?: (id: number) => void;
   onImageQuickView?: (id: number) => void;
   onImagePreview?: (image: Image, index: number) => void;
   onImageDetails?: (image: Image) => void;
@@ -111,7 +111,7 @@ export function RelatedEntityListView<TItem extends RelatedEntityItem>({
   selecting = false,
   onToggle,
   onNavigate,
-  onSceneQuickView,
+  onVideoQuickView,
   onImageQuickView,
   onImagePreview,
   onImageDetails,
@@ -136,12 +136,12 @@ export function RelatedEntityListView<TItem extends RelatedEntityItem>({
   const feedVideoStartPercent = appConfig?.config?.ui.feedVideoStartPercent ?? 0;
   const feedVideoStartMinDuration = appConfig?.config?.ui.feedVideoStartMinDuration ?? 0;
   const [verticalSoundEnabled, setVerticalSoundEnabled] = useState(feedVideoSound);
-  const [feedAudioSceneId, setFeedAudioSceneId] = useState<number | null>(null);
-  const renderItem = (item: TItem) => renderRelatedTile({ entityType, item, itemIndex: itemIndexes.get(item.id) ?? 0, selectedIds, selecting, onToggle, onNavigate, onSceneQuickView, onImageQuickView, onImagePreview, onImageDetails });
+  const [feedAudioVideoId, setFeedAudioVideoId] = useState<number | null>(null);
+  const renderItem = (item: TItem) => renderRelatedTile({ entityType, item, itemIndex: itemIndexes.get(item.id) ?? 0, selectedIds, selecting, onToggle, onNavigate, onVideoQuickView, onImageQuickView, onImagePreview, onImageDetails });
 
   useEffect(() => {
     setVerticalSoundEnabled(feedVideoSound);
-    if (!feedVideoSound) setFeedAudioSceneId(null);
+    if (!feedVideoSound) setFeedAudioVideoId(null);
   }, [feedVideoSound]);
 
   if (effectiveDisplayMode === "tagger") {
@@ -156,11 +156,11 @@ export function RelatedEntityListView<TItem extends RelatedEntityItem>({
     return <RelatedEntityListRows entityType={entityType} items={items} zoomLevel={effectiveZoomLevel} selectedIds={selectedIds} selecting={selecting} onToggle={onToggle} onNavigate={onNavigate} {...loadingState} />;
   }
 
-  if (effectiveDisplayMode === "feed" && (entityType === "scenes" || entityType === "images")) {
+  if (effectiveDisplayMode === "feed" && (entityType === "videos" || entityType === "images")) {
     return (
       <RelatedEntityFeed
         entityType={entityType}
-        items={items as Array<Scene | Image>}
+        items={items as Array<Video | Image>}
         selectedIds={selectedIds}
         selecting={selecting}
         onToggle={onToggle}
@@ -169,17 +169,17 @@ export function RelatedEntityListView<TItem extends RelatedEntityItem>({
         feedVideoSound={feedVideoSound}
         feedVideoStartPercent={feedVideoStartPercent}
         feedVideoStartMinDuration={feedVideoStartMinDuration}
-        feedAudioSceneId={feedAudioSceneId}
-        onFeedAudioSceneChange={setFeedAudioSceneId}
+        feedAudioVideoId={feedAudioVideoId}
+        onFeedAudioVideoChange={setFeedAudioVideoId}
         {...loadingState}
       />
     );
   }
 
-  if (effectiveDisplayMode === "vertical" && entityType === "scenes") {
+  if (effectiveDisplayMode === "vertical" && entityType === "videos") {
     return (
-      <RelatedSceneVerticalViewer
-        scenes={items as Scene[]}
+      <RelatedVideoVerticalViewer
+        videos={items as Video[]}
         selectedIds={selectedIds}
         selecting={selecting}
         onToggle={onToggle}
@@ -221,7 +221,7 @@ export function RelatedEntityListView<TItem extends RelatedEntityItem>({
   );
 }
 
-function renderRelatedTile<TItem extends RelatedEntityItem>({ entityType, item, itemIndex, selectedIds, selecting, onToggle, onNavigate, onSceneQuickView, onImageQuickView, onImagePreview, onImageDetails }: {
+function renderRelatedTile<TItem extends RelatedEntityItem>({ entityType, item, itemIndex, selectedIds, selecting, onToggle, onNavigate, onVideoQuickView, onImageQuickView, onImagePreview, onImageDetails }: {
   entityType: RelatedEntityType;
   item: TItem;
   itemIndex: number;
@@ -229,7 +229,7 @@ function renderRelatedTile<TItem extends RelatedEntityItem>({ entityType, item, 
   selecting: boolean;
   onToggle?: (id: number) => void;
   onNavigate: (route: any) => void;
-  onSceneQuickView?: (id: number) => void;
+  onVideoQuickView?: (id: number) => void;
   onImageQuickView?: (id: number) => void;
   onImagePreview?: (image: Image, index: number) => void;
   onImageDetails?: (image: Image) => void;
@@ -240,9 +240,9 @@ function renderRelatedTile<TItem extends RelatedEntityItem>({ entityType, item, 
   const onClick = () => selecting && onToggle ? onToggle(item.id) : onNavigate(route);
 
   switch (entityType) {
-    case "scenes": {
-      const scene = item as Scene;
-      return <SceneCard scene={scene} onClick={onClick} onNavigate={onNavigate} onQuickView={onSceneQuickView ? () => onSceneQuickView(scene.id) : undefined} selected={selected} onSelect={onSelect} selecting={selecting} />;
+    case "videos": {
+      const video = item as Video;
+      return <VideoCard video={video} onClick={onClick} onNavigate={onNavigate} onQuickView={onVideoQuickView ? () => onVideoQuickView(video.id) : undefined} selected={selected} onSelect={onSelect} selecting={selecting} />;
     }
     case "images": {
       const image = item as Image;
@@ -368,7 +368,7 @@ function renderRelatedTagger<TItem extends RelatedEntityItem>({ entityType, item
   onNavigate: (route: any) => void;
 }) {
   switch (entityType) {
-    case "scenes": return <SceneTagger scenes={items as Scene[]} selectedIds={selectedIds} selecting={selecting} onSelect={onToggle} onNavigate={(sceneId) => onNavigate({ page: "scene", id: sceneId })} />;
+    case "videos": return <VideoTagger videos={items as Video[]} selectedIds={selectedIds} selecting={selecting} onSelect={onToggle} onNavigate={(videoId) => onNavigate({ page: "video", id: videoId })} />;
     case "performers": return <PerformerTagger performers={items as Performer[]} selectedIds={selectedIds} selecting={selecting} onSelect={onToggle} onNavigate={(performerId) => onNavigate({ page: "performer", id: performerId })} />;
     case "studios": return <StudioTagger studios={items as Studio[]} selectedIds={selectedIds} selecting={selecting} onSelect={onToggle} />;
     case "tags": return <TagTagger tags={items as Tag[]} selectedIds={selectedIds} selecting={selecting} onSelect={onToggle} />;
@@ -405,7 +405,7 @@ function getScraperEntityType(entityType: RelatedEntityType) {
 }
 
 function getRoute(entityType: RelatedEntityType, item: RelatedEntityItem): Route {
-  const page = entityType === "scenes" ? "scene"
+  const page = entityType === "videos" ? "video"
     : entityType === "images" ? "image"
       : entityType === "performers" ? "performer"
         : entityType === "galleries" ? "gallery"
@@ -421,9 +421,9 @@ function getRoute(entityType: RelatedEntityType, item: RelatedEntityItem): Route
 
 function getRelatedTitle(entityType: RelatedEntityType, item: RelatedEntityItem) {
   switch (entityType) {
-    case "scenes": {
-      const scene = item as Scene;
-      return scene.title || scene.files?.[0]?.basename || `Scene ${scene.id}`;
+    case "videos": {
+      const video = item as Video;
+      return video.title || video.files?.[0]?.basename || `Video ${video.id}`;
     }
     case "images": return getImageDisplayTitle(item as Image);
     case "performers": return (item as Performer).name || `Performer ${item.id}`;
@@ -446,11 +446,11 @@ function getRelatedTitle(entityType: RelatedEntityType, item: RelatedEntityItem)
 
 function getRelatedSubtitle(entityType: RelatedEntityType, item: RelatedEntityItem) {
   switch (entityType) {
-    case "scenes": {
-      const scene = item as Scene;
-      const file = scene.files?.[0];
-      const duration = typeof scene.clipStartSec === "number" && typeof scene.clipEndSec === "number" ? Math.max(0, scene.clipEndSec - scene.clipStartSec) : file?.duration;
-      return [scene.studioName, file ? getResolutionLabel(file.width, file.height) : null, duration != null ? formatDuration(duration) : null].filter(Boolean).join(" · ") || "Scene";
+    case "videos": {
+      const video = item as Video;
+      const file = video.files?.[0];
+      const duration = typeof video.clipStartSec === "number" && typeof video.clipEndSec === "number" ? Math.max(0, video.clipEndSec - video.clipStartSec) : file?.duration;
+      return [video.studioName, file ? getResolutionLabel(file.width, file.height) : null, duration != null ? formatDuration(duration) : null].filter(Boolean).join(" · ") || "Video";
     }
     case "images": {
       const image = item as Image;
@@ -467,7 +467,7 @@ function getRelatedSubtitle(entityType: RelatedEntityType, item: RelatedEntityIt
     }
     case "studios": {
       const studio = item as Studio;
-      return [studio.parentName, studio.sceneCount != null ? `${studio.sceneCount} scenes` : null].filter(Boolean).join(" · ") || "Studio";
+      return [studio.parentName, studio.videoCount != null ? `${studio.videoCount} videos` : null].filter(Boolean).join(" · ") || "Studio";
     }
     case "tags": return (item as Tag).tagGroupName || "";
     case "groups": {
@@ -488,7 +488,7 @@ function getRelatedSubtitle(entityType: RelatedEntityType, item: RelatedEntityIt
     }
     case "faces": {
       const face = item as Face;
-      return [`${face.appearanceCount} appearances`, `${face.sceneCount} scenes`, `${face.imageCount} images`].join(" · ");
+      return [`${face.appearanceCount} appearances`, `${face.videoCount} videos`, `${face.imageCount} images`].join(" · ");
     }
   }
 }
@@ -536,8 +536,8 @@ function toTagGraphNode(tag: Tag): TagGraphNode {
     tagGroupColor: tag.tagGroupColor ?? undefined,
     parentIds: [],
     childIds: [],
-    totalUsageCount: (tag.sceneCount ?? 0) + (tag.segmentCount ?? 0) + (tag.imageCount ?? 0) + (tag.galleryCount ?? 0) + (tag.groupCount ?? 0) + (tag.performerCount ?? 0) + (tag.studioCount ?? 0),
-    sceneCount: tag.sceneCount ?? 0,
+    totalUsageCount: (tag.videoCount ?? 0) + (tag.segmentCount ?? 0) + (tag.imageCount ?? 0) + (tag.galleryCount ?? 0) + (tag.groupCount ?? 0) + (tag.performerCount ?? 0) + (tag.studioCount ?? 0),
+    videoCount: tag.videoCount ?? 0,
     segmentCount: tag.segmentCount ?? 0,
     imageCount: tag.imageCount ?? 0,
     galleryCount: tag.galleryCount ?? 0,
@@ -560,7 +560,7 @@ function renderRelatedWallTile<TItem extends RelatedEntityItem>({ entityType, it
   const onClick = () => selecting && onToggle ? onToggle(item.id) : onNavigate(getRoute(entityType, item));
 
   switch (entityType) {
-    case "scenes": return <RelatedSceneWallCard scene={item as Scene} selected={selected} selecting={selecting} onSelect={onSelect} onClick={onClick} />;
+    case "videos": return <RelatedVideoWallCard video={item as Video} selected={selected} selecting={selecting} onSelect={onSelect} onClick={onClick} />;
     case "images": return <RelatedImageWallCard image={item as Image} selected={selected} selecting={selecting} onSelect={onSelect} onClick={onClick} />;
     case "performers": return <RelatedPortraitWallCard entityType="performers" item={item as Performer} selected={selected} selecting={selecting} onSelect={onSelect} onClick={onClick} />;
     case "galleries": return <RelatedGalleryWallCard gallery={item as Gallery} selected={selected} selecting={selecting} onSelect={onSelect} onClick={onClick} />;
@@ -568,21 +568,21 @@ function renderRelatedWallTile<TItem extends RelatedEntityItem>({ entityType, it
   }
 }
 
-function RelatedSceneWallCard({ scene, selected, selecting, onSelect, onClick }: { scene: Scene; selected?: boolean; selecting?: boolean; onSelect?: () => void; onClick: () => void }) {
-  const file = scene.files[0];
-  const title = scene.title || file?.basename || `Scene ${scene.id}`;
-  const coverUrl = entityImages.sceneCoverUrl(scene.id, scene.updatedAt, 1280);
+function RelatedVideoWallCard({ video, selected, selecting, onSelect, onClick }: { video: Video; selected?: boolean; selecting?: boolean; onSelect?: () => void; onClick: () => void }) {
+  const file = video.files[0];
+  const title = video.title || file?.basename || `Video ${video.id}`;
+  const coverUrl = entityImages.videoCoverUrl(video.id, video.updatedAt, 1280);
   const appConfig = useOptionalAppConfig();
   const wallPreviewType = appConfig?.config?.ui.wallPreviewType ?? "video";
   const showTitle = appConfig?.config?.ui.wallShowTitle ?? true;
-  const duration = getSceneDisplayDuration(scene);
+  const duration = getVideoDisplayDuration(video);
 
   return (
     <WallMediaCard
       title={title}
       imageSrc={coverUrl}
-      videoSrc={sceneApi.previewUrl(scene.id)}
-      videoStatusSrc={sceneApi.previewStatusUrl(scene.id)}
+      videoSrc={videoApi.previewUrl(video.id)}
+      videoStatusSrc={videoApi.previewStatusUrl(video.id)}
       useVideo={wallPreviewType === "video" || wallPreviewType === "webp"}
       muted
       aspectRatio={file?.width && file.height ? `${file.width} / ${file.height}` : "16 / 9"}
@@ -590,7 +590,7 @@ function RelatedSceneWallCard({ scene, selected, selecting, onSelect, onClick }:
       className={`group ${selected ? "border-accent ring-1 ring-accent/60" : ""}`.trim()}
     >
       <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
-      <RouteCardLinkOverlay route={{ page: "scene", id: scene.id }} onClick={onClick} label={`Open scene ${title}`} selectionSafeZone />
+      <RouteCardLinkOverlay route={{ page: "video", id: video.id }} onClick={onClick} label={`Open video ${title}`} selectionSafeZone />
       <div className={`absolute inset-0 bg-gradient-to-t from-black/65 via-transparent to-transparent transition-opacity ${showTitle ? "opacity-0 group-hover:opacity-100" : "opacity-0"}`} />
       {showTitle ? <div className="absolute inset-x-0 bottom-0 p-2 opacity-0 transition-opacity group-hover:opacity-100"><p className="truncate text-xs font-medium text-white">{title}</p></div> : null}
       {duration > 0 ? <span className="absolute right-1 top-1 rounded bg-black/70 px-1 text-xs text-white">{formatDuration(duration)}</span> : null}
@@ -638,15 +638,15 @@ function RelatedGalleryWallCard({ gallery, selected, selecting, onSelect, onClic
       <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
       <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent p-2 text-xs font-medium text-white">
         <p className="truncate">{title}</p>
-        <p className="mt-0.5 text-[11px] text-white/75">{[gallery.imageCount ? `${gallery.imageCount} images` : null, gallery.sceneCount ? `${gallery.sceneCount} scenes` : null].filter(Boolean).join(" · ")}</p>
+        <p className="mt-0.5 text-[11px] text-white/75">{[gallery.imageCount ? `${gallery.imageCount} images` : null, gallery.videoCount ? `${gallery.videoCount} videos` : null].filter(Boolean).join(" · ")}</p>
       </div>
     </WallMediaCard>
   );
 }
 
-function RelatedEntityFeed({ entityType, items, selectedIds, selecting, onToggle, onNavigate, feedVideoSource, feedVideoSound, feedVideoStartPercent, feedVideoStartMinDuration, feedAudioSceneId, onFeedAudioSceneChange, infinitePageSize, hasNextPage, isFetchingNextPage, loadMore }: {
-  entityType: "scenes" | "images";
-  items: Array<Scene | Image>;
+function RelatedEntityFeed({ entityType, items, selectedIds, selecting, onToggle, onNavigate, feedVideoSource, feedVideoSound, feedVideoStartPercent, feedVideoStartMinDuration, feedAudioVideoId, onFeedAudioVideoChange, infinitePageSize, hasNextPage, isFetchingNextPage, loadMore }: {
+  entityType: "videos" | "images";
+  items: Array<Video | Image>;
   selectedIds?: Set<number>;
   selecting: boolean;
   onToggle?: (id: number) => void;
@@ -655,11 +655,11 @@ function RelatedEntityFeed({ entityType, items, selectedIds, selecting, onToggle
   feedVideoSound: boolean;
   feedVideoStartPercent: number;
   feedVideoStartMinDuration: number;
-  feedAudioSceneId: number | null;
-  onFeedAudioSceneChange: Dispatch<SetStateAction<number | null>>;
+  feedAudioVideoId: number | null;
+  onFeedAudioVideoChange: Dispatch<SetStateAction<number | null>>;
 } & InfiniteEntityLoadingState) {
-  const renderFeedItem = (item: Scene | Image) => entityType === "scenes"
-    ? <RelatedSceneFeedCard scene={item as Scene} selected={selectedIds?.has(item.id) ?? false} selecting={selecting} onSelect={onToggle ? () => onToggle(item.id) : undefined} onNavigate={onNavigate} feedVideoSource={feedVideoSource} feedVideoStartPercent={feedVideoStartPercent} feedVideoStartMinDuration={feedVideoStartMinDuration} soundEnabled={feedAudioSceneId === item.id} onPlaybackEligibilityChange={feedVideoSound ? (eligible) => onFeedAudioSceneChange((current) => eligible ? item.id : current === item.id ? null : current) : undefined} />
+  const renderFeedItem = (item: Video | Image) => entityType === "videos"
+    ? <RelatedVideoFeedCard video={item as Video} selected={selectedIds?.has(item.id) ?? false} selecting={selecting} onSelect={onToggle ? () => onToggle(item.id) : undefined} onNavigate={onNavigate} feedVideoSource={feedVideoSource} feedVideoStartPercent={feedVideoStartPercent} feedVideoStartMinDuration={feedVideoStartMinDuration} soundEnabled={feedAudioVideoId === item.id} onPlaybackEligibilityChange={feedVideoSound ? (eligible) => onFeedAudioVideoChange((current) => eligible ? item.id : current === item.id ? null : current) : undefined} />
     : <RelatedImageFeedCard image={item as Image} selected={selectedIds?.has(item.id) ?? false} selecting={selecting} onSelect={onToggle ? () => onToggle(item.id) : undefined} onNavigate={onNavigate} />;
 
   if (infinitePageSize && items.length > 0) {
@@ -683,36 +683,36 @@ function RelatedEntityFeed({ entityType, items, selectedIds, selecting, onToggle
   return <div className="mx-auto w-full max-w-[64rem] space-y-5 px-3 sm:px-4">{items.map((item) => <div key={item.id}>{renderFeedItem(item)}</div>)}</div>;
 }
 
-function RelatedSceneFeedCard({ scene, selected, selecting, onSelect, onNavigate, feedVideoSource, feedVideoStartPercent, feedVideoStartMinDuration, soundEnabled, onPlaybackEligibilityChange }: { scene: Scene; selected?: boolean; selecting?: boolean; onSelect?: () => void; onNavigate: (route: any) => void; feedVideoSource: string; feedVideoStartPercent: number; feedVideoStartMinDuration: number; soundEnabled: boolean; onPlaybackEligibilityChange?: (eligible: boolean) => void }) {
-  const file = scene.files[0];
-  const title = scene.title || file?.basename || `Scene ${scene.id}`;
-  const duration = getSceneDisplayDuration(scene);
-  const { coverUrl, videoSrc, videoStatusSrc } = getSceneFeedMedia(scene, feedVideoSource);
+function RelatedVideoFeedCard({ video, selected, selecting, onSelect, onNavigate, feedVideoSource, feedVideoStartPercent, feedVideoStartMinDuration, soundEnabled, onPlaybackEligibilityChange }: { video: Video; selected?: boolean; selecting?: boolean; onSelect?: () => void; onNavigate: (route: any) => void; feedVideoSource: string; feedVideoStartPercent: number; feedVideoStartMinDuration: number; soundEnabled: boolean; onPlaybackEligibilityChange?: (eligible: boolean) => void }) {
+  const file = video.files[0];
+  const title = video.title || file?.basename || `Video ${video.id}`;
+  const duration = getVideoDisplayDuration(video);
+  const { coverUrl, videoSrc, videoStatusSrc } = getVideoFeedMedia(video, feedVideoSource);
   const mediaStyle = getFeedMediaStyle(file);
-  const videoStartTimeSec = getSceneFeedVideoStartTime(scene, feedVideoSource, feedVideoStartPercent, feedVideoStartMinDuration);
-  const openOrSelect = () => selecting ? onSelect?.() : onNavigate({ page: "scene", id: scene.id });
+  const videoStartTimeSec = getVideoFeedVideoStartTime(video, feedVideoSource, feedVideoStartPercent, feedVideoStartMinDuration);
+  const openOrSelect = () => selecting ? onSelect?.() : onNavigate({ page: "video", id: video.id });
   const mediaOverlay = (
     <>
       <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
-      <RouteCardLinkOverlay route={{ page: "scene", id: scene.id }} onClick={openOrSelect} label={`Open scene ${title}`} selectionSafeZone />
+      <RouteCardLinkOverlay route={{ page: "video", id: video.id }} onClick={openOrSelect} label={`Open video ${title}`} selectionSafeZone />
     </>
   );
 
   return (
     <FeedCardFrame
-      dataAttribute={{ "data-feed-scene-id": scene.id }}
+      dataAttribute={{ "data-feed-video-id": video.id }}
       selected={selected}
-      identity={scene.studioName ? <FeedIdentityBadge>{scene.studioName}</FeedIdentityBadge> : undefined}
-      header={<>{scene.date ? <span>{scene.date}</span> : null}{duration > 0 ? <span>{formatDuration(duration)}</span> : null}</>}
+      identity={video.studioName ? <FeedIdentityBadge>{video.studioName}</FeedIdentityBadge> : undefined}
+      header={<>{video.date ? <span>{video.date}</span> : null}{duration > 0 ? <span>{formatDuration(duration)}</span> : null}</>}
       media={mediaStyle ? (
         <FeedPortraitMediaFrame title={title} backgroundSrc={coverUrl} className="cursor-pointer" media={<WallMediaCard title={title} imageSrc={coverUrl} videoSrc={videoSrc} videoStatusSrc={videoStatusSrc} useVideo muted={!soundEnabled} videoStartTimeSec={videoStartTimeSec} videoPlayThreshold={0.5} onVideoPlayEligibilityChange={onPlaybackEligibilityChange} fillMedia chromeless imageClassName="object-contain" videoClassName="object-contain" className="h-full w-full bg-transparent" />}>{mediaOverlay}</FeedPortraitMediaFrame>
       ) : (
-        <WallMediaCard title={title} imageSrc={coverUrl} videoSrc={videoSrc} videoStatusSrc={videoStatusSrc} useVideo muted={!soundEnabled} videoStartTimeSec={videoStartTimeSec} videoPlayThreshold={0.5} onVideoPlayEligibilityChange={onPlaybackEligibilityChange} playbackTracking={{ hostType: "scene", hostId: scene.id, surface: "feed", scopeKey: `related-scene-feed:${scene.id}` }} aspectRatio={file?.width && file.height ? `${file.width} / ${file.height}` : "16 / 9"} imageClassName="object-cover" style={mediaStyle} className="overflow-hidden rounded-2xl border border-border/70 bg-black/95 shadow-[0_18px_40px_rgba(0,0,0,0.35)] hover:border-border/70">{mediaOverlay}</WallMediaCard>
+        <WallMediaCard title={title} imageSrc={coverUrl} videoSrc={videoSrc} videoStatusSrc={videoStatusSrc} useVideo muted={!soundEnabled} videoStartTimeSec={videoStartTimeSec} videoPlayThreshold={0.5} onVideoPlayEligibilityChange={onPlaybackEligibilityChange} playbackTracking={{ hostType: "video", hostId: video.id, surface: "feed", scopeKey: `related-video-feed:${video.id}` }} aspectRatio={file?.width && file.height ? `${file.width} / ${file.height}` : "16 / 9"} imageClassName="object-cover" style={mediaStyle} className="overflow-hidden rounded-2xl border border-border/70 bg-black/95 shadow-[0_18px_40px_rgba(0,0,0,0.35)] hover:border-border/70">{mediaOverlay}</WallMediaCard>
       )}
       title={<button type="button" onClick={(event) => { event.stopPropagation(); openOrSelect(); }} className="text-left text-base font-semibold text-foreground transition-colors hover:text-accent">{title}</button>}
-      details={scene.details ? <p className="line-clamp-4">{scene.details}</p> : undefined}
-      metadata={(scene.organized || scene.galleries.length > 0) ? <>{scene.organized ? <FeedMetadataPill>Organized</FeedMetadataPill> : null}{scene.galleries.length > 0 ? <FeedMetadataPill>{scene.galleries.length} galleries</FeedMetadataPill> : null}</> : undefined}
-      chips={<RelatedFeedChips performers={scene.performers} tags={scene.tags} selecting={selecting} onSelect={onSelect} onNavigate={onNavigate} />}
+      details={video.details ? <p className="line-clamp-4">{video.details}</p> : undefined}
+      metadata={(video.organized || video.galleries.length > 0) ? <>{video.organized ? <FeedMetadataPill>Organized</FeedMetadataPill> : null}{video.galleries.length > 0 ? <FeedMetadataPill>{video.galleries.length} galleries</FeedMetadataPill> : null}</> : undefined}
+      chips={<RelatedFeedChips performers={video.performers} tags={video.tags} selecting={selecting} onSelect={onSelect} onNavigate={onNavigate} />}
     />
   );
 }
@@ -761,8 +761,8 @@ function RelatedFeedChips({ performers, tags, selecting, onSelect, onNavigate }:
   );
 }
 
-function RelatedSceneVerticalViewer({ scenes, selectedIds, selecting, onToggle, onNavigate, feedVideoSource, feedVideoStartPercent, feedVideoStartMinDuration, soundEnabled, onToggleSound, hasNextPage, isFetchingNextPage, loadMore }: {
-  scenes: Scene[];
+function RelatedVideoVerticalViewer({ videos, selectedIds, selecting, onToggle, onNavigate, feedVideoSource, feedVideoStartPercent, feedVideoStartMinDuration, soundEnabled, onToggleSound, hasNextPage, isFetchingNextPage, loadMore }: {
+  videos: Video[];
   selectedIds?: Set<number>;
   selecting: boolean;
   onToggle?: (id: number) => void;
@@ -775,19 +775,19 @@ function RelatedSceneVerticalViewer({ scenes, selectedIds, selecting, onToggle, 
 } & InfiniteEntityLoadingState) {
   const viewerRef = useRef<HTMLDivElement | null>(null);
   const [viewerHeight, setViewerHeight] = useState<number | null>(null);
-  const [activeSceneId, setActiveSceneId] = useState<number | null>(scenes[0]?.id ?? null);
-  const activeIndex = scenes.findIndex((scene) => scene.id === activeSceneId);
+  const [activeVideoId, setActiveVideoId] = useState<number | null>(videos[0]?.id ?? null);
+  const activeIndex = videos.findIndex((video) => video.id === activeVideoId);
   const itemHeight = Math.max(420, viewerHeight ?? 720);
 
   useEffect(() => {
-    if (scenes.length === 0) {
-      setActiveSceneId(null);
+    if (videos.length === 0) {
+      setActiveVideoId(null);
       return;
     }
-    if (!scenes.some((scene) => scene.id === activeSceneId)) {
-      setActiveSceneId(scenes[0].id);
+    if (!videos.some((video) => video.id === activeVideoId)) {
+      setActiveVideoId(videos[0].id);
     }
-  }, [activeSceneId, scenes]);
+  }, [activeVideoId, videos]);
 
   useEffect(() => {
     const updateViewerHeight = () => {
@@ -805,7 +805,7 @@ function RelatedSceneVerticalViewer({ scenes, selectedIds, selecting, onToggle, 
     };
   }, []);
 
-  if (scenes.length === 0) return null;
+  if (videos.length === 0) return null;
 
   return (
     <div
@@ -814,28 +814,28 @@ function RelatedSceneVerticalViewer({ scenes, selectedIds, selecting, onToggle, 
       className="relative -mx-2 snap-y snap-mandatory overflow-y-auto bg-black px-0 py-0 sm:-mx-3 md:-mx-4"
     >
       <VirtualizedInfiniteList
-        items={scenes}
-        getItemKey={(scene) => scene.id}
+        items={videos}
+        getItemKey={(video) => video.id}
         estimateSize={itemHeight}
         overscan={2}
         hasNextPage={Boolean(hasNextPage)}
         isFetchingNextPage={Boolean(isFetchingNextPage)}
         loadMore={loadMore ?? noop}
         scrollElementRef={viewerRef}
-        onActiveIndexChange={(idx) => setActiveSceneId(idx == null ? null : scenes[idx]?.id ?? null)}
+        onActiveIndexChange={(idx) => setActiveVideoId(idx == null ? null : videos[idx]?.id ?? null)}
         itemClassName="snap-start"
-        renderItem={({ item: scene, index }) => (
-          <RelatedSceneVerticalCard
-            scene={scene}
-            selected={selectedIds?.has(scene.id) ?? false}
+        renderItem={({ item: video, index }) => (
+          <RelatedVideoVerticalCard
+            video={video}
+            selected={selectedIds?.has(video.id) ?? false}
             selecting={selecting}
-            onSelect={onToggle ? () => onToggle(scene.id) : undefined}
+            onSelect={onToggle ? () => onToggle(video.id) : undefined}
             onNavigate={onNavigate}
             feedVideoSource={feedVideoSource}
             feedVideoStartPercent={feedVideoStartPercent}
             feedVideoStartMinDuration={feedVideoStartMinDuration}
             useVideo={activeIndex < 0 ? index === 0 : Math.abs(index - activeIndex) <= 1}
-            soundEnabled={soundEnabled && scene.id === activeSceneId}
+            soundEnabled={soundEnabled && video.id === activeVideoId}
             onToggleSound={onToggleSound}
             viewerHeight={viewerHeight}
           />
@@ -845,17 +845,17 @@ function RelatedSceneVerticalViewer({ scenes, selectedIds, selecting, onToggle, 
   );
 }
 
-function RelatedSceneVerticalCard({ scene, selected, selecting, onSelect, onNavigate, feedVideoSource, feedVideoStartPercent, feedVideoStartMinDuration, useVideo, soundEnabled, onToggleSound, viewerHeight }: { scene: Scene; selected?: boolean; selecting?: boolean; onSelect?: () => void; onNavigate: (route: any) => void; feedVideoSource: string; feedVideoStartPercent: number; feedVideoStartMinDuration: number; useVideo: boolean; soundEnabled: boolean; onToggleSound: () => void; viewerHeight: number | null }) {
-  const file = scene.files[0];
-  const title = scene.title || file?.basename || `Scene ${scene.id}`;
-  const duration = getSceneDisplayDuration(scene);
-  const { coverUrl, videoSrc, videoStatusSrc } = getSceneFeedMedia(scene, feedVideoSource);
-  const videoStartTimeSec = getSceneFeedVideoStartTime(scene, feedVideoSource, feedVideoStartPercent, feedVideoStartMinDuration);
-  const openOrSelect = () => selecting ? onSelect?.() : onNavigate({ page: "scene", id: scene.id });
+function RelatedVideoVerticalCard({ video, selected, selecting, onSelect, onNavigate, feedVideoSource, feedVideoStartPercent, feedVideoStartMinDuration, useVideo, soundEnabled, onToggleSound, viewerHeight }: { video: Video; selected?: boolean; selecting?: boolean; onSelect?: () => void; onNavigate: (route: any) => void; feedVideoSource: string; feedVideoStartPercent: number; feedVideoStartMinDuration: number; useVideo: boolean; soundEnabled: boolean; onToggleSound: () => void; viewerHeight: number | null }) {
+  const file = video.files[0];
+  const title = video.title || file?.basename || `Video ${video.id}`;
+  const duration = getVideoDisplayDuration(video);
+  const { coverUrl, videoSrc, videoStatusSrc } = getVideoFeedMedia(video, feedVideoSource);
+  const videoStartTimeSec = getVideoFeedVideoStartTime(video, feedVideoSource, feedVideoStartPercent, feedVideoStartMinDuration);
+  const openOrSelect = () => selecting ? onSelect?.() : onNavigate({ page: "video", id: video.id });
   const availableViewerHeight = viewerHeight != null ? Math.max(120, viewerHeight) : null;
 
   return (
-    <article data-vertical-scene-id={scene.id} className="flex h-full min-h-0 snap-start snap-always items-center justify-center px-2 py-0 sm:px-4">
+    <article data-vertical-video-id={video.id} className="flex h-full min-h-0 snap-start snap-always items-center justify-center px-2 py-0 sm:px-4">
       <WallMediaCard
         title={title}
         imageSrc={coverUrl}
@@ -865,7 +865,7 @@ function RelatedSceneVerticalCard({ scene, selected, selecting, onSelect, onNavi
         muted={!soundEnabled}
         videoStartTimeSec={videoStartTimeSec}
         videoPlayThreshold={0.72}
-        playbackTracking={{ hostType: "scene", hostId: scene.id, surface: "vertical", scopeKey: `related-scene-vertical:${scene.id}` }}
+        playbackTracking={{ hostType: "video", hostId: video.id, surface: "vertical", scopeKey: `related-video-vertical:${video.id}` }}
         aspectRatio="9 / 16"
         imageClassName="object-cover"
         style={{ width: availableViewerHeight != null ? `min(calc(100vw - 1rem), ${Math.round(availableViewerHeight * 0.5625)}px)` : "min(calc(100vw - 1rem), calc((100dvh - 10rem) * 0.5625))" }}
@@ -885,18 +885,18 @@ function RelatedSceneVerticalCard({ scene, selected, selecting, onSelect, onNavi
           {soundEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
         </button>
         <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
-        <RouteCardLinkOverlay route={{ page: "scene", id: scene.id }} onClick={openOrSelect} label={`Open scene ${title}`} selectionSafeZone />
+        <RouteCardLinkOverlay route={{ page: "video", id: video.id }} onClick={openOrSelect} label={`Open video ${title}`} selectionSafeZone />
         {duration > 0 ? <span className="absolute right-2 top-2 rounded bg-black/65 px-2 py-0.5 text-xs text-white">{formatDuration(duration)}</span> : null}
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/45 to-transparent p-4 pt-14 text-white">
           <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/75">
-            {scene.studioName ? <span>{scene.studioName}</span> : null}
-            {scene.date ? <span>{scene.date}</span> : null}
+            {video.studioName ? <span>{video.studioName}</span> : null}
+            {video.date ? <span>{video.date}</span> : null}
             <span>{feedVideoSource === "video" ? "Full video" : "Preview clip"}</span>
           </div>
           <p className="mt-1 line-clamp-2 text-base font-semibold leading-tight sm:text-lg">{title}</p>
           <div className="mt-2 flex flex-wrap gap-1.5 text-xs text-white/85">
-            {scene.performers.slice(0, 3).map((performer) => <span key={performer.id}>@{performer.name}</span>)}
-            {scene.tags.slice(0, 3).map((tag) => <span key={tag.id}>#{tag.name}</span>)}
+            {video.performers.slice(0, 3).map((performer) => <span key={performer.id}>@{performer.name}</span>)}
+            {video.tags.slice(0, 3).map((tag) => <span key={tag.id}>#{tag.name}</span>)}
           </div>
         </div>
       </WallMediaCard>
@@ -1002,7 +1002,7 @@ function RelatedThumbnail({ entityType, item, density }: { entityType: RelatedEn
 
 function getRelatedThumbnailUrl(entityType: RelatedEntityType, item: RelatedEntityItem, max: number) {
   switch (entityType) {
-    case "scenes": return entityImages.sceneCoverUrl((item as Scene).id, (item as Scene).updatedAt, Math.max(max, 960));
+    case "videos": return entityImages.videoCoverUrl((item as Video).id, (item as Video).updatedAt, Math.max(max, 960));
     case "images": return imageApi.thumbnailUrl((item as Image).id, max);
     case "performers": return (item as Performer).imagePath;
     case "galleries": return (item as Gallery).coverPath ?? galleryApi.coverUrl((item as Gallery).id, (item as Gallery).updatedAt, Math.max(max, 640));
@@ -1018,7 +1018,7 @@ function getRelatedThumbnailUrl(entityType: RelatedEntityType, item: RelatedEnti
 
 function getRelatedThumbnailIcon(entityType: RelatedEntityType) {
   switch (entityType) {
-    case "scenes": return Film;
+    case "videos": return Film;
     case "images": return ImageIcon;
     case "performers": return User;
     case "galleries": return FolderOpen;
@@ -1034,7 +1034,7 @@ function getRelatedThumbnailIcon(entityType: RelatedEntityType) {
 
 function getRelatedDescription(entityType: RelatedEntityType, item: RelatedEntityItem) {
   switch (entityType) {
-    case "scenes": return (item as Scene).details;
+    case "videos": return (item as Video).details;
     case "images": return (item as Image).details;
     case "performers": return (item as Performer).details ?? (item as Performer).aliases.slice(0, 4).join(", ");
     case "galleries": return (item as Gallery).details;
@@ -1052,7 +1052,7 @@ function getRelatedStatusBadge(entityType: RelatedEntityType, item: RelatedEntit
     : entityType === "studios" ? (item as Studio).favorite
       : entityType === "tags" ? (item as Tag).favorite
         : false;
-  const organized = entityType === "scenes" ? (item as Scene).organized
+  const organized = entityType === "videos" ? (item as Video).organized
     : entityType === "images" ? (item as Image).organized
       : entityType === "galleries" ? (item as Gallery).organized
         : entityType === "audios" ? (item as Audio).organized
@@ -1066,10 +1066,10 @@ function getRelatedStatusBadge(entityType: RelatedEntityType, item: RelatedEntit
 
 function getRelatedStats(entityType: RelatedEntityType, item: RelatedEntityItem) {
   switch (entityType) {
-    case "scenes": {
-      const scene = item as Scene;
-      const file = scene.files[0];
-      return [scene.date, file ? getResolutionLabel(file.width, file.height) : null, file?.size ? formatFileSize(file.size) : null, scene.performers.length ? `${scene.performers.length} performers` : null, scene.tags.length ? `${scene.tags.length} tags` : null].filter(Boolean) as string[];
+    case "videos": {
+      const video = item as Video;
+      const file = video.files[0];
+      return [video.date, file ? getResolutionLabel(file.width, file.height) : null, file?.size ? formatFileSize(file.size) : null, video.performers.length ? `${video.performers.length} performers` : null, video.tags.length ? `${video.tags.length} tags` : null].filter(Boolean) as string[];
     }
     case "images": {
       const image = item as Image;
@@ -1078,23 +1078,23 @@ function getRelatedStats(entityType: RelatedEntityType, item: RelatedEntityItem)
     }
     case "performers": {
       const performer = item as Performer;
-      return [performer.sceneCount ? `${performer.sceneCount} scenes` : null, performer.imageCount ? `${performer.imageCount} images` : null, performer.galleryCount ? `${performer.galleryCount} galleries` : null, performer.groupCount ? `${performer.groupCount} groups` : null].filter(Boolean) as string[];
+      return [performer.videoCount ? `${performer.videoCount} videos` : null, performer.imageCount ? `${performer.imageCount} images` : null, performer.galleryCount ? `${performer.galleryCount} galleries` : null, performer.groupCount ? `${performer.groupCount} groups` : null].filter(Boolean) as string[];
     }
     case "galleries": {
       const gallery = item as Gallery;
-      return [gallery.date, gallery.imageCount ? `${gallery.imageCount} images` : null, gallery.sceneCount ? `${gallery.sceneCount} scenes` : null, gallery.performers.length ? `${gallery.performers.length} performers` : null].filter(Boolean) as string[];
+      return [gallery.date, gallery.imageCount ? `${gallery.imageCount} images` : null, gallery.videoCount ? `${gallery.videoCount} videos` : null, gallery.performers.length ? `${gallery.performers.length} performers` : null].filter(Boolean) as string[];
     }
     case "studios": {
       const studio = item as Studio;
-      return [studio.sceneCount ? `${studio.sceneCount} scenes` : null, studio.imageCount ? `${studio.imageCount} images` : null, studio.galleryCount ? `${studio.galleryCount} galleries` : null, studio.childStudioCount ? `${studio.childStudioCount} child studios` : null].filter(Boolean) as string[];
+      return [studio.videoCount ? `${studio.videoCount} videos` : null, studio.imageCount ? `${studio.imageCount} images` : null, studio.galleryCount ? `${studio.galleryCount} galleries` : null, studio.childStudioCount ? `${studio.childStudioCount} child studios` : null].filter(Boolean) as string[];
     }
     case "tags": {
       const tag = item as Tag;
-      return [tag.tagGroupName, tag.sceneCount ? `${tag.sceneCount} scenes` : null, tag.imageCount ? `${tag.imageCount} images` : null, tag.performerCount ? `${tag.performerCount} performers` : null].filter(Boolean) as string[];
+      return [tag.tagGroupName, tag.videoCount ? `${tag.videoCount} videos` : null, tag.imageCount ? `${tag.imageCount} images` : null, tag.performerCount ? `${tag.performerCount} performers` : null].filter(Boolean) as string[];
     }
     case "groups": {
       const group = item as Group;
-      return [group.kind, group.itemCount ? `${group.itemCount} items` : null, group.sceneCount ? `${group.sceneCount} scenes` : null, group.imageCount ? `${group.imageCount} images` : null].filter(Boolean) as string[];
+      return [group.kind, group.itemCount ? `${group.itemCount} items` : null, group.videoCount ? `${group.videoCount} videos` : null, group.imageCount ? `${group.imageCount} images` : null].filter(Boolean) as string[];
     }
     case "audios": {
       const audio = item as Audio;
@@ -1110,32 +1110,32 @@ function getRelatedStats(entityType: RelatedEntityType, item: RelatedEntityItem)
     }
     case "faces": {
       const face = item as Face;
-      return [`${face.appearanceCount} appearances`, `${face.detectionCount} detections`, `${face.sceneCount} scenes`, `${face.imageCount} images`];
+      return [`${face.appearanceCount} appearances`, `${face.detectionCount} detections`, `${face.videoCount} videos`, `${face.imageCount} images`];
     }
   }
 }
 
-function getSceneDisplayDuration(scene: Scene) {
-  if (typeof scene.clipStartSec === "number" && typeof scene.clipEndSec === "number") {
-    return Math.max(0, scene.clipEndSec - scene.clipStartSec);
+function getVideoDisplayDuration(video: Video) {
+  if (typeof video.clipStartSec === "number" && typeof video.clipEndSec === "number") {
+    return Math.max(0, video.clipEndSec - video.clipStartSec);
   }
 
-  return scene.files[0]?.duration ?? 0;
+  return video.files[0]?.duration ?? 0;
 }
 
-function getSceneFeedMedia(scene: Scene, feedVideoSource: string) {
-  const coverUrl = entityImages.sceneCoverUrl(scene.id, scene.updatedAt, 1280);
+function getVideoFeedMedia(video: Video, feedVideoSource: string) {
+  const coverUrl = entityImages.videoCoverUrl(video.id, video.updatedAt, 1280);
 
   if (feedVideoSource === "video") {
-    return { coverUrl, videoSrc: sceneApi.streamUrl(scene.id), videoStatusSrc: undefined };
+    return { coverUrl, videoSrc: videoApi.streamUrl(video.id), videoStatusSrc: undefined };
   }
 
-  return { coverUrl, videoSrc: sceneApi.previewUrl(scene.id), videoStatusSrc: sceneApi.previewStatusUrl(scene.id) };
+  return { coverUrl, videoSrc: videoApi.previewUrl(video.id), videoStatusSrc: videoApi.previewStatusUrl(video.id) };
 }
 
-function getSceneFeedVideoStartTime(scene: Scene, feedVideoSource: string, startPercent: number, minDuration: number) {
+function getVideoFeedVideoStartTime(video: Video, feedVideoSource: string, startPercent: number, minDuration: number) {
   if (feedVideoSource !== "video" || startPercent <= 0) return 0;
-  const duration = getSceneDisplayDuration(scene);
+  const duration = getVideoDisplayDuration(video);
   if (duration <= Math.max(0, minDuration)) return 0;
   return duration * (Math.min(95, Math.max(0, startPercent)) / 100);
 }

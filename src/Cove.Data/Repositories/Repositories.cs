@@ -109,8 +109,8 @@ public class PerformerRepository : IPerformerRepository
         var sortQuery = query.Select(performer => new
         {
             Performer = performer,
-            LastFavoriteAt = performer.ScenePerformers
-                .SelectMany(scenePerformer => scenePerformer.Scene!.LikeHistory)
+            LastFavoriteAt = performer.VideoPerformers
+                .SelectMany(videoPerformer => videoPerformer.Video!.LikeHistory)
                 .Select(history => (DateTime?)history.OccurredAt)
                 .Max(),
         });
@@ -129,9 +129,9 @@ public class PerformerRepository : IPerformerRepository
         var sortQuery = query.Select(performer => new
         {
             Performer = performer,
-            LastPlayedAt = performer.ScenePerformers
-                .Select(scenePerformer => _db.UserEntityAffinities
-                    .Where(affinity => affinity.UserId == selectedUserId && affinity.HostType == AffinityHostType.Scene && affinity.HostId == scenePerformer.SceneId)
+            LastPlayedAt = performer.VideoPerformers
+                .Select(videoPerformer => _db.UserEntityAffinities
+                    .Where(affinity => affinity.UserId == selectedUserId && affinity.HostType == AffinityHostType.Video && affinity.HostId == videoPerformer.VideoId)
                     .Select(affinity => affinity.LastConsumedAt)
                     .FirstOrDefault())
                 .Max(),
@@ -143,9 +143,9 @@ public class PerformerRepository : IPerformerRepository
     }
 
     private IQueryable<Performer> ApplyPlayCountSort(IQueryable<Performer> query, bool desc)
-        => ApplySceneAffinityIntSumSort(query, nameof(UserEntityAffinity.ViewCount), desc);
+        => ApplyVideoAffinityIntSumSort(query, nameof(UserEntityAffinity.ViewCount), desc);
 
-    private IQueryable<Performer> ApplySceneAffinityIntSumCriterion(IQueryable<Performer> query, IntCriterion? criterion, string propertyName)
+    private IQueryable<Performer> ApplyVideoAffinityIntSumCriterion(IQueryable<Performer> query, IntCriterion? criterion, string propertyName)
     {
         if (criterion == null)
             return query;
@@ -154,15 +154,15 @@ public class PerformerRepository : IPerformerRepository
         if (userId is not int selectedUserId)
             return FilterHelpers.ApplyInt(query, criterion, _ => 0);
 
-        return FilterHelpers.ApplyInt(query, criterion, performer => performer.ScenePerformers
-            .Select(scenePerformer => _db.UserEntityAffinities
-                .Where(affinity => affinity.UserId == selectedUserId && affinity.HostType == AffinityHostType.Scene && affinity.HostId == scenePerformer.SceneId)
+        return FilterHelpers.ApplyInt(query, criterion, performer => performer.VideoPerformers
+            .Select(videoPerformer => _db.UserEntityAffinities
+                .Where(affinity => affinity.UserId == selectedUserId && affinity.HostType == AffinityHostType.Video && affinity.HostId == videoPerformer.VideoId)
                 .Select(affinity => EF.Property<int>(affinity, propertyName))
                 .FirstOrDefault())
             .Sum());
     }
 
-    private IQueryable<Performer> ApplySceneAffinityIntSumSort(IQueryable<Performer> query, string propertyName, bool desc)
+    private IQueryable<Performer> ApplyVideoAffinityIntSumSort(IQueryable<Performer> query, string propertyName, bool desc)
     {
         var userId = EngagementQueryHelpers.CurrentUserId(_db);
         if (userId is not int selectedUserId)
@@ -171,9 +171,9 @@ public class PerformerRepository : IPerformerRepository
         var sortQuery = query.Select(performer => new
         {
             Performer = performer,
-            Value = performer.ScenePerformers
-                .Select(scenePerformer => _db.UserEntityAffinities
-                    .Where(affinity => affinity.UserId == selectedUserId && affinity.HostType == AffinityHostType.Scene && affinity.HostId == scenePerformer.SceneId)
+            Value = performer.VideoPerformers
+                .Select(videoPerformer => _db.UserEntityAffinities
+                    .Where(affinity => affinity.UserId == selectedUserId && affinity.HostType == AffinityHostType.Video && affinity.HostId == videoPerformer.VideoId)
                     .Select(affinity => EF.Property<int>(affinity, propertyName))
                     .FirstOrDefault())
                 .Sum(),
@@ -262,6 +262,40 @@ public class PerformerRepository : IPerformerRepository
             .AsSplitQuery()
             .FirstOrDefaultAsync(p => p.Id == id, ct);
 
+    public async Task<IReadOnlyList<Performer>> FindByNamesOrRemoteIdsAsync(
+        IReadOnlyList<string> names,
+        string? remoteEndpoint,
+        IReadOnlyList<string> remoteIds,
+        CancellationToken ct = default)
+    {
+        var query = _db.Performers
+            .AsNoTracking()
+            .Include(p => p.Aliases)
+            .Include(p => p.RemoteIds);
+
+        if (!string.IsNullOrWhiteSpace(remoteEndpoint) && remoteIds.Count > 0)
+        {
+            return await query
+                .Where(p =>
+                    (p.RemoteIds.Any(r => r.Endpoint == remoteEndpoint && remoteIds.Contains(r.RemoteId)))
+                    || names.Contains(p.Name)
+                    || p.Aliases.Any(a => names.Contains(a.Alias)))
+                .ToListAsync(ct);
+        }
+
+        return await query
+            .Where(p => names.Contains(p.Name) || p.Aliases.Any(a => names.Contains(a.Alias)))
+            .ToListAsync(ct);
+    }
+
+    public async Task<Performer?> FindByRemoteIdAsync(string remoteEndpoint, string remoteId, CancellationToken ct = default)
+        => await _db.Performers
+            .Include(p => p.Aliases)
+            .Include(p => p.RemoteIds)
+            .FirstOrDefaultAsync(
+                p => p.RemoteIds.Any(r => r.Endpoint == remoteEndpoint && r.RemoteId == remoteId),
+                ct);
+
     public async Task<IReadOnlyList<Performer>> GetAllAsync(CancellationToken ct = default)
         => await _db.Performers.AsNoTracking().ToListAsync(ct);
 
@@ -322,7 +356,7 @@ public class PerformerRepository : IPerformerRepository
             if (filter.TagIds?.Count > 0)
                 query = query.Where(p => p.PerformerTags.Any(pt => filter.TagIds.Contains(pt.TagId)));
             if (filter.StudioId.HasValue)
-                query = query.Where(p => p.ScenePerformers.Any(sp => sp.Scene!.StudioId == filter.StudioId.Value));
+                query = query.Where(p => p.VideoPerformers.Any(sp => sp.Video!.StudioId == filter.StudioId.Value));
 
             // Advanced criteria
             query = FilterHelpers.ApplyString(query, filter.NameCriterion, p => p.Name);
@@ -330,13 +364,13 @@ public class PerformerRepository : IPerformerRepository
             query = FilterHelpers.ApplyInt(query, filter.HeightCriterion, p => p.HeightCm ?? 0);
             query = FilterHelpers.ApplyInt(query, filter.WeightCriterion, p => p.Weight ?? 0);
 
-            if (filter.SceneCountCriterion != null)
+            if (filter.VideoCountCriterion != null)
             {
-                query = filter.SceneCountCriterion.Modifier switch
+                query = filter.VideoCountCriterion.Modifier switch
                 {
-                    CriterionModifier.IsNull => query.Where(p => !p.ScenePerformers.Any()),
-                    CriterionModifier.NotNull => query.Where(p => p.ScenePerformers.Any()),
-                    _ => FilterHelpers.ApplyInt(query, filter.SceneCountCriterion, p => p.ScenePerformers.Count),
+                    CriterionModifier.IsNull => query.Where(p => !p.VideoPerformers.Any()),
+                    CriterionModifier.NotNull => query.Where(p => p.VideoPerformers.Any()),
+                    _ => FilterHelpers.ApplyInt(query, filter.VideoCountCriterion, p => p.VideoPerformers.Count),
                 };
             }
 
@@ -344,11 +378,11 @@ public class PerformerRepository : IPerformerRepository
             {
                 query = filter.StudioCountCriterion.Modifier switch
                 {
-                    CriterionModifier.IsNull => query.Where(p => !p.ScenePerformers.Any(sp => sp.Scene != null && sp.Scene.StudioId.HasValue)),
-                    CriterionModifier.NotNull => query.Where(p => p.ScenePerformers.Any(sp => sp.Scene != null && sp.Scene.StudioId.HasValue)),
-                    _ => FilterHelpers.ApplyInt(query, filter.StudioCountCriterion, p => p.ScenePerformers
-                        .Where(sp => sp.Scene != null && sp.Scene.StudioId.HasValue)
-                        .Select(sp => sp.Scene!.StudioId!.Value)
+                    CriterionModifier.IsNull => query.Where(p => !p.VideoPerformers.Any(sp => sp.Video != null && sp.Video.StudioId.HasValue)),
+                    CriterionModifier.NotNull => query.Where(p => p.VideoPerformers.Any(sp => sp.Video != null && sp.Video.StudioId.HasValue)),
+                    _ => FilterHelpers.ApplyInt(query, filter.StudioCountCriterion, p => p.VideoPerformers
+                        .Where(sp => sp.Video != null && sp.Video.StudioId.HasValue)
+                        .Select(sp => sp.Video!.StudioId!.Value)
                         .Distinct()
                         .Count()),
                 };
@@ -397,7 +431,7 @@ public class PerformerRepository : IPerformerRepository
                     foreach (var studioGroup in studioGroups.Where(group => group.Length > 0))
                     {
                         var requiredGroup = studioGroup;
-                        query = query.Where(p => p.ScenePerformers.Any(sp => sp.Scene != null && sp.Scene.StudioId.HasValue && requiredGroup.Contains(sp.Scene.StudioId.Value)));
+                        query = query.Where(p => p.VideoPerformers.Any(sp => sp.Video != null && sp.Video.StudioId.HasValue && requiredGroup.Contains(sp.Video.StudioId.Value)));
                     }
                 }
                 else
@@ -405,14 +439,14 @@ public class PerformerRepository : IPerformerRepository
                     foreach (var studioId in studiosCriterion.Value.Distinct())
                     {
                         var requiredStudioId = studioId;
-                        query = query.Where(p => p.ScenePerformers.Any(sp => sp.Scene != null && sp.Scene.StudioId == requiredStudioId));
+                        query = query.Where(p => p.VideoPerformers.Any(sp => sp.Video != null && sp.Video.StudioId == requiredStudioId));
                     }
                 }
 
                 if (studiosCriterion.Excludes?.Count > 0)
                 {
                     var excludedStudioIds = studiosCriterion.Excludes.Distinct().ToArray();
-                    query = query.Where(p => !p.ScenePerformers.Any(sp => sp.Scene != null && sp.Scene.StudioId.HasValue && excludedStudioIds.Contains(sp.Scene.StudioId.Value)));
+                    query = query.Where(p => !p.VideoPerformers.Any(sp => sp.Video != null && sp.Video.StudioId.HasValue && excludedStudioIds.Contains(sp.Video.StudioId.Value)));
                 }
             }
             else
@@ -420,9 +454,9 @@ public class PerformerRepository : IPerformerRepository
                 query = FilterHelpers.ApplyMultiId(
                     query,
                     filter.StudiosCriterion,
-                    p => p.ScenePerformers
-                        .Where(sp => sp.Scene != null && sp.Scene.StudioId.HasValue)
-                        .Select(sp => sp.Scene!.StudioId!.Value),
+                    p => p.VideoPerformers
+                        .Where(sp => sp.Video != null && sp.Video.StudioId.HasValue)
+                        .Select(sp => sp.Video!.StudioId!.Value),
                     expandedStudios?.ValueGroups);
             }
 
@@ -508,8 +542,8 @@ public class PerformerRepository : IPerformerRepository
 
             // Count criteria
             query = FilterHelpers.ApplyInt(query, filter.TagCountCriterion, p => p.TagCount);
-            query = ApplySceneAffinityIntSumCriterion(query, filter.PlayCountCriterion, nameof(UserEntityAffinity.ViewCount));
-            query = ApplySceneAffinityIntSumCriterion(query, filter.LikeCounterCriterion, nameof(UserEntityAffinity.LikeCount));
+            query = ApplyVideoAffinityIntSumCriterion(query, filter.PlayCountCriterion, nameof(UserEntityAffinity.ViewCount));
+            query = ApplyVideoAffinityIntSumCriterion(query, filter.LikeCounterCriterion, nameof(UserEntityAffinity.LikeCount));
 
             // Groups criterion
             if (filter.GroupsCriterion != null)
@@ -517,12 +551,12 @@ public class PerformerRepository : IPerformerRepository
                 var gIds = filter.GroupsCriterion.Value;
                 query = filter.GroupsCriterion.Modifier switch
                 {
-                    CriterionModifier.IsNull => query.Where(p => !p.ScenePerformers.Any(sp => sp.Scene!.GroupItems.Any())),
-                    CriterionModifier.NotNull => query.Where(p => p.ScenePerformers.Any(sp => sp.Scene!.GroupItems.Any())),
-                    CriterionModifier.Includes => query.Where(p => p.ScenePerformers.Any(sp => sp.Scene!.GroupItems.Any(item => gIds.Contains(item.GroupId)))),
-                    CriterionModifier.Excludes => query.Where(p => !p.ScenePerformers.Any(sp => sp.Scene!.GroupItems.Any(item => gIds.Contains(item.GroupId)))),
+                    CriterionModifier.IsNull => query.Where(p => !p.VideoPerformers.Any(sp => sp.Video!.GroupItems.Any())),
+                    CriterionModifier.NotNull => query.Where(p => p.VideoPerformers.Any(sp => sp.Video!.GroupItems.Any())),
+                    CriterionModifier.Includes => query.Where(p => p.VideoPerformers.Any(sp => sp.Video!.GroupItems.Any(item => gIds.Contains(item.GroupId)))),
+                    CriterionModifier.Excludes => query.Where(p => !p.VideoPerformers.Any(sp => sp.Video!.GroupItems.Any(item => gIds.Contains(item.GroupId)))),
                     _ when gIds.Count == 0 => query,
-                    _ => query.Where(p => p.ScenePerformers.Any(sp => sp.Scene!.GroupItems.Any(item => gIds.Contains(item.GroupId)))),
+                    _ => query.Where(p => p.VideoPerformers.Any(sp => sp.Video!.GroupItems.Any(item => gIds.Contains(item.GroupId)))),
                 };
             }
 
@@ -569,17 +603,17 @@ public class PerformerRepository : IPerformerRepository
             "rating" => EngagementQueryHelpers.ApplyRatingSort(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Performer, desc),
             "created_at" => desc ? query.OrderByDescending(p => p.CreatedAt) : query.OrderBy(p => p.CreatedAt),
             "birthdate" => desc ? query.OrderByDescending(p => p.Birthdate) : query.OrderBy(p => p.Birthdate),
-            "scene_count" => desc ? query.OrderByDescending(p => p.ScenePerformers.Count) : query.OrderBy(p => p.ScenePerformers.Count),
+            "video_count" => desc ? query.OrderByDescending(p => p.VideoPerformers.Count) : query.OrderBy(p => p.VideoPerformers.Count),
             "image_count" => desc ? query.OrderByDescending(p => p.ImagePerformers.Count) : query.OrderBy(p => p.ImagePerformers.Count),
             "gallery_count" => desc ? query.OrderByDescending(p => p.GalleryPerformers.Count) : query.OrderBy(p => p.GalleryPerformers.Count),
-            "latest_scene_date" => desc ? query.OrderByDescending(p => p.ScenePerformers.Max(sp => sp.Scene!.Date)) : query.OrderBy(p => p.ScenePerformers.Max(sp => sp.Scene!.Date)),
-            "total_file_size" => desc ? query.OrderByDescending(p => p.ScenePerformers.Sum(sp => (long?)sp.Scene!.MaxFileSize) ?? 0L) : query.OrderBy(p => p.ScenePerformers.Sum(sp => (long?)sp.Scene!.MaxFileSize) ?? 0L),
+            "latest_video_date" => desc ? query.OrderByDescending(p => p.VideoPerformers.Max(sp => sp.Video!.Date)) : query.OrderBy(p => p.VideoPerformers.Max(sp => sp.Video!.Date)),
+            "total_file_size" => desc ? query.OrderByDescending(p => p.VideoPerformers.Sum(sp => (long?)sp.Video!.MaxFileSize) ?? 0L) : query.OrderBy(p => p.VideoPerformers.Sum(sp => (long?)sp.Video!.MaxFileSize) ?? 0L),
             "career_length" => ApplyCareerLengthSort(query, desc),
             "height" => ApplyHeightSort(query, desc),
             "weight" => desc ? query.OrderByDescending(p => p.Weight) : query.OrderBy(p => p.Weight),
             "measurements" => ApplyMeasurementsSort(query, desc),
             "tag_count" => desc ? query.OrderByDescending(p => p.TagCount) : query.OrderBy(p => p.TagCount),
-            "like_counter" => ApplySceneAffinityIntSumSort(query, nameof(UserEntityAffinity.LikeCount), desc),
+            "like_counter" => ApplyVideoAffinityIntSumSort(query, nameof(UserEntityAffinity.LikeCount), desc),
             "play_count" => ApplyPlayCountSort(query, desc),
             "last_like_at" => ApplyLastFavoriteSort(query, desc),
             "last_played_at" => ApplyLastPlayedAtSort(query, desc),
@@ -870,14 +904,14 @@ public class TagRepository : ITagRepository
             {
             "name" => desc ? query.OrderByDescending(t => t.Name) : query.OrderBy(t => t.Name),
             "tag_group" => ApplyTagGroupSort(query, desc),
-            "scene_count" => desc ? query.OrderByDescending(t => t.SceneCount) : query.OrderBy(t => t.SceneCount),
+            "video_count" => desc ? query.OrderByDescending(t => t.VideoCount) : query.OrderBy(t => t.VideoCount),
             "gallery_count" => desc ? query.OrderByDescending(t => t.GalleryCount) : query.OrderBy(t => t.GalleryCount),
             "group_count" => desc ? query.OrderByDescending(t => t.GroupCount) : query.OrderBy(t => t.GroupCount),
             "image_count" => desc ? query.OrderByDescending(t => t.ImageCount) : query.OrderBy(t => t.ImageCount),
             "performer_count" => desc ? query.OrderByDescending(t => t.PerformerCount) : query.OrderBy(t => t.PerformerCount),
             "studio_count" => desc ? query.OrderByDescending(t => t.StudioCount) : query.OrderBy(t => t.StudioCount),
-            "latest_scene_date" => desc ? query.OrderByDescending(t => t.SceneTags.Max(st => st.Scene!.Date)) : query.OrderBy(t => t.SceneTags.Max(st => st.Scene!.Date)),
-            "total_file_size" => desc ? query.OrderByDescending(t => t.SceneTags.Sum(st => (long?)st.Scene!.MaxFileSize) ?? 0L) : query.OrderBy(t => t.SceneTags.Sum(st => (long?)st.Scene!.MaxFileSize) ?? 0L),
+            "latest_video_date" => desc ? query.OrderByDescending(t => t.VideoTags.Max(st => st.Video!.Date)) : query.OrderBy(t => t.VideoTags.Max(st => st.Video!.Date)),
+            "total_file_size" => desc ? query.OrderByDescending(t => t.VideoTags.Sum(st => (long?)st.Video!.MaxFileSize) ?? 0L) : query.OrderBy(t => t.VideoTags.Sum(st => (long?)st.Video!.MaxFileSize) ?? 0L),
             "created_at" => desc ? query.OrderByDescending(t => t.CreatedAt) : query.OrderBy(t => t.CreatedAt),
             "updated_at" => desc ? query.OrderByDescending(t => t.UpdatedAt) : query.OrderBy(t => t.UpdatedAt),
             "random" => SeededRandomOrdering.OrderBy(query, findFilter?.Seed, t => t.Id, desc),
@@ -930,9 +964,9 @@ public class TagRepository : ITagRepository
 
     private async Task<IQueryable<Tag>> ApplyTagCountCriteriaAsync(IQueryable<Tag> query, TagFilter filter, CancellationToken ct)
     {
-        query = filter.SceneCountIncludesChildren
+        query = filter.VideoCountIncludesChildren
             ? query
-            : FilterHelpers.ApplyInt(query, filter.SceneCountCriterion, t => t.SceneCount);
+            : FilterHelpers.ApplyInt(query, filter.VideoCountCriterion, t => t.VideoCount);
         query = filter.PerformerCountIncludesChildren
             ? query
             : FilterHelpers.ApplyInt(query, filter.PerformerCountCriterion, t => t.PerformerCount);
@@ -966,20 +1000,20 @@ public class TagRepository : ITagRepository
         var relevantTagIds = tagAndDescendantIdsByTagId.Values.SelectMany(tagIds => tagIds).Distinct().ToArray();
         var rootTagIdsByDescendantTagId = BuildRootTagIdsByDescendantTagId(tagAndDescendantIdsByTagId);
 
-        Dictionary<int, int>? sceneCountsByTagId = null;
+        Dictionary<int, int>? videoCountsByTagId = null;
         Dictionary<int, int>? performerCountsByTagId = null;
         Dictionary<int, int>? imageCountsByTagId = null;
         Dictionary<int, int>? galleryCountsByTagId = null;
         Dictionary<int, int>? studioCountsByTagId = null;
         Dictionary<int, int>? groupCountsByTagId = null;
 
-        if (filter.SceneCountIncludesChildren && filter.SceneCountCriterion != null)
+        if (filter.VideoCountIncludesChildren && filter.VideoCountCriterion != null)
         {
-            sceneCountsByTagId = CountDistinctEntitiesByRootTagId(
-                await _db.Set<SceneTag>()
+            videoCountsByTagId = CountDistinctEntitiesByRootTagId(
+                await _db.Set<VideoTag>()
                     .AsNoTracking()
-                    .Where(sceneTag => relevantTagIds.Contains(sceneTag.TagId))
-                    .Select(sceneTag => new TagEntityPair(sceneTag.TagId, sceneTag.SceneId))
+                    .Where(videoTag => relevantTagIds.Contains(videoTag.TagId))
+                    .Select(videoTag => new TagEntityPair(videoTag.TagId, videoTag.VideoId))
                     .ToListAsync(ct),
                 rootTagIdsByDescendantTagId);
         }
@@ -1041,7 +1075,7 @@ public class TagRepository : ITagRepository
 
         var matchingTagIds = candidateTagIds.Where(tagId =>
         {
-            return MatchesTagCountCriterion(filter.SceneCountCriterion, filter.SceneCountIncludesChildren, tagId, sceneCountsByTagId)
+            return MatchesTagCountCriterion(filter.VideoCountCriterion, filter.VideoCountIncludesChildren, tagId, videoCountsByTagId)
                 && MatchesTagCountCriterion(filter.PerformerCountCriterion, filter.PerformerCountIncludesChildren, tagId, performerCountsByTagId)
                 && MatchesTagCountCriterion(filter.ImageCountCriterion, filter.ImageCountIncludesChildren, tagId, imageCountsByTagId)
                 && MatchesTagCountCriterion(filter.GalleryCountCriterion, filter.GalleryCountIncludesChildren, tagId, galleryCountsByTagId)
@@ -1099,7 +1133,7 @@ public class TagRepository : ITagRepository
     }
 
     private static bool NeedsChildTagCountAggregation(TagFilter filter)
-        => (filter.SceneCountIncludesChildren && filter.SceneCountCriterion != null)
+        => (filter.VideoCountIncludesChildren && filter.VideoCountCriterion != null)
         || (filter.PerformerCountIncludesChildren && filter.PerformerCountCriterion != null)
         || (filter.ImageCountIncludesChildren && filter.ImageCountCriterion != null)
         || (filter.GalleryCountIncludesChildren && filter.GalleryCountCriterion != null)
@@ -1192,6 +1226,61 @@ public class TagRepository : ITagRepository
             .AsNoTracking()
             .ToListAsync(ct);
     }
+
+    public async Task<Dictionary<string, Tag>> FindOrCreateByNamesAsync(IReadOnlyList<string> names, CancellationToken ct = default)
+    {
+        const string tagNameUniqueConstraint = "IX_tags_Name";
+        const int maxAttempts = 3;
+
+        var normalizedNames = names
+            .Where(static n => !string.IsNullOrWhiteSpace(n))
+            .Select(static n => n.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (normalizedNames.Length == 0)
+            return new Dictionary<string, Tag>(StringComparer.OrdinalIgnoreCase);
+
+        var lowered = normalizedNames.Select(static n => n.ToLowerInvariant()).ToArray();
+
+        for (var attempt = 0; attempt < maxAttempts; attempt++)
+        {
+            var existing = await _db.Tags
+                .Where(t => lowered.Contains(t.Name.ToLower()))
+                .ToListAsync(ct);
+
+            var byName = existing.ToDictionary(static t => t.Name, StringComparer.OrdinalIgnoreCase);
+            var created = new List<Tag>();
+            foreach (var name in normalizedNames)
+            {
+                if (byName.ContainsKey(name)) continue;
+                var tag = new Tag { Name = name, SortName = name };
+                _db.Tags.Add(tag);
+                byName[name] = tag;
+                created.Add(tag);
+            }
+
+            if (created.Count == 0) return byName;
+
+            try
+            {
+                await _db.SaveChangesAsync(ct);
+                return byName;
+            }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateException ex)
+                when (attempt < maxAttempts - 1)
+            {
+                var inner = ex.InnerException;
+                var sqlState = inner?.GetType().GetProperty("SqlState")?.GetValue(inner) as string;
+                var constraint = inner?.GetType().GetProperty("ConstraintName")?.GetValue(inner) as string;
+                if (sqlState != "23505" || constraint != tagNameUniqueConstraint) throw;
+                foreach (var tag in created)
+                    _db.Entry(tag).State = Microsoft.EntityFrameworkCore.EntityState.Detached;
+            }
+        }
+
+        throw new InvalidOperationException("Could not resolve tags after duplicate-name retry.");
+    }
 }
 
 public class StudioRepository : IStudioRepository
@@ -1267,7 +1356,7 @@ public class StudioRepository : IStudioRepository
 
             // Advanced criteria
             query = EngagementQueryHelpers.ApplyRatingCriterion(_db, query, EngagementQueryHelpers.CurrentUserId(_db), RatingHostType.Studio, filter.RatingCriterion);
-            query = FilterHelpers.ApplyInt(query, filter.SceneCountCriterion, s => s.SceneCount);
+            query = FilterHelpers.ApplyInt(query, filter.VideoCountCriterion, s => s.VideoCount);
             query = FilterHelpers.ApplyInt(query, filter.GalleryCountCriterion, s => s.GalleryCount);
             query = FilterHelpers.ApplyInt(query, filter.ImageCountCriterion, s => s.ImageCount);
 
@@ -1372,11 +1461,11 @@ public class StudioRepository : IStudioRepository
             : sort switch
             {
             "name" => desc ? query.OrderByDescending(s => s.Name) : query.OrderBy(s => s.Name),
-            "scene_count" => desc ? query.OrderByDescending(s => s.SceneCount) : query.OrderBy(s => s.SceneCount),
+            "video_count" => desc ? query.OrderByDescending(s => s.VideoCount) : query.OrderBy(s => s.VideoCount),
             "gallery_count" => desc ? query.OrderByDescending(s => s.GalleryCount) : query.OrderBy(s => s.GalleryCount),
             "image_count" => desc ? query.OrderByDescending(s => s.ImageCount) : query.OrderBy(s => s.ImageCount),
-            "latest_scene_date" => desc ? query.OrderByDescending(s => s.Scenes.Max(scene => scene.Date)) : query.OrderBy(s => s.Scenes.Max(scene => scene.Date)),
-            "total_file_size" => desc ? query.OrderByDescending(s => s.Scenes.Sum(scene => (long?)scene.MaxFileSize) ?? 0L) : query.OrderBy(s => s.Scenes.Sum(scene => (long?)scene.MaxFileSize) ?? 0L),
+            "latest_video_date" => desc ? query.OrderByDescending(s => s.Videos.Max(video => video.Date)) : query.OrderBy(s => s.Videos.Max(video => video.Date)),
+            "total_file_size" => desc ? query.OrderByDescending(s => s.Videos.Sum(video => (long?)video.MaxFileSize) ?? 0L) : query.OrderBy(s => s.Videos.Sum(video => (long?)video.MaxFileSize) ?? 0L),
             "rating" => ApplyStudioRatingSort(query, desc),
             "parent_count" => desc ? query.OrderByDescending(s => s.ParentId.HasValue ? 1 : 0).ThenByDescending(s => s.Id) : query.OrderBy(s => s.ParentId.HasValue ? 1 : 0).ThenBy(s => s.Id),
             "child_count" => desc ? query.OrderByDescending(s => s.ChildStudioCount) : query.OrderBy(s => s.ChildStudioCount),
@@ -1433,7 +1522,7 @@ public class GalleryRepository : IGalleryRepository
             .Include(g => g.Files).ThenInclude(f => f.ParentFolder)
             .Include(g => g.Files).ThenInclude(f => f.Fingerprints)
             .Include(g => g.Folder)
-            .Include(g => g.SceneGalleries)
+            .Include(g => g.VideoGalleries)
             .AsSplitQuery()
             .FirstOrDefaultAsync(g => g.Id == id, ct);
 
@@ -1529,8 +1618,8 @@ public class GalleryRepository : IGalleryRepository
             query = FilterHelpers.ApplyInt(query, filter.TagCountCriterion, g => g.TagCount);
             query = FilterHelpers.ApplyInt(query, filter.PerformerCountCriterion, g => g.PerformerCount);
 
-            // Scenes criterion
-            query = FilterHelpers.ApplyMultiId(query, filter.ScenesCriterion, g => g.SceneGalleries.Select(sg => sg.SceneId));
+            // Videos criterion
+            query = FilterHelpers.ApplyMultiId(query, filter.VideosCriterion, g => g.VideoGalleries.Select(sg => sg.VideoId));
 
             // Performer tags criterion
             if (filter.PerformerTagsCriterion != null)
@@ -1852,6 +1941,24 @@ public class ImageRepository : IImageRepository
             .AsSplitQuery()
             .FirstOrDefaultAsync(i => i.Id == id, ct);
 
+    public async Task<IReadOnlyList<ImagePerformer>> GetImagePerformersAsync(IReadOnlyList<int> imageIds, CancellationToken ct = default)
+        => await _db.Set<ImagePerformer>()
+            .AsNoTracking()
+            .Include(static ip => ip.Performer)
+                .ThenInclude(static p => p!.RemoteIds)
+            .Where(ip => imageIds.Contains(ip.ImageId) && ip.Performer != null)
+            .ToListAsync(ct);
+
+    public async Task<IReadOnlyList<int>> GetTagIdsAsync(int imageId, CancellationToken ct = default)
+        => await _db.Set<ImageTag>()
+            .AsNoTracking()
+            .Where(it => it.ImageId == imageId)
+            .Select(it => it.TagId)
+            .ToListAsync(ct);
+
+    public void AddTagLink(int imageId, int tagId)
+        => _db.Set<ImageTag>().Add(new ImageTag { ImageId = imageId, TagId = tagId });
+
     public async Task<IReadOnlyList<Image>> GetAllAsync(CancellationToken ct = default)
         => await _db.Images.AsNoTracking().ToListAsync(ct);
 
@@ -1961,6 +2068,8 @@ public class ImageRepository : IImageRepository
         if (filter == null) return query;
 
         // Simple filters
+        if (filter.Ids?.Count > 0)
+            query = query.Where(i => filter.Ids.Contains(i.Id));
         if (!string.IsNullOrEmpty(filter.Title))
             query = FilterHelpers.ApplyString(query, new StringCriterion { Value = filter.Title, Modifier = CriterionModifier.Includes }, DisplayTitleSelector);
         if (filter.Organized.HasValue) query = query.Where(i => i.Organized == filter.Organized.Value);
@@ -2499,14 +2608,14 @@ public class GroupRepository : IGroupRepository
             query = FilterHelpers.ApplyString(query, filter.QuerySourceKeyCriterion, g => g.QuerySourceKey);
             query = ApplyAllowedHostTypesCriterion(query, filter.AllowedHostTypesCriterion);
             query = FilterHelpers.ApplyBool(query, filter.HasQueryCriterion, g => g.QueryJson != null && g.QueryJson != string.Empty);
-            query = FilterHelpers.ApplyBool(query, filter.ShowInSceneListsCriterion, g => g.ShowInSceneLists);
+            query = FilterHelpers.ApplyBool(query, filter.ShowInVideoListsCriterion, g => g.ShowInVideoLists);
             query = FilterHelpers.ApplyNullableTimestamp(query, filter.LastResolvedAtCriterion, g => g.LastResolvedAt);
             query = FilterHelpers.ApplyInt(query, filter.SortOrderCriterion, g => g.SortOrder);
             query = FilterHelpers.ApplyInt(query, filter.CachedItemCountCriterion, g => g.CachedItemCount ?? 0);
 
             // Count criteria
             query = FilterHelpers.ApplyInt(query, filter.ItemCountCriterion, g => g.GroupItems.Count);
-            query = FilterHelpers.ApplyInt(query, filter.SceneCountCriterion, g => g.GroupItems.Where(item => item.SceneId != null).Select(item => item.SceneId).Distinct().Count());
+            query = FilterHelpers.ApplyInt(query, filter.VideoCountCriterion, g => g.GroupItems.Where(item => item.VideoId != null).Select(item => item.VideoId).Distinct().Count());
             query = FilterHelpers.ApplyInt(query, filter.ImageCountCriterion, g => g.GroupItems.Count(item => item.Kind == GroupItemKind.Image));
             query = FilterHelpers.ApplyInt(query, filter.AudioCountCriterion, g => g.GroupItems.Count(item => item.Kind == GroupItemKind.Audio));
             query = FilterHelpers.ApplyInt(query, filter.TextCountCriterion, g => g.GroupItems.Count(item => item.Kind == GroupItemKind.Text));
@@ -2520,19 +2629,19 @@ public class GroupRepository : IGroupRepository
             query = FilterHelpers.ApplyInt(query, filter.ContainingGroupCountCriterion, g => g.ContainingGroupRelations.Count);
             query = FilterHelpers.ApplyInt(query, filter.TagCountCriterion, g => g.GroupTags.Count);
 
-            // Performers criterion (performers in scenes belonging to this group)
+            // Performers criterion (performers in videos belonging to this group)
             if (filter.PerformersCriterion != null)
             {
                 var pIds = filter.PerformersCriterion.Value;
                 query = filter.PerformersCriterion.Modifier switch
                 {
-                    CriterionModifier.IsNull => query.Where(g => !g.GroupItems.Any(item => item.Scene!.ScenePerformers.Any())),
-                    CriterionModifier.NotNull => query.Where(g => g.GroupItems.Any(item => item.Scene!.ScenePerformers.Any())),
-                    CriterionModifier.Includes => query.Where(g => g.GroupItems.Any(item => item.Scene!.ScenePerformers.Any(sp => pIds.Contains(sp.PerformerId)))),
-                    CriterionModifier.Excludes => query.Where(g => !g.GroupItems.Any(item => item.Scene!.ScenePerformers.Any(sp => pIds.Contains(sp.PerformerId)))),
-                    CriterionModifier.IncludesAll => query.Where(g => pIds.All(pid => g.GroupItems.Any(item => item.Scene!.ScenePerformers.Any(sp => sp.PerformerId == pid)))),
+                    CriterionModifier.IsNull => query.Where(g => !g.GroupItems.Any(item => item.Video!.VideoPerformers.Any())),
+                    CriterionModifier.NotNull => query.Where(g => g.GroupItems.Any(item => item.Video!.VideoPerformers.Any())),
+                    CriterionModifier.Includes => query.Where(g => g.GroupItems.Any(item => item.Video!.VideoPerformers.Any(sp => pIds.Contains(sp.PerformerId)))),
+                    CriterionModifier.Excludes => query.Where(g => !g.GroupItems.Any(item => item.Video!.VideoPerformers.Any(sp => pIds.Contains(sp.PerformerId)))),
+                    CriterionModifier.IncludesAll => query.Where(g => pIds.All(pid => g.GroupItems.Any(item => item.Video!.VideoPerformers.Any(sp => sp.PerformerId == pid)))),
                     _ when pIds.Count == 0 => query,
-                    _ => query.Where(g => g.GroupItems.Any(item => item.Scene!.ScenePerformers.Any(sp => pIds.Contains(sp.PerformerId)))),
+                    _ => query.Where(g => g.GroupItems.Any(item => item.Video!.VideoPerformers.Any(sp => pIds.Contains(sp.PerformerId)))),
                 };
             }
 
@@ -2565,7 +2674,7 @@ public class GroupRepository : IGroupRepository
             "created_at" => desc ? query.OrderByDescending(g => g.CreatedAt) : query.OrderBy(g => g.CreatedAt),
             "updated_at" or "updatedAt" => desc ? query.OrderByDescending(g => g.UpdatedAt).ThenByDescending(g => g.Id) : query.OrderBy(g => g.UpdatedAt).ThenBy(g => g.Id),
             "item_count" => ApplyGroupIntSort(query, g => g.GroupItems.Count, desc),
-            "scene_count" => ApplyGroupIntSort(query, g => g.GroupItems.Where(item => item.SceneId != null).Select(item => item.SceneId).Distinct().Count(), desc),
+            "video_count" => ApplyGroupIntSort(query, g => g.GroupItems.Where(item => item.VideoId != null).Select(item => item.VideoId).Distinct().Count(), desc),
             "image_count" => ApplyGroupIntSort(query, g => g.GroupItems.Count(item => item.Kind == GroupItemKind.Image), desc),
             "audio_count" => ApplyGroupIntSort(query, g => g.GroupItems.Count(item => item.Kind == GroupItemKind.Audio), desc),
             "text_count" => ApplyGroupIntSort(query, g => g.GroupItems.Count(item => item.Kind == GroupItemKind.Text), desc),
@@ -2581,7 +2690,7 @@ public class GroupRepository : IGroupRepository
             "cached_item_count" => ApplyGroupIntSort(query, g => g.CachedItemCount ?? 0, desc),
             "last_resolved_at" => desc ? query.OrderByDescending(g => g.LastResolvedAt).ThenByDescending(g => g.Id) : query.OrderBy(g => g.LastResolvedAt).ThenBy(g => g.Id),
             "query_source_key" => desc ? query.OrderByDescending(g => g.QuerySourceKey).ThenByDescending(g => g.Id) : query.OrderBy(g => g.QuerySourceKey).ThenBy(g => g.Id),
-            "show_in_scene_lists" => desc ? query.OrderByDescending(g => g.ShowInSceneLists).ThenByDescending(g => g.Id) : query.OrderBy(g => g.ShowInSceneLists).ThenBy(g => g.Id),
+            "show_in_video_lists" => desc ? query.OrderByDescending(g => g.ShowInVideoLists).ThenByDescending(g => g.Id) : query.OrderBy(g => g.ShowInVideoLists).ThenBy(g => g.Id),
             "aliases" => desc ? query.OrderByDescending(g => g.Aliases ?? g.Name).ThenByDescending(g => g.Id) : query.OrderBy(g => g.Aliases ?? g.Name).ThenBy(g => g.Id),
             "random" => SeededRandomOrdering.OrderBy(query, findFilter?.Seed, g => g.Id, desc),
             _ => desc ? query.OrderByDescending(g => g.UpdatedAt) : query.OrderBy(g => g.UpdatedAt),

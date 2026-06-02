@@ -47,9 +47,10 @@ describe("createManualOpenRequest", () => {
   it("puts active pane contexts before page contexts", () => {
     const unregister = registerManualContext("pane:extension-runner");
     try {
-      expect(createManualOpenRequest("scene", "scenes", "/scenes/1").contexts?.[0]).toBe("pane:extension-runner");
+      expect(createManualOpenRequest("video", "videos", "/videos/1").contexts?.[0]).toBe("pane:extension-runner");
     } finally {
       unregister();
     }
   });
 });
+

@@ -10,7 +10,7 @@ public class Face : BaseEntity
     public int DetectionCount { get; set; }
     public int AppearanceCount { get; set; }
     public int FrameSampleCount { get; set; }
-    public int SceneCount { get; set; }
+    public int VideoCount { get; set; }
     public int ImageCount { get; set; }
     public string? PrimarySourceKey { get; set; }
     public string? SearchText { get; set; }

@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 import { Search, X } from "lucide-react";
-import type { Performer, Scene, Studio, Tag } from "../api/types";
+import type { Performer, Video, Studio, Tag } from "../api/types";
 import { PerformerTagger } from "./PerformerTagger";
-import { SceneTagger } from "./SceneTagger";
+import { VideoTagger } from "./VideoTagger";
 import { StudioTagger } from "./StudioTagger";
 import { TagTagger } from "./TagTagger";
 
@@ -32,15 +32,15 @@ function MetadataTaggerShell({ open, title, subtitle, onClose, children }: { ope
   );
 }
 
-export function SceneMetadataTaggerDialog({ open, onClose, scene, onNavigate }: { open: boolean; onClose: () => void; scene: Scene; onNavigate: (route: any) => void }) {
+export function VideoMetadataTaggerDialog({ open, onClose, video, onNavigate }: { open: boolean; onClose: () => void; video: Video; onNavigate: (route: any) => void }) {
   return (
     <MetadataTaggerShell
       open={open}
       onClose={onClose}
       title="Scrape / Metadata"
-      subtitle="Search scrapers or metadata providers and choose which fields to apply to this scene."
+      subtitle="Search scrapers or metadata providers and choose which fields to apply to this video."
     >
-      <SceneTagger scenes={[scene]} onNavigate={(sceneId) => onNavigate({ page: "scene", id: sceneId })} mode="detail" />
+      <VideoTagger videos={[video]} onNavigate={(videoId) => onNavigate({ page: "video", id: videoId })} mode="detail" />
     </MetadataTaggerShell>
   );
 }

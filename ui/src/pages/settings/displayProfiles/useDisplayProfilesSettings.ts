@@ -1,6 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { scenes, segmentDisplayProfiles, segmentLibrary, tags } from "../../../api/client";
+import { videos, segmentDisplayProfiles, segmentLibrary, tags } from "../../../api/client";
 import type {
   SegmentDisplayProfile,
   SegmentDisplayProfileCreate,
@@ -36,8 +36,8 @@ export function useDisplayProfilesSettings() {
   const [ruleForm, setRuleForm] = useState<RuleFormState>(emptyRuleForm());
   const [bulkWizardOpen, setBulkWizardOpen] = useState(false);
   const [bulkWizardForm, setBulkWizardForm] = useState<BulkWizardState>(emptyBulkWizardForm());
-  const [previewSceneSearch, setPreviewSceneSearch] = useState("");
-  const [previewSceneId, setPreviewSceneId] = useState<number | null>(null);
+  const [previewVideoSearch, setPreviewVideoSearch] = useState("");
+  const [previewVideoId, setPreviewVideoId] = useState<number | null>(null);
 
   const { data: profiles = [], isLoading: profilesLoading } = useQuery({
     queryKey: ["segment-display-profiles"],
@@ -74,21 +74,21 @@ export function useDisplayProfilesSettings() {
     staleTime: 60_000,
   });
 
-  const trimmedPreviewSceneSearch = previewSceneSearch.trim();
-  const { data: previewSceneResults = [] } = useQuery({
-    queryKey: ["display-profiles", "preview-scenes", trimmedPreviewSceneSearch],
+  const trimmedPreviewVideoSearch = previewVideoSearch.trim();
+  const { data: previewVideoResults = [] } = useQuery({
+    queryKey: ["display-profiles", "preview-videos", trimmedPreviewVideoSearch],
     queryFn: async () => {
-      const response = await scenes.find({ q: trimmedPreviewSceneSearch || undefined, perPage: 8, sort: "updated_at", direction: "desc" });
+      const response = await videos.find({ q: trimmedPreviewVideoSearch || undefined, perPage: 8, sort: "updated_at", direction: "desc" });
       return response.items;
     },
-    enabled: trimmedPreviewSceneSearch.length > 0,
+    enabled: trimmedPreviewVideoSearch.length > 0,
     staleTime: 60_000,
   });
 
-  const { data: previewScene } = useQuery({
-    queryKey: ["display-profiles", "preview-scene", previewSceneId],
-    queryFn: () => scenes.get(previewSceneId!),
-    enabled: previewSceneId != null,
+  const { data: previewVideo } = useQuery({
+    queryKey: ["display-profiles", "preview-video", previewVideoId],
+    queryFn: () => videos.get(previewVideoId!),
+    enabled: previewVideoId != null,
     staleTime: 60_000,
   });
 
@@ -157,25 +157,25 @@ export function useDisplayProfilesSettings() {
   }, [editingRule, persistedPreviewRules, ruleForm, ruleModalOpen, rules]);
 
   const currentPreviewRequest = useMemo<SegmentDisplayProfilePreviewRequest | null>(() => {
-    if (previewSceneId == null) {
+    if (previewVideoId == null) {
       return null;
     }
 
     return {
-      sceneId: previewSceneId,
+      videoId: previewVideoId,
       rules: persistedPreviewRules,
     };
-  }, [persistedPreviewRules, previewSceneId]);
+  }, [persistedPreviewRules, previewVideoId]);
   const draftPreviewRequest = useMemo<SegmentDisplayProfilePreviewRequest | null>(() => {
-    if (previewSceneId == null || !ruleModalOpen) {
+    if (previewVideoId == null || !ruleModalOpen) {
       return null;
     }
 
     return {
-      sceneId: previewSceneId,
+      videoId: previewVideoId,
       rules: draftPreviewRules,
     };
-  }, [draftPreviewRules, previewSceneId, ruleModalOpen]);
+  }, [draftPreviewRules, previewVideoId, ruleModalOpen]);
 
   const deferredCurrentPreviewRequest = useDeferredValue(currentPreviewRequest);
   const deferredDraftPreviewRequest = useDeferredValue(draftPreviewRequest);
@@ -381,9 +381,9 @@ export function useDisplayProfilesSettings() {
     },
     orderedProfiles,
     overrideRuleCount: Array.from(ruleTagMap.values()).filter((tag) => tag.showAsSegment != null).length,
-    previewScene,
-    previewSceneResults,
-    previewSceneSearch,
+    previewVideo,
+    previewVideoResults,
+    previewVideoSearch,
     profileForm,
     profileModalOpen,
     profileSavePending: createProfileMutation.isPending || updateProfileMutation.isPending,
@@ -404,8 +404,8 @@ export function useDisplayProfilesSettings() {
     selectedRuleTag: selectedRuleTagQuery.data,
     setBulkWizardForm,
     setDefaultProfile: (profileId: number) => setDefaultMutation.mutate(profileId),
-    setPreviewSceneId,
-    setPreviewSceneSearch,
+    setPreviewVideoId,
+    setPreviewVideoSearch,
     setProfileForm,
     setRuleForm,
     setSelectedProfileId,

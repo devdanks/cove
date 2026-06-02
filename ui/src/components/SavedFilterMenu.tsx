@@ -5,15 +5,15 @@ import type { FindFilter } from "../api/types";
 import { Bookmark, ChevronDown, Save, Trash2, Loader2, Star } from "lucide-react";
 
 const DEFAULT_SORT_BY_MODE: Record<string, string> = {
-  scenes: "date",
+  videos: "date",
   images: "date",
   galleries: "date",
   groups: "date",
   audios: "date",
   texts: "date",
-  performers: "latest_scene_date",
-  studios: "latest_scene_date",
-  tags: "latest_scene_date",
+  performers: "latest_video_date",
+  studios: "latest_video_date",
+  tags: "latest_video_date",
 };
 
 function normalizeSavedFindFilter(mode: string, findFilter: FindFilter | undefined): FindFilter | undefined {
@@ -231,3 +231,4 @@ export function SavedFilterMenu({
     </div>
   );
 }
+

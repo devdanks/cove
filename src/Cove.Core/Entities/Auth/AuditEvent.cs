@@ -16,7 +16,7 @@ public class AuditEvent
     public string? Ip { get; set; }
     public string? UserAgent { get; set; }
 
-    /// <summary>Dotted action key, e.g. "login.success", "scene.delete", "permission.grant".</summary>
+    /// <summary>Dotted action key, e.g. "login.success", "video.delete", "permission.grant".</summary>
     public string Action { get; set; } = string.Empty;
 
     public string? TargetKind { get; set; }
@@ -28,3 +28,4 @@ public class AuditEvent
     /// <summary>JSON-encoded structured detail.</summary>
     public string? Detail { get; set; }
 }
+

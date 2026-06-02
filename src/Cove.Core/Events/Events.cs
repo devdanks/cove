@@ -3,7 +3,7 @@ namespace Cove.Core.Events;
 public enum EventType
 {
     // Entity lifecycle
-    SceneCreated, SceneUpdated, SceneDeleted,
+    VideoCreated, VideoUpdated, VideoDeleted,
     PerformerCreated, PerformerUpdated, PerformerDeleted,
     TagCreated, TagUpdated, TagDeleted, TagMerged,
     StudioCreated, StudioUpdated, StudioDeleted,
@@ -85,3 +85,4 @@ public class EventBus : IEventBus
         public void Dispose() => action();
     }
 }
+

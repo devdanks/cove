@@ -11,6 +11,10 @@ public sealed class FaceFilter
     public IReadOnlyList<int>? Ids { get; init; }
     public bool? HasPerformer { get; init; }
     public bool? Ignored { get; init; }
+    /// <summary>When false, only returns faces that have not been merged (MergedIntoFaceId == null).</summary>
+    public bool? IsMerged { get; init; }
+    /// <summary>When true, includes the Performer navigation (with RemoteIds) in results.</summary>
+    public bool IncludePerformer { get; init; } = false;
 }
 
 /// <summary>Filter criteria for querying face appearances.</summary>

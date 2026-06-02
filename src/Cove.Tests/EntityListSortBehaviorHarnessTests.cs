@@ -18,8 +18,8 @@ public class EntityListSortBehaviorHarnessTests
 
     private static readonly HashSet<string> SortRowsWithBehaviorExemptions = new(StringComparer.OrdinalIgnoreCase)
     {
-        "sort:scenes:random",
-        "sort:scenes:organized",
+        "sort:videos:random",
+        "sort:videos:organized",
         "sort:images:random",
         "sort:images:visual_match",
         "sort:galleries:random",
@@ -50,24 +50,24 @@ public class EntityListSortBehaviorHarnessTests
     public static IEnumerable<object[]> FilterRows()
     {
         yield return [new FilterProbe(
-            "filter:scenes:TitleCriterion/includes",
-            fixture => QueryFilteredIdsAsync(fixture.Context, "scenes", new SceneFilter { TitleCriterion = new StringCriterion { Modifier = CriterionModifier.Includes, Value = "Alpha" } }),
+            "filter:videos:TitleCriterion/includes",
+            fixture => QueryFilteredIdsAsync(fixture.Context, "videos", new VideoFilter { TitleCriterion = new StringCriterion { Modifier = CriterionModifier.Includes, Value = "Alpha" } }),
             _ => [401])];
         yield return [new FilterProbe(
-            "filter:scenes:TagsCriterion/includes",
-            fixture => QueryFilteredIdsAsync(fixture.Context, "scenes", new SceneFilter { TagsCriterion = new MultiIdCriterion { Modifier = CriterionModifier.Includes, Value = [201] } }),
+            "filter:videos:TagsCriterion/includes",
+            fixture => QueryFilteredIdsAsync(fixture.Context, "videos", new VideoFilter { TagsCriterion = new MultiIdCriterion { Modifier = CriterionModifier.Includes, Value = [201] } }),
             _ => [401])];
         yield return [new FilterProbe(
-            "filter:scenes:RatingCriterion/greater_than",
-            fixture => QueryFilteredIdsAsync(fixture.Context, "scenes", new SceneFilter { RatingCriterion = new IntCriterion { Modifier = CriterionModifier.GreaterThan, Value = 2 } }),
+            "filter:videos:RatingCriterion/greater_than",
+            fixture => QueryFilteredIdsAsync(fixture.Context, "videos", new VideoFilter { RatingCriterion = new IntCriterion { Modifier = CriterionModifier.GreaterThan, Value = 2 } }),
             _ => [402, 403])];
         yield return [new FilterProbe(
-            "filter:scenes:DurationCriterion/greater_than",
-            fixture => QueryFilteredIdsAsync(fixture.Context, "scenes", new SceneFilter { DurationCriterion = new IntCriterion { Modifier = CriterionModifier.GreaterThan, Value = 20 } }),
+            "filter:videos:DurationCriterion/greater_than",
+            fixture => QueryFilteredIdsAsync(fixture.Context, "videos", new VideoFilter { DurationCriterion = new IntCriterion { Modifier = CriterionModifier.GreaterThan, Value = 20 } }),
             _ => [402, 403])];
         yield return [new FilterProbe(
-            "filter:scenes:OrganizedCriterion/true",
-            fixture => QueryFilteredIdsAsync(fixture.Context, "scenes", new SceneFilter { OrganizedCriterion = new BoolCriterion { Value = true } }),
+            "filter:videos:OrganizedCriterion/true",
+            fixture => QueryFilteredIdsAsync(fixture.Context, "videos", new VideoFilter { OrganizedCriterion = new BoolCriterion { Value = true } }),
             _ => [402, 403])];
 
         yield return [new FilterProbe(
@@ -165,31 +165,31 @@ public class EntityListSortBehaviorHarnessTests
 
         yield return [new FilterProbe(
             "filter:segments:kind/includes",
-            fixture => QuerySegmentIdsAsync(fixture.Context, q: null, ids: null, sceneId: null, sceneIds: null, sceneTitle: null, tagId: null, tagIds: null, kind: "beat", sourceKey: null, tagged: null, minConfidence: null, minDurationSec: null, excludeSceneIds: null),
+            fixture => QuerySegmentIdsAsync(fixture.Context, q: null, ids: null, videoId: null, videoIds: null, videoTitle: null, tagId: null, tagIds: null, kind: "beat", sourceKey: null, tagged: null, minConfidence: null, minDurationSec: null, excludeVideoIds: null),
             _ => [1002])];
         yield return [new FilterProbe(
             "filter:segments:minConfidence/greater_than_or_equal",
-            fixture => QuerySegmentIdsAsync(fixture.Context, q: null, ids: null, sceneId: null, sceneIds: null, sceneTitle: null, tagId: null, tagIds: null, kind: null, sourceKey: null, tagged: null, minConfidence: 0.5f, minDurationSec: null, excludeSceneIds: null),
+            fixture => QuerySegmentIdsAsync(fixture.Context, q: null, ids: null, videoId: null, videoIds: null, videoTitle: null, tagId: null, tagIds: null, kind: null, sourceKey: null, tagged: null, minConfidence: 0.5f, minDurationSec: null, excludeVideoIds: null),
             _ => [1002, 1003])];
         yield return [new FilterProbe(
             "filter:segments:title/includes",
-            fixture => QuerySegmentIdsAsync(fixture.Context, q: null, ids: null, sceneId: null, sceneIds: null, sceneTitle: null, tagId: null, tagIds: null, kind: null, sourceKey: null, tagged: null, minConfidence: null, minDurationSec: null, excludeSceneIds: null, title: "Beta", titleModifier: "INCLUDES"),
+            fixture => QuerySegmentIdsAsync(fixture.Context, q: null, ids: null, videoId: null, videoIds: null, videoTitle: null, tagId: null, tagIds: null, kind: null, sourceKey: null, tagged: null, minConfidence: null, minDurationSec: null, excludeVideoIds: null, title: "Beta", titleModifier: "INCLUDES"),
             _ => [1002])];
         yield return [new FilterProbe(
             "filter:segments:startSec/greater_than",
-            fixture => QuerySegmentIdsAsync(fixture.Context, q: null, ids: null, sceneId: null, sceneIds: null, sceneTitle: null, tagId: null, tagIds: null, kind: null, sourceKey: null, tagged: null, minConfidence: null, minDurationSec: null, excludeSceneIds: null, startSec: 4, startSecModifier: "GREATER_THAN"),
+            fixture => QuerySegmentIdsAsync(fixture.Context, q: null, ids: null, videoId: null, videoIds: null, videoTitle: null, tagId: null, tagIds: null, kind: null, sourceKey: null, tagged: null, minConfidence: null, minDurationSec: null, excludeVideoIds: null, startSec: 4, startSecModifier: "GREATER_THAN"),
             _ => [1002, 1003])];
         yield return [new FilterProbe(
             "filter:segments:createdAt/greater_than",
-            fixture => QuerySegmentIdsAsync(fixture.Context, q: null, ids: null, sceneId: null, sceneIds: null, sceneTitle: null, tagId: null, tagIds: null, kind: null, sourceKey: null, tagged: null, minConfidence: null, minDurationSec: null, excludeSceneIds: null, createdAt: "2024-03-21T00:00:00Z", createdAtModifier: "GREATER_THAN"),
+            fixture => QuerySegmentIdsAsync(fixture.Context, q: null, ids: null, videoId: null, videoIds: null, videoTitle: null, tagId: null, tagIds: null, kind: null, sourceKey: null, tagged: null, minConfidence: null, minDurationSec: null, excludeVideoIds: null, createdAt: "2024-03-21T00:00:00Z", createdAtModifier: "GREATER_THAN"),
             _ => [1002, 1003])];
         yield return [new FilterProbe(
             "filter:segments:hasImage/true",
-            fixture => QuerySegmentIdsAsync(fixture.Context, q: null, ids: null, sceneId: null, sceneIds: null, sceneTitle: null, tagId: null, tagIds: null, kind: null, sourceKey: null, tagged: null, minConfidence: null, minDurationSec: null, excludeSceneIds: null, hasImage: true),
+            fixture => QuerySegmentIdsAsync(fixture.Context, q: null, ids: null, videoId: null, videoIds: null, videoTitle: null, tagId: null, tagIds: null, kind: null, sourceKey: null, tagged: null, minConfidence: null, minDurationSec: null, excludeVideoIds: null, hasImage: true),
             _ => [1002])];
         yield return [new FilterProbe(
             "filter:segments:hasPayload/true",
-            fixture => QuerySegmentIdsAsync(fixture.Context, q: null, ids: null, sceneId: null, sceneIds: null, sceneTitle: null, tagId: null, tagIds: null, kind: null, sourceKey: null, tagged: null, minConfidence: null, minDurationSec: null, excludeSceneIds: null, hasPayload: true),
+            fixture => QuerySegmentIdsAsync(fixture.Context, q: null, ids: null, videoId: null, videoIds: null, videoTitle: null, tagId: null, tagIds: null, kind: null, sourceKey: null, tagged: null, minConfidence: null, minDurationSec: null, excludeVideoIds: null, hasPayload: true),
             _ => [1003])];
 
         yield return [new FilterProbe(
@@ -201,8 +201,8 @@ public class EntityListSortBehaviorHarnessTests
             fixture => QueryFilteredIdsAsync(fixture.Context, "performers", new PerformerFilter { HeightCriterion = new IntCriterion { Modifier = CriterionModifier.GreaterThan, Value = 165 } }),
             _ => [302, 303])];
         yield return [new FilterProbe(
-            "filter:performers:SceneCountCriterion/greater_than",
-            fixture => QueryFilteredIdsAsync(fixture.Context, "performers", new PerformerFilter { SceneCountCriterion = new IntCriterion { Modifier = CriterionModifier.GreaterThan, Value = 1 } }),
+            "filter:performers:VideoCountCriterion/greater_than",
+            fixture => QueryFilteredIdsAsync(fixture.Context, "performers", new PerformerFilter { VideoCountCriterion = new IntCriterion { Modifier = CriterionModifier.GreaterThan, Value = 1 } }),
             _ => [301, 302])];
         yield return [new FilterProbe(
             "filter:performers:ImageCountCriterion/greater_than",
@@ -313,11 +313,11 @@ public class EntityListSortBehaviorHarnessTests
             Value = "15",
         };
 
-        var sceneFilteredIds = await QueryFilteredIdsAsync(fixture.Context, "scenes", new SceneFilter { CustomFieldCriteria = [criterion] });
-        Assert.Equal([401, 403], sceneFilteredIds.OrderBy(id => id).ToArray());
+        var videoFilteredIds = await QueryFilteredIdsAsync(fixture.Context, "videos", new VideoFilter { CustomFieldCriteria = [criterion] });
+        Assert.Equal([401, 403], videoFilteredIds.OrderBy(id => id).ToArray());
 
-        var sceneSortedIds = await QueryIdsAsync(fixture.Context, "scenes", "custom:number:extension_score", CoveSortDirection.Asc);
-        Assert.Equal([402, 401, 403], sceneSortedIds);
+        var videoSortedIds = await QueryIdsAsync(fixture.Context, "videos", "custom:number:extension_score", CoveSortDirection.Asc);
+        Assert.Equal([402, 401, 403], videoSortedIds);
 
         var audioFilteredIds = await QueryFilteredIdsAsync(fixture.Context, "audios", new AudioFilter { CustomFieldCriteria = [criterion] });
         Assert.Equal([801, 803], audioFilteredIds.OrderBy(id => id).ToArray());
@@ -354,7 +354,7 @@ public class EntityListSortBehaviorHarnessTests
 
         return entity switch
         {
-            "scenes" => (await new SceneRepository(context).FindAsync(null, findFilter)).Items.Select(item => item.Id).ToArray(),
+            "videos" => (await new VideoRepository(context).FindAsync(null, findFilter)).Items.Select(item => item.Id).ToArray(),
             "images" => (await new ImageRepository(context).FindAsync(null, findFilter)).Items.Select(item => item.Id).ToArray(),
             "galleries" => (await new GalleryRepository(context).FindAsync(null, findFilter)).Items.Select(item => item.Id).ToArray(),
             "groups" => (await new GroupRepository(context).FindAsync(null, findFilter)).Items.Select(item => item.Id).ToArray(),
@@ -389,9 +389,9 @@ public class EntityListSortBehaviorHarnessTests
         var response = await controller.List(
             q: null,
             ids: null,
-            sceneId: null,
-            sceneIds: null,
-            sceneTitle: null,
+            videoId: null,
+            videoIds: null,
+            videoTitle: null,
             tagId: null,
             tagIds: null,
             kind: null,
@@ -410,7 +410,7 @@ public class EntityListSortBehaviorHarnessTests
             durationModifier: null,
             sort: sortKey,
             direction: DirectionValue(direction),
-            excludeSceneIds: null,
+            excludeVideoIds: null,
             page: 1,
             perPage: 50);
 
@@ -421,9 +421,9 @@ public class EntityListSortBehaviorHarnessTests
         CoveContext context,
         string? q,
         string? ids,
-        int? sceneId,
-        string? sceneIds,
-        string? sceneTitle,
+        int? videoId,
+        string? videoIds,
+        string? videoTitle,
         int? tagId,
         string? tagIds,
         string? kind,
@@ -431,7 +431,7 @@ public class EntityListSortBehaviorHarnessTests
         bool? tagged,
         float? minConfidence,
         double? minDurationSec,
-        string? excludeSceneIds,
+        string? excludeVideoIds,
         string? title = null,
         string? titleModifier = null,
         double? startSec = null,
@@ -445,9 +445,9 @@ public class EntityListSortBehaviorHarnessTests
         var response = await controller.List(
             q,
             ids,
-            sceneId,
-            sceneIds,
-            sceneTitle,
+            videoId,
+            videoIds,
+            videoTitle,
             tagId,
             tagIds,
             kind,
@@ -466,7 +466,7 @@ public class EntityListSortBehaviorHarnessTests
             durationModifier: null,
             sort: "updated_at",
             direction: "asc",
-            excludeSceneIds: excludeSceneIds,
+            excludeVideoIds: excludeVideoIds,
             title: title,
             titleModifier: titleModifier,
             hasImage: hasImage,
@@ -526,9 +526,9 @@ public class EntityListSortBehaviorHarnessTests
         int? frameSampleCount = null,
         int? frameSampleCount2 = null,
         string? frameSampleCountModifier = null,
-        int? sceneCount = null,
-        int? sceneCount2 = null,
-        string? sceneCountModifier = null,
+        int? videoCount = null,
+        int? videoCount2 = null,
+        string? videoCountModifier = null,
         int? imageCount = null,
         int? imageCount2 = null,
         string? imageCountModifier = null,
@@ -557,9 +557,9 @@ public class EntityListSortBehaviorHarnessTests
             frameSampleCount: frameSampleCount,
             frameSampleCount2: frameSampleCount2,
             frameSampleCountModifier: frameSampleCountModifier,
-            sceneCount: sceneCount,
-            sceneCount2: sceneCount2,
-            sceneCountModifier: sceneCountModifier,
+            videoCount: videoCount,
+            videoCount2: videoCount2,
+            videoCountModifier: videoCountModifier,
             imageCount: imageCount,
             imageCount2: imageCount2,
             imageCountModifier: imageCountModifier,
@@ -582,7 +582,7 @@ public class EntityListSortBehaviorHarnessTests
         var findFilter = new FindFilter { Page = 1, PerPage = 50, Sort = "created_at", Direction = CoveSortDirection.Asc };
         return (entity, filter) switch
         {
-            ("scenes", SceneFilter sceneFilter) => (await new SceneRepository(context).FindAsync(sceneFilter, findFilter)).Items.Select(item => item.Id).ToArray(),
+            ("videos", VideoFilter videoFilter) => (await new VideoRepository(context).FindAsync(videoFilter, findFilter)).Items.Select(item => item.Id).ToArray(),
             ("images", ImageFilter imageFilter) => (await new ImageRepository(context).FindAsync(imageFilter, findFilter)).Items.Select(item => item.Id).ToArray(),
             ("galleries", GalleryFilter galleryFilter) => (await new GalleryRepository(context).FindAsync(galleryFilter, findFilter)).Items.Select(item => item.Id).ToArray(),
             ("groups", GroupFilter groupFilter) => (await new GroupRepository(context).FindAsync(groupFilter, findFilter)).Items.Select(item => item.Id).ToArray(),
@@ -624,7 +624,7 @@ public class EntityListSortBehaviorHarnessTests
         var descending = direction == CoveSortDirection.Desc;
         return entity switch
         {
-            "scenes" => ProjectSceneIds(fixture, sortKey, descending),
+            "videos" => ProjectVideoIds(fixture, sortKey, descending),
             "images" => ProjectImageIds(fixture, sortKey, descending),
             "audios" => ProjectAudioIds(fixture, sortKey, descending),
             "texts" => ProjectTextIds(fixture, sortKey, descending),
@@ -639,36 +639,36 @@ public class EntityListSortBehaviorHarnessTests
         };
     }
 
-    private static IReadOnlyList<int> ProjectSceneIds(SortHarnessFixture fixture, string sortKey, bool descending)
+    private static IReadOnlyList<int> ProjectVideoIds(SortHarnessFixture fixture, string sortKey, bool descending)
         => sortKey switch
         {
-            "updated_at" => Order(fixture.Scenes, scene => scene.UpdatedAt, descending),
-            "created_at" => Order(fixture.Scenes, scene => scene.CreatedAt, descending),
-            "title" => Order(fixture.Scenes, scene => scene.Title, descending),
-            "date" => Order(fixture.Scenes, scene => scene.Date ?? DateOnly.MinValue, descending),
-            "rating" => Order(fixture.Scenes, scene => fixture.Rating(RatingHostType.Scene, scene.Id), descending),
-            "play_count" => Order(fixture.Scenes, scene => fixture.Affinity(AffinityHostType.Scene, scene.Id).ViewCount, descending),
-            "like_counter" => Order(fixture.Scenes, scene => fixture.Affinity(AffinityHostType.Scene, scene.Id).LikeCount, descending),
-            "last_like_at" => Order(fixture.Scenes, scene => scene.LikeHistory.Max(history => history.OccurredAt), descending),
-            "duration" => Order(fixture.Scenes, scene => scene.MaxDuration, descending),
-            "file_size" => Order(fixture.Scenes, scene => scene.MaxFileSize, descending),
-            "file_mod_time" => Order(fixture.Scenes, scene => scene.MaxFileModTime, descending),
-            "file_count" => Order(fixture.Scenes, scene => scene.Files.Count, descending),
-            "path" => descending ? Order(fixture.Scenes, scene => scene.MaxPath, true) : Order(fixture.Scenes, scene => scene.MinPath, false),
-            "resolution" => Order(fixture.Scenes, scene => scene.MaxHeight, descending),
-            "framerate" => Order(fixture.Scenes, scene => scene.MaxFrameRate, descending),
-            "bitrate" => Order(fixture.Scenes, scene => scene.MaxBitRate, descending),
-            "phash" => Order(fixture.Scenes, scene => ScenePhash(scene, descending), descending),
-            "tag_count" => Order(fixture.Scenes, scene => scene.SceneTags.Count, descending),
-            "performer_count" => Order(fixture.Scenes, scene => scene.ScenePerformers.Count, descending),
-            "performer_age" => Order(fixture.Scenes, scene => PerformerAge(scene, descending), descending),
-            "studio" => Order(fixture.Scenes, scene => scene.Studio!.Name, descending),
-            "code" => Order(fixture.Scenes, scene => scene.Code, descending),
-            "last_played_at" => Order(fixture.Scenes, scene => fixture.Affinity(AffinityHostType.Scene, scene.Id).LastConsumedAt, descending),
-            "play_duration" => Order(fixture.Scenes, scene => fixture.Affinity(AffinityHostType.Scene, scene.Id).TotalConsumedSec, descending),
-            "resume_time" => Order(fixture.Scenes, scene => fixture.Affinity(AffinityHostType.Scene, scene.Id).LastPositionSec, descending),
-            "organized" => Order(fixture.Scenes, scene => scene.Organized, descending),
-            _ => throw new InvalidOperationException($"No scene sort projection configured for '{sortKey}'."),
+            "updated_at" => Order(fixture.Videos, video => video.UpdatedAt, descending),
+            "created_at" => Order(fixture.Videos, video => video.CreatedAt, descending),
+            "title" => Order(fixture.Videos, video => video.Title, descending),
+            "date" => Order(fixture.Videos, video => video.Date ?? DateOnly.MinValue, descending),
+            "rating" => Order(fixture.Videos, video => fixture.Rating(RatingHostType.Video, video.Id), descending),
+            "play_count" => Order(fixture.Videos, video => fixture.Affinity(AffinityHostType.Video, video.Id).ViewCount, descending),
+            "like_counter" => Order(fixture.Videos, video => fixture.Affinity(AffinityHostType.Video, video.Id).LikeCount, descending),
+            "last_like_at" => Order(fixture.Videos, video => video.LikeHistory.Max(history => history.OccurredAt), descending),
+            "duration" => Order(fixture.Videos, video => video.MaxDuration, descending),
+            "file_size" => Order(fixture.Videos, video => video.MaxFileSize, descending),
+            "file_mod_time" => Order(fixture.Videos, video => video.MaxFileModTime, descending),
+            "file_count" => Order(fixture.Videos, video => video.Files.Count, descending),
+            "path" => descending ? Order(fixture.Videos, video => video.MaxPath, true) : Order(fixture.Videos, video => video.MinPath, false),
+            "resolution" => Order(fixture.Videos, video => video.MaxHeight, descending),
+            "framerate" => Order(fixture.Videos, video => video.MaxFrameRate, descending),
+            "bitrate" => Order(fixture.Videos, video => video.MaxBitRate, descending),
+            "phash" => Order(fixture.Videos, video => VideoPhash(video, descending), descending),
+            "tag_count" => Order(fixture.Videos, video => video.VideoTags.Count, descending),
+            "performer_count" => Order(fixture.Videos, video => video.VideoPerformers.Count, descending),
+            "performer_age" => Order(fixture.Videos, video => PerformerAge(video, descending), descending),
+            "studio" => Order(fixture.Videos, video => video.Studio!.Name, descending),
+            "code" => Order(fixture.Videos, video => video.Code, descending),
+            "last_played_at" => Order(fixture.Videos, video => fixture.Affinity(AffinityHostType.Video, video.Id).LastConsumedAt, descending),
+            "play_duration" => Order(fixture.Videos, video => fixture.Affinity(AffinityHostType.Video, video.Id).TotalConsumedSec, descending),
+            "resume_time" => Order(fixture.Videos, video => fixture.Affinity(AffinityHostType.Video, video.Id).LastPositionSec, descending),
+            "organized" => Order(fixture.Videos, video => video.Organized, descending),
+            _ => throw new InvalidOperationException($"No video sort projection configured for '{sortKey}'."),
         };
 
     private static IReadOnlyList<int> ProjectImageIds(SortHarnessFixture fixture, string sortKey, bool descending)
@@ -763,7 +763,7 @@ public class EntityListSortBehaviorHarnessTests
             "created_at" => Order(fixture.Groups, group => group.CreatedAt, descending),
             "updated_at" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.UpdatedAt, descending),
             "item_count" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.GroupItems.Count, descending),
-            "scene_count" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.GroupItems.Where(item => item.SceneId != null).Select(item => item.SceneId).Distinct().Count(), descending),
+            "video_count" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.GroupItems.Where(item => item.VideoId != null).Select(item => item.VideoId).Distinct().Count(), descending),
             "image_count" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.GroupItems.Count(item => item.Kind == GroupItemKind.Image), descending),
             "audio_count" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.GroupItems.Count(item => item.Kind == GroupItemKind.Audio), descending),
             "text_count" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.GroupItems.Count(item => item.Kind == GroupItemKind.Text), descending),
@@ -779,7 +779,7 @@ public class EntityListSortBehaviorHarnessTests
             "cached_item_count" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.CachedItemCount ?? 0, descending),
             "last_resolved_at" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.LastResolvedAt, descending),
             "query_source_key" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.QuerySourceKey, descending),
-            "show_in_scene_lists" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.ShowInSceneLists, descending),
+            "show_in_video_lists" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.ShowInVideoLists, descending),
             "aliases" => OrderWithDirectionalIdTieBreaker(fixture.Groups, group => group.Aliases ?? group.Name, descending),
             _ => throw new InvalidOperationException($"No group sort projection configured for '{sortKey}'."),
         };
@@ -794,7 +794,7 @@ public class EntityListSortBehaviorHarnessTests
             "duration" => OrderWithDirectionalIdTieBreaker(fixture.SegmentRows, row => (row.Segment.EndSec ?? row.Segment.StartSec) - row.Segment.StartSec, descending),
             "confidence" => OrderWithDirectionalIdTieBreaker(fixture.SegmentRows, row => row.Segment.Confidence ?? -1f, descending),
             "title" => OrderWithDirectionalIdTieBreaker(fixture.SegmentRows, row => row.Segment.Title ?? row.Segment.Kind ?? row.TagName ?? string.Empty, descending),
-            "scene_title" => OrderWithDirectionalIdTieBreaker(fixture.SegmentRows, row => row.SceneTitle ?? string.Empty, descending),
+            "video_title" => OrderWithDirectionalIdTieBreaker(fixture.SegmentRows, row => row.VideoTitle ?? string.Empty, descending),
             "kind" => OrderWithDirectionalIdTieBreaker(fixture.SegmentRows, row => row.Segment.Kind ?? string.Empty, descending),
             "source_key" => OrderWithDirectionalIdTieBreaker(fixture.SegmentRows, row => row.Segment.SourceKey, descending),
             "tag_name" => OrderWithDirectionalIdTieBreaker(fixture.SegmentRows, row => row.TagName ?? string.Empty, descending),
@@ -808,18 +808,18 @@ public class EntityListSortBehaviorHarnessTests
         {
             "name" => Order(fixture.Performers, performer => performer.Name, descending),
             "rating" => Order(fixture.Performers, performer => fixture.Rating(RatingHostType.Performer, performer.Id), descending),
-            "scene_count" => Order(fixture.Performers, performer => performer.ScenePerformers.Count, descending),
+            "video_count" => Order(fixture.Performers, performer => performer.VideoPerformers.Count, descending),
             "image_count" => Order(fixture.Performers, performer => performer.ImagePerformers.Count, descending),
             "gallery_count" => Order(fixture.Performers, performer => performer.GalleryPerformers.Count, descending),
-            "latest_scene_date" => Order(fixture.Performers, performer => performer.ScenePerformers.Max(link => link.Scene!.Date), descending),
-            "total_file_size" => Order(fixture.Performers, performer => performer.ScenePerformers.Sum(link => link.Scene!.MaxFileSize), descending),
+            "latest_video_date" => Order(fixture.Performers, performer => performer.VideoPerformers.Max(link => link.Video!.Date), descending),
+            "total_file_size" => Order(fixture.Performers, performer => performer.VideoPerformers.Sum(link => link.Video!.MaxFileSize), descending),
             "tag_count" => Order(fixture.Performers, performer => performer.PerformerTags.Count, descending),
             "career_length" => OrderWithDirectionalIdTieBreaker(fixture.Performers, CareerLength, descending),
-            "last_like_at" => OrderWithDirectionalIdTieBreaker(fixture.Performers, performer => performer.ScenePerformers.SelectMany(link => link.Scene!.LikeHistory).Max(history => history.OccurredAt), descending),
-            "last_played_at" => OrderWithDirectionalIdTieBreaker(fixture.Performers, performer => performer.ScenePerformers.Max(link => fixture.Affinity(AffinityHostType.Scene, link.SceneId).LastConsumedAt), descending),
+            "last_like_at" => OrderWithDirectionalIdTieBreaker(fixture.Performers, performer => performer.VideoPerformers.SelectMany(link => link.Video!.LikeHistory).Max(history => history.OccurredAt), descending),
+            "last_played_at" => OrderWithDirectionalIdTieBreaker(fixture.Performers, performer => performer.VideoPerformers.Max(link => fixture.Affinity(AffinityHostType.Video, link.VideoId).LastConsumedAt), descending),
             "measurements" => OrderMeasurements(fixture.Performers, descending),
-            "like_counter" => OrderWithDirectionalIdTieBreaker(fixture.Performers, performer => performer.ScenePerformers.Sum(link => fixture.Affinity(AffinityHostType.Scene, link.SceneId).LikeCount), descending),
-            "play_count" => OrderWithDirectionalIdTieBreaker(fixture.Performers, performer => performer.ScenePerformers.Sum(link => fixture.Affinity(AffinityHostType.Scene, link.SceneId).ViewCount), descending),
+            "like_counter" => OrderWithDirectionalIdTieBreaker(fixture.Performers, performer => performer.VideoPerformers.Sum(link => fixture.Affinity(AffinityHostType.Video, link.VideoId).LikeCount), descending),
+            "play_count" => OrderWithDirectionalIdTieBreaker(fixture.Performers, performer => performer.VideoPerformers.Sum(link => fixture.Affinity(AffinityHostType.Video, link.VideoId).ViewCount), descending),
             "birthdate" => Order(fixture.Performers, performer => performer.Birthdate, descending),
             "height" => OrderWithDirectionalIdTieBreaker(fixture.Performers, performer => performer.HeightCm ?? 0, descending),
             "weight" => Order(fixture.Performers, performer => performer.Weight, descending),
@@ -833,11 +833,11 @@ public class EntityListSortBehaviorHarnessTests
         {
             "name" => Order(fixture.Studios, studio => studio.Name, descending),
             "rating" => Order(fixture.Studios, studio => fixture.Rating(RatingHostType.Studio, studio.Id), descending),
-            "scene_count" => Order(fixture.Studios, studio => studio.SceneCount, descending),
+            "video_count" => Order(fixture.Studios, studio => studio.VideoCount, descending),
             "gallery_count" => Order(fixture.Studios, studio => studio.GalleryCount, descending),
             "image_count" => Order(fixture.Studios, studio => studio.ImageCount, descending),
-            "latest_scene_date" => Order(fixture.Studios, studio => studio.Scenes.Max(scene => scene.Date), descending),
-            "total_file_size" => Order(fixture.Studios, studio => studio.Scenes.Sum(scene => scene.MaxFileSize), descending),
+            "latest_video_date" => Order(fixture.Studios, studio => studio.Videos.Max(video => video.Date), descending),
+            "total_file_size" => Order(fixture.Studios, studio => studio.Videos.Sum(video => video.MaxFileSize), descending),
             "parent_count" => OrderWithDirectionalIdTieBreaker(fixture.Studios, studio => studio.ParentId.HasValue ? 1 : 0, descending),
             "child_count" => Order(fixture.Studios, studio => studio.ChildStudioCount, descending),
             "tag_count" => Order(fixture.Studios, studio => studio.TagCount, descending),
@@ -851,14 +851,14 @@ public class EntityListSortBehaviorHarnessTests
         {
             "name" => Order(fixture.Tags, tag => tag.Name, descending),
             "tag_group" => Order(fixture.Tags, tag => tag.TagGroup!.Name, descending),
-            "scene_count" => Order(fixture.Tags, tag => tag.SceneTags.Select(link => link.SceneId).Distinct().Count(), descending),
+            "video_count" => Order(fixture.Tags, tag => tag.VideoTags.Select(link => link.VideoId).Distinct().Count(), descending),
             "gallery_count" => Order(fixture.Tags, tag => tag.GalleryTags.Select(link => link.GalleryId).Distinct().Count(), descending),
             "group_count" => Order(fixture.Tags, tag => tag.GroupTags.Select(link => link.GroupId).Distinct().Count(), descending),
             "image_count" => Order(fixture.Tags, tag => tag.ImageTags.Select(link => link.ImageId).Distinct().Count(), descending),
             "performer_count" => Order(fixture.Tags, tag => tag.PerformerTags.Select(link => link.PerformerId).Distinct().Count(), descending),
             "studio_count" => Order(fixture.Tags, tag => tag.StudioTags.Select(link => link.StudioId).Distinct().Count(), descending),
-            "latest_scene_date" => Order(fixture.Tags, tag => tag.SceneTags.Max(link => link.Scene!.Date), descending),
-            "total_file_size" => Order(fixture.Tags, tag => tag.SceneTags.Sum(link => link.Scene!.MaxFileSize), descending),
+            "latest_video_date" => Order(fixture.Tags, tag => tag.VideoTags.Max(link => link.Video!.Date), descending),
+            "total_file_size" => Order(fixture.Tags, tag => tag.VideoTags.Sum(link => link.Video!.MaxFileSize), descending),
             "created_at" => Order(fixture.Tags, tag => tag.CreatedAt, descending),
             "updated_at" => Order(fixture.Tags, tag => tag.UpdatedAt, descending),
             _ => throw new InvalidOperationException($"No tag sort projection configured for '{sortKey}'."),
@@ -870,7 +870,7 @@ public class EntityListSortBehaviorHarnessTests
             "created_desc" => fixture.Faces.OrderByDescending(face => face.CreatedAt).ThenBy(face => face.Id).Select(face => face.Id).ToArray(),
             "updated_desc" => fixture.Faces.OrderByDescending(face => face.UpdatedAt).ThenBy(face => face.Id).Select(face => face.Id).ToArray(),
             "appearance_desc" => fixture.Faces.OrderBy(face => face.MergedIntoFaceId != null).ThenByDescending(face => face.AppearanceCount).ThenByDescending(face => face.FrameSampleCount).ThenBy(face => face.Label).ThenBy(face => face.Id).Select(face => face.Id).ToArray(),
-            "scene_count_desc" => fixture.Faces.OrderByDescending(face => face.SceneCount).ThenByDescending(face => face.AppearanceCount).ThenBy(face => face.Id).Select(face => face.Id).ToArray(),
+            "video_count_desc" => fixture.Faces.OrderByDescending(face => face.VideoCount).ThenByDescending(face => face.AppearanceCount).ThenBy(face => face.Id).Select(face => face.Id).ToArray(),
             "image_count_desc" => fixture.Faces.OrderByDescending(face => face.ImageCount).ThenByDescending(face => face.AppearanceCount).ThenBy(face => face.Id).Select(face => face.Id).ToArray(),
             "suggestion_confidence" => fixture.Faces.OrderByDescending(face => face.UpdatedAt).ThenBy(face => face.Id).Select(face => face.Id).ToArray(),
             "label_asc" => fixture.Faces.OrderBy(FaceLabel).ThenBy(face => face.Id).Select(face => face.Id).ToArray(),
@@ -891,7 +891,7 @@ public class EntityListSortBehaviorHarnessTests
             "appearance_count_desc" => fixture.Faces.OrderByDescending(face => face.AppearanceCount).ThenByDescending(face => face.Id).Select(face => face.Id).ToArray(),
             "frame_sample_count_asc" => fixture.Faces.OrderBy(face => face.FrameSampleCount).ThenBy(face => face.Id).Select(face => face.Id).ToArray(),
             "frame_sample_count_desc" => fixture.Faces.OrderByDescending(face => face.FrameSampleCount).ThenByDescending(face => face.Id).Select(face => face.Id).ToArray(),
-            "scene_count_asc" => fixture.Faces.OrderBy(face => face.SceneCount).ThenBy(face => face.Id).Select(face => face.Id).ToArray(),
+            "video_count_asc" => fixture.Faces.OrderBy(face => face.VideoCount).ThenBy(face => face.Id).Select(face => face.Id).ToArray(),
             "image_count_asc" => fixture.Faces.OrderBy(face => face.ImageCount).ThenBy(face => face.Id).Select(face => face.Id).ToArray(),
             _ => throw new InvalidOperationException($"No face sort projection configured for '{sortKey}'."),
         };
@@ -962,9 +962,9 @@ public class EntityListSortBehaviorHarnessTests
     private static string NormalizeControllerSortKey(string sortKey)
         => sortKey.Replace("_", string.Empty, StringComparison.OrdinalIgnoreCase).ToLowerInvariant();
 
-    private static string? ScenePhash(Scene scene, bool descending)
+    private static string? VideoPhash(Video video, bool descending)
     {
-        var values = scene.Files
+        var values = video.Files
             .SelectMany(file => file.Fingerprints)
             .Where(fingerprint => fingerprint.Type == "phash" && fingerprint.Value != string.Empty)
             .Select(fingerprint => fingerprint.Value);
@@ -972,11 +972,11 @@ public class EntityListSortBehaviorHarnessTests
         return descending ? values.OrderByDescending(value => value).FirstOrDefault() : values.OrderBy(value => value).FirstOrDefault();
     }
 
-    private static int? PerformerAge(Scene scene, bool descending)
+    private static int? PerformerAge(Video video, bool descending)
     {
-        var ages = scene.ScenePerformers
-            .Where(link => scene.Date != null && link.Performer!.Birthdate != null)
-            .Select(link => AgeOnDate(link.Performer!.Birthdate!.Value, scene.Date!.Value))
+        var ages = video.VideoPerformers
+            .Where(link => video.Date != null && link.Performer!.Birthdate != null)
+            .Select(link => AgeOnDate(link.Performer!.Birthdate!.Value, video.Date!.Value))
             .ToArray();
 
         if (ages.Length == 0)
@@ -1018,7 +1018,7 @@ public class EntityListSortBehaviorHarnessTests
         }
 
         public CoveContext Context { get; }
-        public IReadOnlyList<Scene> Scenes { get; private set; } = [];
+        public IReadOnlyList<Video> Videos { get; private set; } = [];
         public IReadOnlyList<Image> Images { get; private set; } = [];
         public IReadOnlyList<Audio> Audios { get; private set; } = [];
         public IReadOnlyList<TextDocument> Texts { get; private set; } = [];
@@ -1082,31 +1082,31 @@ public class EntityListSortBehaviorHarnessTests
 
             var studios = new[]
             {
-                new Studio { Id = 101, Name = "Aster Studio", CreatedAt = now.AddDays(-13), UpdatedAt = now.AddHours(-7), SceneCount = 1, GalleryCount = 2, ImageCount = 3, ChildStudioCount = 1, TagCount = 4, Organized = true },
-                new Studio { Id = 102, Name = "Beryl Studio", CreatedAt = now.AddDays(-12), UpdatedAt = now.AddHours(-5), SceneCount = 2, GalleryCount = 3, ImageCount = 1, ChildStudioCount = 2, TagCount = 2, Organized = false },
-                new Studio { Id = 103, Name = "Citrine Studio", CreatedAt = now.AddDays(-11), UpdatedAt = now.AddHours(-3), SceneCount = 3, GalleryCount = 1, ImageCount = 2, ChildStudioCount = 3, TagCount = 1, Organized = true },
+                new Studio { Id = 101, Name = "Aster Studio", CreatedAt = now.AddDays(-13), UpdatedAt = now.AddHours(-7), VideoCount = 1, GalleryCount = 2, ImageCount = 3, ChildStudioCount = 1, TagCount = 4, Organized = true },
+                new Studio { Id = 102, Name = "Beryl Studio", CreatedAt = now.AddDays(-12), UpdatedAt = now.AddHours(-5), VideoCount = 2, GalleryCount = 3, ImageCount = 1, ChildStudioCount = 2, TagCount = 2, Organized = false },
+                new Studio { Id = 103, Name = "Citrine Studio", CreatedAt = now.AddDays(-11), UpdatedAt = now.AddHours(-3), VideoCount = 3, GalleryCount = 1, ImageCount = 2, ChildStudioCount = 3, TagCount = 1, Organized = true },
             };
 
             var tags = new[]
             {
-                new Tag { Id = 201, Name = "Arc", SortName = "Arc", TagGroup = tagGroups[0], CreatedAt = now.AddDays(-23), UpdatedAt = now.AddHours(-9), SceneCount = 1, GalleryCount = 3, GroupCount = 2, ImageCount = 1, PerformerCount = 2, StudioCount = 3 },
-                new Tag { Id = 202, Name = "Bloom", SortName = "Bloom", TagGroup = tagGroups[1], Favorite = true, CreatedAt = now.AddDays(-22), UpdatedAt = now.AddHours(-8), SceneCount = 2, GalleryCount = 1, GroupCount = 3, ImageCount = 2, PerformerCount = 3, StudioCount = 1 },
-                new Tag { Id = 203, Name = "Cinder", SortName = "Cinder", TagGroup = tagGroups[2], CreatedAt = now.AddDays(-21), UpdatedAt = now.AddHours(-6), SceneCount = 3, GalleryCount = 2, GroupCount = 1, ImageCount = 3, PerformerCount = 1, StudioCount = 2 },
+                new Tag { Id = 201, Name = "Arc", SortName = "Arc", TagGroup = tagGroups[0], CreatedAt = now.AddDays(-23), UpdatedAt = now.AddHours(-9), VideoCount = 1, GalleryCount = 3, GroupCount = 2, ImageCount = 1, PerformerCount = 2, StudioCount = 3 },
+                new Tag { Id = 202, Name = "Bloom", SortName = "Bloom", TagGroup = tagGroups[1], Favorite = true, CreatedAt = now.AddDays(-22), UpdatedAt = now.AddHours(-8), VideoCount = 2, GalleryCount = 1, GroupCount = 3, ImageCount = 2, PerformerCount = 3, StudioCount = 1 },
+                new Tag { Id = 203, Name = "Cinder", SortName = "Cinder", TagGroup = tagGroups[2], CreatedAt = now.AddDays(-21), UpdatedAt = now.AddHours(-6), VideoCount = 3, GalleryCount = 2, GroupCount = 1, ImageCount = 3, PerformerCount = 1, StudioCount = 2 },
             };
 
             var performers = new[]
             {
-                new Performer { Id = 301, Name = "Ava", Birthdate = new DateOnly(1990, 2, 3), CareerStart = new DateOnly(2012, 1, 1), CareerEnd = new DateOnly(2016, 1, 1), HeightCm = 160, Weight = 52, Measurements = "30-20-30", SceneCount = 1, ImageCount = 3, GalleryCount = 1, TagCount = 2, CreatedAt = now.AddDays(-33), UpdatedAt = now.AddHours(-12) },
-                new Performer { Id = 302, Name = "Bianca", Birthdate = new DateOnly(1988, 6, 4), CareerStart = new DateOnly(2010, 1, 1), CareerEnd = new DateOnly(2018, 1, 1), HeightCm = 170, Weight = 58, Measurements = "34-24-34", SceneCount = 2, ImageCount = 1, GalleryCount = 3, TagCount = 3, CreatedAt = now.AddDays(-32), UpdatedAt = now.AddHours(-10) },
-                new Performer { Id = 303, Name = "Cora", Birthdate = new DateOnly(1995, 10, 5), CareerStart = new DateOnly(2016, 1, 1), CareerEnd = new DateOnly(2026, 1, 1), HeightCm = 180, Weight = 64, Measurements = "40-30-40", SceneCount = 3, ImageCount = 2, GalleryCount = 2, TagCount = 1, CreatedAt = now.AddDays(-31), UpdatedAt = now.AddHours(-8) },
+                new Performer { Id = 301, Name = "Ava", Birthdate = new DateOnly(1990, 2, 3), CareerStart = new DateOnly(2012, 1, 1), CareerEnd = new DateOnly(2016, 1, 1), HeightCm = 160, Weight = 52, Measurements = "30-20-30", VideoCount = 1, ImageCount = 3, GalleryCount = 1, TagCount = 2, CreatedAt = now.AddDays(-33), UpdatedAt = now.AddHours(-12) },
+                new Performer { Id = 302, Name = "Bianca", Birthdate = new DateOnly(1988, 6, 4), CareerStart = new DateOnly(2010, 1, 1), CareerEnd = new DateOnly(2018, 1, 1), HeightCm = 170, Weight = 58, Measurements = "34-24-34", VideoCount = 2, ImageCount = 1, GalleryCount = 3, TagCount = 3, CreatedAt = now.AddDays(-32), UpdatedAt = now.AddHours(-10) },
+                new Performer { Id = 303, Name = "Cora", Birthdate = new DateOnly(1995, 10, 5), CareerStart = new DateOnly(2016, 1, 1), CareerEnd = new DateOnly(2026, 1, 1), HeightCm = 180, Weight = 64, Measurements = "40-30-40", VideoCount = 3, ImageCount = 2, GalleryCount = 2, TagCount = 1, CreatedAt = now.AddDays(-31), UpdatedAt = now.AddHours(-8) },
             };
 
-            var scenes = new[]
+            var videos = new[]
             {
-                new Scene
+                new Video
                 {
                     Id = 401,
-                    Title = "Alpha Scene",
+                    Title = "Alpha Video",
                     Code = "A-001",
                     Date = new DateOnly(2021, 1, 5),
                     Studio = studios[0],
@@ -1127,12 +1127,12 @@ public class EntityListSortBehaviorHarnessTests
                     [
                         new VideoFile { Id = 1201, Basename = "alpha.mp4", ParentFolder = folderA, ParentFolderId = folderA.Id, Path = "Z:/cove/a/alpha.mp4", Size = 1_100, ModTime = now.AddDays(-4), Height = 720, Duration = 11, FrameRate = 24, BitRate = 1_100_000, Fingerprints = [new FileFingerprint { Id = 1301, Type = "phash", Value = "11aa" }] },
                     ],
-                    LikeHistory = [new SceneLikeHistory { Id = 1401, OccurredAt = now.AddDays(-10) }],
+                    LikeHistory = [new VideoLikeHistory { Id = 1401, OccurredAt = now.AddDays(-10) }],
                 },
-                new Scene
+                new Video
                 {
                     Id = 402,
-                    Title = "Beta Scene",
+                    Title = "Beta Video",
                     Code = "B-002",
                     Date = new DateOnly(2022, 2, 6),
                     Studio = studios[1],
@@ -1154,12 +1154,12 @@ public class EntityListSortBehaviorHarnessTests
                         new VideoFile { Id = 1202, Basename = "beta-a.mp4", ParentFolder = folderB, ParentFolderId = folderB.Id, Path = "Z:/cove/b/beta-a.mp4", Size = 1_000, ModTime = now.AddDays(-3), Height = 1080, Duration = 22, FrameRate = 30, BitRate = 2_200_000, Fingerprints = [new FileFingerprint { Id = 1302, Type = "phash", Value = "22bb" }] },
                         new VideoFile { Id = 1204, Basename = "beta-b.mp4", ParentFolder = folderB, ParentFolderId = folderB.Id, Path = "Z:/cove/b/beta-b.mp4", Size = 2_200, ModTime = now.AddDays(-3), Height = 1080, Duration = 20, FrameRate = 30, BitRate = 2_100_000 },
                     ],
-                    LikeHistory = [new SceneLikeHistory { Id = 1402, OccurredAt = now.AddDays(-8) }],
+                    LikeHistory = [new VideoLikeHistory { Id = 1402, OccurredAt = now.AddDays(-8) }],
                 },
-                new Scene
+                new Video
                 {
                     Id = 403,
-                    Title = "Gamma Scene",
+                    Title = "Gamma Video",
                     Code = "C-003",
                     Date = new DateOnly(2023, 3, 7),
                     Studio = studios[2],
@@ -1182,16 +1182,16 @@ public class EntityListSortBehaviorHarnessTests
                         new VideoFile { Id = 1205, Basename = "gamma-b.mp4", ParentFolder = folderC, ParentFolderId = folderC.Id, Path = "Z:/cove/c/gamma-b.mp4", Size = 4_500, ModTime = now.AddDays(-2), Height = 1440, Duration = 30, FrameRate = 48, BitRate = 2_900_000 },
                         new VideoFile { Id = 1206, Basename = "gamma-c.mp4", ParentFolder = folderC, ParentFolderId = folderC.Id, Path = "Z:/cove/c/gamma-c.mp4", Size = 3_500, ModTime = now.AddDays(-2), Height = 1080, Duration = 28, FrameRate = 24, BitRate = 2_500_000 },
                     ],
-                    LikeHistory = [new SceneLikeHistory { Id = 1403, OccurredAt = now.AddDays(-6) }],
+                    LikeHistory = [new VideoLikeHistory { Id = 1403, OccurredAt = now.AddDays(-6) }],
                 },
             };
 
-            LinkScene(scenes[0], tags[0], performers[0]);
-            LinkScene(scenes[1], tags[1], performers[0], performers[1]);
-            LinkScene(scenes[2], tags[2], performers[0], performers[1], performers[2]);
-            LinkSceneTag(scenes[0], tags[1]);
-            LinkSceneTag(scenes[0], tags[2]);
-            LinkSceneTag(scenes[1], tags[2]);
+            LinkVideo(videos[0], tags[0], performers[0]);
+            LinkVideo(videos[1], tags[1], performers[0], performers[1]);
+            LinkVideo(videos[2], tags[2], performers[0], performers[1], performers[2]);
+            LinkVideoTag(videos[0], tags[1]);
+            LinkVideoTag(videos[0], tags[2]);
+            LinkVideoTag(videos[1], tags[2]);
 
             var images = new[]
             {
@@ -1216,9 +1216,9 @@ public class EntityListSortBehaviorHarnessTests
 
             var groups = new[]
             {
-                new Group { Id = 701, Name = "Alpha Group", Aliases = "A One", SortOrder = 3, Date = new DateOnly(2018, 1, 2), CreatedAt = now.AddDays(-73), UpdatedAt = now.AddHours(-42), AllowedHostTypes = ["scene", "image", "audio"] },
-                new Group { Id = 702, Name = "Beta Group", Aliases = "B Two", QuerySourceKey = "manual", QueryJson = "{}", LastResolvedAt = now.AddDays(-3), CachedItemCount = 6, ShowInSceneLists = true, SortOrder = 1, Date = new DateOnly(2018, 2, 3), CreatedAt = now.AddDays(-72), UpdatedAt = now.AddHours(-40), AllowedHostTypes = ["scene", "image", "audio", "text", "gallery"] },
-                new Group { Id = 703, Name = "Gamma Group", Aliases = "C Three", Kind = GroupKind.Dynamic, QuerySourceKey = "filter", QueryJson = "{\"entityType\":\"scene\"}", LastResolvedAt = now.AddDays(-1), CachedItemCount = 16, SortOrder = 2, Date = new DateOnly(2018, 3, 4), CreatedAt = now.AddDays(-71), UpdatedAt = now.AddHours(-38) },
+                new Group { Id = 701, Name = "Alpha Group", Aliases = "A One", SortOrder = 3, Date = new DateOnly(2018, 1, 2), CreatedAt = now.AddDays(-73), UpdatedAt = now.AddHours(-42), AllowedHostTypes = ["video", "image", "audio"] },
+                new Group { Id = 702, Name = "Beta Group", Aliases = "B Two", QuerySourceKey = "manual", QueryJson = "{}", LastResolvedAt = now.AddDays(-3), CachedItemCount = 6, ShowInVideoLists = true, SortOrder = 1, Date = new DateOnly(2018, 2, 3), CreatedAt = now.AddDays(-72), UpdatedAt = now.AddHours(-40), AllowedHostTypes = ["video", "image", "audio", "text", "gallery"] },
+                new Group { Id = 703, Name = "Gamma Group", Aliases = "C Three", Kind = GroupKind.Dynamic, QuerySourceKey = "filter", QueryJson = "{\"entityType\":\"video\"}", LastResolvedAt = now.AddDays(-1), CachedItemCount = 16, SortOrder = 2, Date = new DateOnly(2018, 3, 4), CreatedAt = now.AddDays(-71), UpdatedAt = now.AddHours(-38) },
             };
 
             LinkGalleryImage(galleries[0], images[0]);
@@ -1270,35 +1270,35 @@ public class EntityListSortBehaviorHarnessTests
 
             var segments = new[]
             {
-                new Segment { Id = 1001, HostType = SegmentHostType.Scene, HostId = scenes[0].Id, StartSec = 1, EndSec = 4, Tag = tags[0], Kind = "action", RefId = 1101, SourceKey = "alpha-source", SourceRunId = "run-alpha", ColorHint = "red", Confidence = 0.2f, Title = "Alpha Segment", CreatedAt = now.AddDays(-103), UpdatedAt = now.AddHours(-72) },
-                new Segment { Id = 1002, HostType = SegmentHostType.Scene, HostId = scenes[1].Id, StartSec = 5, EndSec = 12, Tag = tags[1], Kind = "beat", RefId = 1102, SourceKey = "beta-source", SourceRunId = "run-beta", ColorHint = "green", Confidence = 0.6f, Title = "Beta Segment", ImageBlobId = "segment-beta-image", CreatedAt = now.AddDays(-102), UpdatedAt = now.AddHours(-70) },
-                new Segment { Id = 1003, HostType = SegmentHostType.Scene, HostId = scenes[2].Id, StartSec = 9, EndSec = 20, Tag = tags[2], Kind = "performer", RefId = performers[2].Id, SourceKey = "gamma-source", SourceRunId = "run-gamma", ColorHint = "blue", Confidence = 0.9f, Title = "Gamma Segment", Payload = JsonDocument.Parse("{\"source\":\"harness\"}"), CreatedAt = now.AddDays(-101), UpdatedAt = now.AddHours(-68) },
+                new Segment { Id = 1001, HostType = SegmentHostType.Video, HostId = videos[0].Id, StartSec = 1, EndSec = 4, Tag = tags[0], Kind = "action", RefId = 1101, SourceKey = "alpha-source", SourceRunId = "run-alpha", ColorHint = "red", Confidence = 0.2f, Title = "Alpha Segment", CreatedAt = now.AddDays(-103), UpdatedAt = now.AddHours(-72) },
+                new Segment { Id = 1002, HostType = SegmentHostType.Video, HostId = videos[1].Id, StartSec = 5, EndSec = 12, Tag = tags[1], Kind = "beat", RefId = 1102, SourceKey = "beta-source", SourceRunId = "run-beta", ColorHint = "green", Confidence = 0.6f, Title = "Beta Segment", ImageBlobId = "segment-beta-image", CreatedAt = now.AddDays(-102), UpdatedAt = now.AddHours(-70) },
+                new Segment { Id = 1003, HostType = SegmentHostType.Video, HostId = videos[2].Id, StartSec = 9, EndSec = 20, Tag = tags[2], Kind = "performer", RefId = performers[2].Id, SourceKey = "gamma-source", SourceRunId = "run-gamma", ColorHint = "blue", Confidence = 0.9f, Title = "Gamma Segment", Payload = JsonDocument.Parse("{\"source\":\"harness\"}"), CreatedAt = now.AddDays(-101), UpdatedAt = now.AddHours(-68) },
             };
 
             var faces = new[]
             {
-                new Face { Id = 1101, Label = "Alpha Face", Performer = performers[0], AppearanceCount = 2, FrameSampleCount = 20, SceneCount = 1, ImageCount = 0, DetectionCount = 2, PrimarySourceKey = "source-c", CreatedAt = now.AddDays(-113), UpdatedAt = now.AddHours(-82) },
-                new Face { Id = 1102, Label = "Beta Face", Performer = performers[1], CoverBlobId = "face-beta-cover", MergedIntoFaceId = 1101, AppearanceCount = 3, FrameSampleCount = 30, SceneCount = 1, ImageCount = 1, DetectionCount = 4, PrimarySourceKey = "source-b", CreatedAt = now.AddDays(-112), UpdatedAt = now.AddHours(-80) },
-                new Face { Id = 1103, Label = "Gamma Face", Performer = performers[2], CoverBlobId = "face-gamma-cover", Ignored = true, AppearanceCount = 4, FrameSampleCount = 40, SceneCount = 2, ImageCount = 2, DetectionCount = 6, PrimarySourceKey = "source-a", CreatedAt = now.AddDays(-111), UpdatedAt = now.AddHours(-78) },
+                new Face { Id = 1101, Label = "Alpha Face", Performer = performers[0], AppearanceCount = 2, FrameSampleCount = 20, VideoCount = 1, ImageCount = 0, DetectionCount = 2, PrimarySourceKey = "source-c", CreatedAt = now.AddDays(-113), UpdatedAt = now.AddHours(-82) },
+                new Face { Id = 1102, Label = "Beta Face", Performer = performers[1], CoverBlobId = "face-beta-cover", MergedIntoFaceId = 1101, AppearanceCount = 3, FrameSampleCount = 30, VideoCount = 1, ImageCount = 1, DetectionCount = 4, PrimarySourceKey = "source-b", CreatedAt = now.AddDays(-112), UpdatedAt = now.AddHours(-80) },
+                new Face { Id = 1103, Label = "Gamma Face", Performer = performers[2], CoverBlobId = "face-gamma-cover", Ignored = true, AppearanceCount = 4, FrameSampleCount = 40, VideoCount = 2, ImageCount = 2, DetectionCount = 6, PrimarySourceKey = "source-a", CreatedAt = now.AddDays(-111), UpdatedAt = now.AddHours(-78) },
             };
 
             LinkGroupRelation(groups[0], groups[1]);
             LinkGroupRelation(groups[2], groups[0]);
             LinkGroupRelation(groups[2], groups[1]);
-            LinkGroupItem(groups[0], 1701, GroupItemKind.Scene, "scene", scenes[0].Id, sceneId: scenes[0].Id);
+            LinkGroupItem(groups[0], 1701, GroupItemKind.Video, "video", videos[0].Id, videoId: videos[0].Id);
             LinkGroupItem(groups[0], 1702, GroupItemKind.Image, "image", images[0].Id);
             LinkGroupItem(groups[0], 1703, GroupItemKind.Audio, "audio", audios[0].Id);
-            LinkGroupItem(groups[1], 1704, GroupItemKind.Scene, "scene", scenes[0].Id, sceneId: scenes[0].Id);
-            LinkGroupItem(groups[1], 1705, GroupItemKind.Scene, "scene", scenes[1].Id, sceneId: scenes[1].Id);
+            LinkGroupItem(groups[1], 1704, GroupItemKind.Video, "video", videos[0].Id, videoId: videos[0].Id);
+            LinkGroupItem(groups[1], 1705, GroupItemKind.Video, "video", videos[1].Id, videoId: videos[1].Id);
             LinkGroupItem(groups[1], 1706, GroupItemKind.Image, "image", images[0].Id);
             LinkGroupItem(groups[1], 1707, GroupItemKind.Image, "image", images[1].Id);
             LinkGroupItem(groups[1], 1708, GroupItemKind.Audio, "audio", audios[0].Id);
             LinkGroupItem(groups[1], 1709, GroupItemKind.Audio, "audio", audios[1].Id);
             LinkGroupItem(groups[1], 1710, GroupItemKind.Text, "text", texts[0].Id);
             LinkGroupItem(groups[1], 1711, GroupItemKind.Gallery, "gallery", galleries[0].Id);
-            LinkGroupItem(groups[2], 1712, GroupItemKind.Scene, "scene", scenes[0].Id, sceneId: scenes[0].Id);
-            LinkGroupItem(groups[2], 1713, GroupItemKind.Scene, "scene", scenes[1].Id, sceneId: scenes[1].Id);
-            LinkGroupItem(groups[2], 1714, GroupItemKind.Scene, "scene", scenes[2].Id, sceneId: scenes[2].Id);
+            LinkGroupItem(groups[2], 1712, GroupItemKind.Video, "video", videos[0].Id, videoId: videos[0].Id);
+            LinkGroupItem(groups[2], 1713, GroupItemKind.Video, "video", videos[1].Id, videoId: videos[1].Id);
+            LinkGroupItem(groups[2], 1714, GroupItemKind.Video, "video", videos[2].Id, videoId: videos[2].Id);
             LinkGroupItem(groups[2], 1715, GroupItemKind.Image, "image", images[0].Id);
             LinkGroupItem(groups[2], 1716, GroupItemKind.Image, "image", images[1].Id);
             LinkGroupItem(groups[2], 1717, GroupItemKind.Image, "image", images[2].Id);
@@ -1320,7 +1320,7 @@ public class EntityListSortBehaviorHarnessTests
             Context.Studios.AddRange(studios);
             Context.Tags.AddRange(tags);
             Context.Performers.AddRange(performers);
-            Context.Scenes.AddRange(scenes);
+            Context.Videos.AddRange(videos);
             Context.Images.AddRange(images);
             Context.Galleries.AddRange(galleries);
             Context.Groups.AddRange(groups);
@@ -1335,16 +1335,16 @@ public class EntityListSortBehaviorHarnessTests
                 Key = "extension_score",
                 Label = "Extension Score",
                 Type = CustomFieldTypes.Number,
-                EntityTypes = [CustomFieldEntityTypes.Scene, CustomFieldEntityTypes.Audio, CustomFieldEntityTypes.Face],
+                EntityTypes = [CustomFieldEntityTypes.Video, CustomFieldEntityTypes.Audio, CustomFieldEntityTypes.Face],
                 Filterable = true,
                 Sortable = true,
             };
 
             Context.CustomFieldDefinitions.Add(extensionScoreDefinition);
             Context.CustomFieldValues.AddRange(
-                CustomNumberValue(21101, extensionScoreDefinition, CustomFieldEntityTypes.Scene, scenes[0].Id, 20),
-                CustomNumberValue(21102, extensionScoreDefinition, CustomFieldEntityTypes.Scene, scenes[1].Id, 10),
-                CustomNumberValue(21103, extensionScoreDefinition, CustomFieldEntityTypes.Scene, scenes[2].Id, 30),
+                CustomNumberValue(21101, extensionScoreDefinition, CustomFieldEntityTypes.Video, videos[0].Id, 20),
+                CustomNumberValue(21102, extensionScoreDefinition, CustomFieldEntityTypes.Video, videos[1].Id, 10),
+                CustomNumberValue(21103, extensionScoreDefinition, CustomFieldEntityTypes.Video, videos[2].Id, 30),
                 CustomNumberValue(21104, extensionScoreDefinition, CustomFieldEntityTypes.Audio, audios[0].Id, 20),
                 CustomNumberValue(21105, extensionScoreDefinition, CustomFieldEntityTypes.Audio, audios[1].Id, 10),
                 CustomNumberValue(21106, extensionScoreDefinition, CustomFieldEntityTypes.Audio, audios[2].Id, 30),
@@ -1352,9 +1352,9 @@ public class EntityListSortBehaviorHarnessTests
                 CustomNumberValue(21108, extensionScoreDefinition, CustomFieldEntityTypes.Face, faces[1].Id, 10),
                 CustomNumberValue(21109, extensionScoreDefinition, CustomFieldEntityTypes.Face, faces[2].Id, 30));
 
-            AddRating(RatingHostType.Scene, scenes[0].Id, 1);
-            AddRating(RatingHostType.Scene, scenes[1].Id, 3);
-            AddRating(RatingHostType.Scene, scenes[2].Id, 5);
+            AddRating(RatingHostType.Video, videos[0].Id, 1);
+            AddRating(RatingHostType.Video, videos[1].Id, 3);
+            AddRating(RatingHostType.Video, videos[2].Id, 5);
             AddRating(RatingHostType.Image, images[0].Id, 2);
             AddRating(RatingHostType.Image, images[1].Id, 4);
             AddRating(RatingHostType.Image, images[2].Id, 6);
@@ -1377,9 +1377,9 @@ public class EntityListSortBehaviorHarnessTests
             AddRating(RatingHostType.Studio, studios[1].Id, 8);
             AddRating(RatingHostType.Studio, studios[2].Id, 9);
 
-            AddAffinity(AffinityHostType.Scene, scenes[0].Id, viewCount: 1, likeCount: 10, totalConsumedSec: 100, lastPositionSec: 11, lastConsumedAt: now.AddDays(-30));
-            AddAffinity(AffinityHostType.Scene, scenes[1].Id, viewCount: 3, likeCount: 20, totalConsumedSec: 200, lastPositionSec: 22, lastConsumedAt: now.AddDays(-20));
-            AddAffinity(AffinityHostType.Scene, scenes[2].Id, viewCount: 9, likeCount: 30, totalConsumedSec: 300, lastPositionSec: 33, lastConsumedAt: now.AddDays(-10));
+            AddAffinity(AffinityHostType.Video, videos[0].Id, viewCount: 1, likeCount: 10, totalConsumedSec: 100, lastPositionSec: 11, lastConsumedAt: now.AddDays(-30));
+            AddAffinity(AffinityHostType.Video, videos[1].Id, viewCount: 3, likeCount: 20, totalConsumedSec: 200, lastPositionSec: 22, lastConsumedAt: now.AddDays(-20));
+            AddAffinity(AffinityHostType.Video, videos[2].Id, viewCount: 9, likeCount: 30, totalConsumedSec: 300, lastPositionSec: 33, lastConsumedAt: now.AddDays(-10));
             AddAffinity(AffinityHostType.Image, images[0].Id, viewCount: 1, likeCount: 5, totalConsumedSec: 0, lastPositionSec: null, lastConsumedAt: now.AddDays(-30));
             AddAffinity(AffinityHostType.Image, images[1].Id, viewCount: 1, likeCount: 15, totalConsumedSec: 0, lastPositionSec: null, lastConsumedAt: now.AddDays(-20));
             AddAffinity(AffinityHostType.Image, images[2].Id, viewCount: 1, likeCount: 25, totalConsumedSec: 0, lastPositionSec: null, lastConsumedAt: now.AddDays(-10));
@@ -1393,7 +1393,7 @@ public class EntityListSortBehaviorHarnessTests
             await Context.SaveChangesAsync();
             await CorruptCountColumnsAsync(performers, images, studios);
 
-            Scenes = scenes;
+            Videos = videos;
             Images = images;
             Audios = audios;
             Texts = texts;
@@ -1401,9 +1401,9 @@ public class EntityListSortBehaviorHarnessTests
             Groups = groups;
             SegmentRows =
             [
-                new(segments[0], scenes[0].Title, tags[0].Name, "Alpha Face", performers[0].Name),
-                new(segments[1], scenes[1].Title, tags[1].Name, "Beta Face", performers[1].Name),
-                new(segments[2], scenes[2].Title, tags[2].Name, performers[2].Name, performers[2].Name),
+                new(segments[0], videos[0].Title, tags[0].Name, "Alpha Face", performers[0].Name),
+                new(segments[1], videos[1].Title, tags[1].Name, "Beta Face", performers[1].Name),
+                new(segments[2], videos[2].Title, tags[2].Name, performers[2].Name, performers[2].Name),
             ];
             Performers = performers;
             Studios = studios;
@@ -1436,18 +1436,18 @@ public class EntityListSortBehaviorHarnessTests
 
         private async Task CorruptCountColumnsAsync(IReadOnlyList<Performer> performers, IReadOnlyList<Image> images, IReadOnlyList<Studio> studios)
         {
-            performers[0].SceneCount = 0;
-            performers[1].SceneCount = 9;
-            performers[2].SceneCount = 5;
+            performers[0].VideoCount = 0;
+            performers[1].VideoCount = 9;
+            performers[2].VideoCount = 5;
             performers[0].ImageCount = 0;
             performers[1].ImageCount = 9;
             performers[2].ImageCount = 5;
             images[0].PerformerCount = 9;
             images[1].PerformerCount = 0;
             images[2].PerformerCount = 5;
-            studios[0].SceneCount = 1;
-            studios[1].SceneCount = 2;
-            studios[2].SceneCount = 3;
+            studios[0].VideoCount = 1;
+            studios[1].VideoCount = 2;
+            studios[2].VideoCount = 3;
             studios[0].ImageCount = 1;
             studios[1].ImageCount = 2;
             studios[2].ImageCount = 3;
@@ -1461,15 +1461,15 @@ public class EntityListSortBehaviorHarnessTests
             await ((HarnessCoveContext)Context).SaveWithoutDerivedCountsAsync();
         }
 
-        private static void LinkScene(Scene scene, Tag tag, params Performer[] performers)
+        private static void LinkVideo(Video video, Tag tag, params Performer[] performers)
         {
-            LinkSceneTag(scene, tag);
+            LinkVideoTag(video, tag);
 
             foreach (var performer in performers)
             {
-                var scenePerformer = new ScenePerformer { Scene = scene, SceneId = scene.Id, Performer = performer, PerformerId = performer.Id };
-                scene.ScenePerformers.Add(scenePerformer);
-                performer.ScenePerformers.Add(scenePerformer);
+                var videoPerformer = new VideoPerformer { Video = video, VideoId = video.Id, Performer = performer, PerformerId = performer.Id };
+                video.VideoPerformers.Add(videoPerformer);
+                performer.VideoPerformers.Add(videoPerformer);
             }
         }
 
@@ -1484,11 +1484,11 @@ public class EntityListSortBehaviorHarnessTests
                 NumberValue = value,
             };
 
-        private static void LinkSceneTag(Scene scene, Tag tag)
+        private static void LinkVideoTag(Video video, Tag tag)
         {
-            var sceneTag = new SceneTag { Scene = scene, SceneId = scene.Id, Tag = tag, TagId = tag.Id };
-            scene.SceneTags.Add(sceneTag);
-            tag.SceneTags.Add(sceneTag);
+            var videoTag = new VideoTag { Video = video, VideoId = video.Id, Tag = tag, TagId = tag.Id };
+            video.VideoTags.Add(videoTag);
+            tag.VideoTags.Add(videoTag);
         }
 
         private static void LinkImage(Image image, params Performer[] performers)
@@ -1551,7 +1551,7 @@ public class EntityListSortBehaviorHarnessTests
             }
         }
 
-        private static void LinkGroupItem(Group group, int id, GroupItemKind kind, string hostType, int hostId, int? sceneId = null)
+        private static void LinkGroupItem(Group group, int id, GroupItemKind kind, string hostType, int hostId, int? videoId = null)
         {
             group.GroupItems.Add(new GroupItem
             {
@@ -1561,7 +1561,7 @@ public class EntityListSortBehaviorHarnessTests
                 Kind = kind,
                 HostType = hostType,
                 HostId = hostId,
-                SceneId = sceneId,
+                VideoId = videoId,
                 OrderIndex = group.GroupItems.Count + 1,
             });
         }
@@ -1637,7 +1637,7 @@ public class EntityListSortBehaviorHarnessTests
         }
     }
 
-    public sealed record SegmentHarnessRow(Segment Segment, string? SceneTitle, string? TagName, string? RefLabel, string? PerformerName);
+    public sealed record SegmentHarnessRow(Segment Segment, string? VideoTitle, string? TagName, string? RefLabel, string? PerformerName);
 
     private sealed class HarnessCoveContext(DbContextOptions<CoveContext> options, ICurrentPrincipalAccessor principalAccessor) : CoveContext(options, principalAccessor)
     {

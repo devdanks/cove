@@ -107,7 +107,7 @@ public class ImageBatchScrapeService(
 
                     var appliedAttempt = await scrapeAttemptService.ApplyImageAttemptWithDefaultPlanAsync(
                         attempt.Id,
-                        new ApplySceneScrapeAttemptDto(
+                        new ApplyVideoScrapeAttemptDto(
                             ReplaceFields: null,
                             CollectionModes: null,
                             CreateMissingTags: request.CreateMissingTags,

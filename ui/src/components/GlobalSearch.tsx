@@ -2,7 +2,7 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { BookOpenText, Building2, Film, FolderOpen, Headphones, ImageIcon, Layers, Loader2, Search, Tag, Users } from "lucide-react";
-import { audios, galleries, groups as groupApi, images, performers, scenes, studios, tags, texts } from "../api/client";
+import { audios, galleries, groups as groupApi, images, performers, videos, studios, tags, texts } from "../api/client";
 import type { InteractionHostType } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { canReadEntity } from "../auth/visibility";
@@ -20,7 +20,7 @@ type SearchGroup = {
   items: { id: number; title: string; subtitle?: string; route: any; hostType: InteractionHostType }[];
 };
 
-type SceneSearchItems = Awaited<ReturnType<typeof scenes.find>>["items"];
+type VideoSearchItems = Awaited<ReturnType<typeof videos.find>>["items"];
 type PerformerSearchItems = Awaited<ReturnType<typeof performers.find>>["items"];
 type StudioSearchItems = Awaited<ReturnType<typeof studios.find>>["items"];
 type TagSearchItems = Awaited<ReturnType<typeof tags.find>>["items"];
@@ -80,7 +80,7 @@ export function GlobalSearch({ navigate }: Props) {
   const { hasPermission, permissions } = useAuth();
 
   const readableEntities = useMemo(() => ({
-    scenes: canReadEntity("scene", hasPermission),
+    videos: canReadEntity("video", hasPermission),
     performers: canReadEntity("performer", hasPermission),
     studios: canReadEntity("studio", hasPermission),
     tags: canReadEntity("tag", hasPermission),
@@ -93,7 +93,7 @@ export function GlobalSearch({ navigate }: Props) {
 
   const searchableLabels = useMemo(() => {
     const labels: string[] = [];
-    if (readableEntities.scenes) labels.push("scenes");
+    if (readableEntities.videos) labels.push("videos");
     if (readableEntities.performers) labels.push("performers");
     if (readableEntities.studios) labels.push("studios");
     if (readableEntities.tags) labels.push("tags");
@@ -153,18 +153,18 @@ export function GlobalSearch({ navigate }: Props) {
       const aliasCriterion = { value: deferredTerm, modifier: "INCLUDES" as const };
       const aliasFindFilter = { perPage: query.perPage, sort: "name", direction: "asc" as const };
       const searches: SearchDefinition[] = [
-        ...(readableEntities.scenes ? [{
-          key: "scenes",
-          label: "Scenes",
+        ...(readableEntities.videos ? [{
+          key: "videos",
+          label: "Videos",
           icon: Film,
-          hostType: "scene" as const,
-          load: () => scenes.find(query),
-          mapItems: (items: unknown[]) => (items as SceneSearchItems).map((item) => ({
+          hostType: "video" as const,
+          load: () => videos.find(query),
+          mapItems: (items: unknown[]) => (items as VideoSearchItems).map((item) => ({
             id: item.id,
-            title: item.title || item.files[0]?.basename || `Scene ${item.id}`,
+            title: item.title || item.files[0]?.basename || `Video ${item.id}`,
             subtitle: item.studioName || item.date || undefined,
-            route: { page: "scene", id: item.id },
-            hostType: "scene" as const,
+            route: { page: "video", id: item.id },
+            hostType: "video" as const,
           })),
         }] : []),
         ...(readableEntities.performers ? [{

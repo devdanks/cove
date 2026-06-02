@@ -1,4 +1,4 @@
-import type { ResolvedSpan, Scene } from "../../../api/types";
+import type { ResolvedSpan, Video } from "../../../api/types";
 import { TextInput } from "../../../components/EditModal";
 import { formatSeconds } from "./types";
 
@@ -11,11 +11,11 @@ interface PreviewCardData {
 interface Props {
   title: string;
   description: string;
-  previewScene?: Scene;
-  previewSceneSearch?: string;
-  onPreviewSceneSearchChange?: (value: string) => void;
-  previewSceneResults?: Scene[];
-  onSelectPreviewScene?: (sceneId: number) => void;
+  previewVideo?: Video;
+  previewVideoSearch?: string;
+  onPreviewVideoSearchChange?: (value: string) => void;
+  previewVideoResults?: Video[];
+  onSelectPreviewVideo?: (videoId: number) => void;
   cards: PreviewCardData[];
   emptyMessage: string;
 }
@@ -23,15 +23,15 @@ interface Props {
 export function RulesPreviewPane({
   title,
   description,
-  previewScene,
-  previewSceneSearch,
-  onPreviewSceneSearchChange,
-  previewSceneResults = [],
-  onSelectPreviewScene,
+  previewVideo,
+  previewVideoSearch,
+  onPreviewVideoSearchChange,
+  previewVideoResults = [],
+  onSelectPreviewVideo,
   cards,
   emptyMessage,
 }: Props) {
-  const trimmedSearch = previewSceneSearch?.trim() ?? "";
+  const trimmedSearch = previewVideoSearch?.trim() ?? "";
 
   return (
     <div className="rounded-xl border border-border bg-card p-4">
@@ -40,25 +40,25 @@ export function RulesPreviewPane({
           <h4 className="text-sm font-semibold uppercase tracking-wide text-muted">{title}</h4>
           <p className="mt-1 text-sm text-secondary">{description}</p>
         </div>
-        {previewScene ? <div className="rounded-full bg-surface px-3 py-1 text-xs text-secondary">{previewScene.title || `Scene #${previewScene.id}`}</div> : null}
+        {previewVideo ? <div className="rounded-full bg-surface px-3 py-1 text-xs text-secondary">{previewVideo.title || `Video #${previewVideo.id}`}</div> : null}
       </div>
 
-      {onPreviewSceneSearchChange ? (
+      {onPreviewVideoSearchChange ? (
         <div className="mt-4 space-y-3">
-          <TextInput value={previewSceneSearch ?? ""} onChange={onPreviewSceneSearchChange} placeholder="Search scenes for preview..." />
+          <TextInput value={previewVideoSearch ?? ""} onChange={onPreviewVideoSearchChange} placeholder="Search videos for preview..." />
           {trimmedSearch ? (
             <div className="max-h-44 overflow-y-auto rounded-xl border border-border bg-surface/40">
-              {previewSceneResults.length === 0 ? (
-                <div className="px-4 py-3 text-sm text-secondary">No scenes found.</div>
-              ) : previewSceneResults.map((scene) => (
+              {previewVideoResults.length === 0 ? (
+                <div className="px-4 py-3 text-sm text-secondary">No videos found.</div>
+              ) : previewVideoResults.map((video) => (
                 <button
-                  key={scene.id}
+                  key={video.id}
                   type="button"
-                  onClick={() => onSelectPreviewScene?.(scene.id)}
+                  onClick={() => onSelectPreviewVideo?.(video.id)}
                   className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm text-foreground transition-colors hover:bg-card"
                 >
-                  <span>{scene.title || `Scene #${scene.id}`}</span>
-                  <span className="text-xs text-muted">#{scene.id}</span>
+                  <span>{video.title || `Video #${video.id}`}</span>
+                  <span className="text-xs text-muted">#{video.id}</span>
                 </button>
               ))}
             </div>
@@ -66,13 +66,13 @@ export function RulesPreviewPane({
         </div>
       ) : null}
 
-      {previewScene ? (
+      {previewVideo ? (
         <div className={`mt-4 grid gap-4 ${cards.length > 1 ? "md:grid-cols-2" : ""}`}>
           {cards.map((card) => (
             <SpanPreviewCard
               key={card.title}
               title={card.title}
-              scene={previewScene}
+              video={previewVideo}
               spans={card.spans}
               loading={card.loading}
             />
@@ -89,12 +89,12 @@ export function RulesPreviewPane({
 
 function SpanPreviewCard({
   title,
-  scene,
+  video,
   spans,
   loading,
 }: {
   title: string;
-  scene?: Scene;
+  video?: Video;
   spans: ResolvedSpan[];
   loading: boolean;
 }) {
@@ -105,13 +105,13 @@ function SpanPreviewCard({
       <div className="flex items-center justify-between gap-3">
         <div>
           <div className="text-sm font-medium text-foreground">{title}</div>
-          <div className="mt-1 text-xs text-secondary">{scene ? (scene.title || `Scene #${scene.id}`) : "No preview scene selected"}</div>
+          <div className="mt-1 text-xs text-secondary">{video ? (video.title || `Video #${video.id}`) : "No preview video selected"}</div>
         </div>
         <div className="text-xs text-muted">{spans.length} span{spans.length === 1 ? "" : "s"}</div>
       </div>
 
       {loading ? <div className="mt-4 text-sm text-secondary">Loading preview...</div> : null}
-      {!loading && spans.length === 0 ? <div className="mt-4 text-sm text-secondary">No spans would be shown for this scene.</div> : null}
+      {!loading && spans.length === 0 ? <div className="mt-4 text-sm text-secondary">No spans would be shown for this video.</div> : null}
       {!loading && spans.length > 0 ? (
         <div className="mt-4 space-y-3">
           {spans.slice(0, 8).map((span) => {

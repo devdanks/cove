@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { entityImages, scenes } from "../api/client";
+import { entityImages, videos } from "../api/client";
 import { WallMediaCard } from "./WallMediaCard";
 
 export function SegmentPreviewMedia({
@@ -23,12 +23,12 @@ export function SegmentPreviewMedia({
   const [previewActive, setPreviewActive] = useState(false);
   const posterUrl = segmentId != null
     ? entityImages.segmentCoverUrl(segmentId, updatedAt)
-    : scenes.screenshotUrl(hostId, updatedAt, startSec);
-  const videoUrl = startSec != null ? scenes.streamUrl(hostId) : undefined;
+    : videos.screenshotUrl(hostId, updatedAt, startSec);
+  const videoUrl = startSec != null ? videos.streamUrl(hostId) : undefined;
   const mediaClassName = className.includes("object-") ? className : `${className} object-cover`;
 
   useEffect(() => {
-    const hoverRoot = rootRef.current?.closest(".scene-card") ?? rootRef.current;
+    const hoverRoot = rootRef.current?.closest(".video-card") ?? rootRef.current;
     if (!hoverRoot) return;
 
     const activate = () => setPreviewActive(true);
@@ -69,9 +69,9 @@ export function SegmentPreviewMedia({
           hostId: segmentId,
           surface: "segmentPreview",
           scopeKey: `segment-preview:${segmentId}`,
-          parentHostType: "scene",
+          parentHostType: "video",
           parentHostId: hostId,
-          itemHostType: "scene",
+          itemHostType: "video",
           itemHostId: hostId,
           segmentId,
           clipStartSec: startSec,

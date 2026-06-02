@@ -19,7 +19,7 @@ public interface IFingerprintService
     Task<string?> ComputeVideoPhashAsync(string path, double duration, CancellationToken ct = default);
     Task<string?> ComputeAudioPhashAsync(string path, CancellationToken ct = default);
     Task<string?> ComputeTextPhashAsync(string path, CancellationToken ct = default);
-    string StartGenerateScenePhashes();
+    string StartGenerateVideoPhashes();
     string StartGenerateImagePhashes();
 }
 
@@ -438,19 +438,19 @@ public class FingerprintService(
         return configured;
     }
 
-    public string StartGenerateScenePhashes()
+    public string StartGenerateVideoPhashes()
     {
-        return jobService.Enqueue("generate_scene_phashes", "Generating scene pHashes", async (progress, ct) =>
+        return jobService.Enqueue("generate_video_phashes", "Generating video pHashes", async (progress, ct) =>
         {
-            logger.LogInformation("[phash] Scene phash generation job started");
-            Console.WriteLine("[phash] Scene phash generation job started");
+            logger.LogInformation("[phash] Video phash generation job started");
+            Console.WriteLine("[phash] Video phash generation job started");
             List<(int FileId, string Path, double Duration)> workItems;
 
             using (var scope = scopeFactory.CreateScope())
             {
                 var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
 
-                var totalScenes = await db.VideoFiles.CountAsync(ct);
+                var totalVideos = await db.VideoFiles.CountAsync(ct);
 
                 // Get IDs of files that already have a phash
                 var filesWithPhashIds = await db.FileFingerprints
@@ -460,8 +460,8 @@ public class FingerprintService(
                     .ToHashSetAsync(ct);
 
                 logger.LogInformation("[phash] Database check: {Total} video files total, {HasPhash} already have phash entries",
-                    totalScenes, filesWithPhashIds.Count);
-                Console.WriteLine($"[phash] Database check: {totalScenes} video files total, {filesWithPhashIds.Count} already have phash entries");
+                    totalVideos, filesWithPhashIds.Count);
+                Console.WriteLine($"[phash] Database check: {totalVideos} video files total, {filesWithPhashIds.Count} already have phash entries");
 
                 // Only load files that need phash generation
                 var pendingVideoFiles = await db.VideoFiles
@@ -479,7 +479,7 @@ public class FingerprintService(
 
             if (workItems.Count == 0)
             {
-                progress.Report(1.0, "All scenes already have pHashes");
+                progress.Report(1.0, "All videos already have pHashes");
                 logger.LogInformation("[phash] All video files already have pHashes — nothing to do");
                 Console.WriteLine("[phash] All video files already have pHashes — nothing to do");
                 return;

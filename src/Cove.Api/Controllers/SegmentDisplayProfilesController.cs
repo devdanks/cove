@@ -281,11 +281,11 @@ public class SegmentDisplayProfilesController(CoveContext db, SegmentSpanResolve
     [RequiresPermission(Permissions.SegmentsRead)]
     public async Task<ActionResult<ResolvedSpanListDto>> Preview([FromBody] SegmentDisplayProfilePreviewRequestDto dto, CancellationToken ct)
     {
-        if (dto.SceneId <= 0)
-            return BadRequest("SceneId is required.");
+        if (dto.VideoId <= 0)
+            return BadRequest("VideoId is required.");
 
-        var sceneExists = await db.Scenes.AsNoTracking().AnyAsync(scene => scene.Id == dto.SceneId, ct);
-        if (!sceneExists)
+        var videoExists = await db.Videos.AsNoTracking().AnyAsync(video => video.Id == dto.VideoId, ct);
+        if (!videoExists)
             return NotFound();
 
         var ruleInputs = dto.Rules ?? [];
@@ -310,7 +310,7 @@ public class SegmentDisplayProfilesController(CoveContext db, SegmentSpanResolve
             })
             .ToList();
 
-        var spans = await spanResolver.PreviewSceneAsync(dto.SceneId, rules, ct);
+        var spans = await spanResolver.PreviewVideoAsync(dto.VideoId, rules, ct);
         return Ok(new ResolvedSpanListDto(spans.ToList()));
     }
 

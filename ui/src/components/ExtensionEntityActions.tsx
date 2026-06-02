@@ -25,8 +25,8 @@ interface QueuedActionResponse {
 function normalizeEntityType(entityType: string): string {
   const normalized = entityType.trim().toLowerCase();
   switch (normalized) {
-    case "scenes":
-      return "scene";
+    case "videos":
+      return "video";
     case "images":
       return "image";
     default:
@@ -107,7 +107,7 @@ export function ExtensionEntityActions({ entityType, entityId, pageType, renderM
   }, []);
 
   const actions = useMemo(() => {
-    if (normalizedEntityType !== "scene" && normalizedEntityType !== "image") {
+    if (normalizedEntityType !== "video" && normalizedEntityType !== "image") {
       return [];
     }
 

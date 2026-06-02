@@ -682,25 +682,25 @@ public sealed class UserService : IUserService
         var theme = NormalizeThemePreferences(preferences.Theme);
         var ratingSystemOptions = NormalizeRatingSystemOptions(preferences.RatingSystemOptions);
         var tracking = NormalizeTrackingPreferences(preferences.Tracking);
-        var scenes = NormalizeScenesPreferences(preferences.Scenes);
+        var videos = NormalizeVideosPreferences(preferences.Videos);
         var playback = NormalizePlaybackPreferences(preferences.Playback);
         var keybindingOverrides = NormalizeKeybindingOverrides(preferences.KeybindingOverrides);
-        if (theme is null && ratingSystemOptions is null && tracking is null && scenes is null && playback is null && keybindingOverrides is null)
+        if (theme is null && ratingSystemOptions is null && tracking is null && videos is null && playback is null && keybindingOverrides is null)
         {
             return null;
         }
 
-        return new UserUiPreferencesDto(theme, ratingSystemOptions, tracking, scenes, keybindingOverrides, playback);
+        return new UserUiPreferencesDto(theme, ratingSystemOptions, tracking, videos, keybindingOverrides, playback);
     }
 
-    private static UserScenesPreferencesDto? NormalizeScenesPreferences(UserScenesPreferencesDto? scenes)
+    private static UserVideosPreferencesDto? NormalizeVideosPreferences(UserVideosPreferencesDto? videos)
     {
-        if (scenes?.IncludeCompilationGroups is not bool includeCompilationGroups)
+        if (videos?.IncludeCompilationGroups is not bool includeCompilationGroups)
         {
             return null;
         }
 
-        return new UserScenesPreferencesDto(includeCompilationGroups);
+        return new UserVideosPreferencesDto(includeCompilationGroups);
     }
 
     private static UserPlaybackPreferencesDto? NormalizePlaybackPreferences(UserPlaybackPreferencesDto? playback)
@@ -1026,3 +1026,4 @@ public sealed class RoleService : IRoleService
         r.Permissions.Select(p => p.PermissionKey).OrderBy(x => x).ToList(),
         r.Users.Count);
 }
+

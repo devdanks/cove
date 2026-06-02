@@ -12,16 +12,35 @@ public interface IRepository<T> where T : class
     Task<int> CountAsync(CancellationToken ct = default);
 }
 
-public interface ISceneRepository : IRepository<Scene>
+public interface IVideoRepository : IRepository<Video>
 {
-    Task<(IReadOnlyList<Scene> Items, int TotalCount)> FindAsync(SceneFilter? filter, FindFilter? findFilter, CancellationToken ct = default);
-    Task<Scene?> GetByIdWithRelationsAsync(int id, CancellationToken ct = default);
+    Task<(IReadOnlyList<Video> Items, int TotalCount)> FindAsync(VideoFilter? filter, FindFilter? findFilter, CancellationToken ct = default);
+    Task<Video?> GetByIdWithRelationsAsync(int id, CancellationToken ct = default);
+    /// <summary>Returns VideoPerformer join rows (with Performer.RemoteIds included) for the given video IDs.</summary>
+    Task<IReadOnlyList<VideoPerformer>> GetVideoPerformersAsync(IReadOnlyList<int> videoIds, CancellationToken ct = default);
 }
 
 public interface IPerformerRepository : IRepository<Performer>
 {
     Task<(IReadOnlyList<Performer> Items, int TotalCount)> FindAsync(PerformerFilter? filter, FindFilter? findFilter, CancellationToken ct = default);
     Task<Performer?> GetByIdWithRelationsAsync(int id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Finds performers whose name/aliases match any of <paramref name="names"/>, or whose remote ID
+    /// at <paramref name="remoteEndpoint"/> matches any of <paramref name="remoteIds"/>.
+    /// Results include Aliases and RemoteIds navigations. Useful for deduplication and external-source linking.
+    /// </summary>
+    Task<IReadOnlyList<Performer>> FindByNamesOrRemoteIdsAsync(
+        IReadOnlyList<string> names,
+        string? remoteEndpoint,
+        IReadOnlyList<string> remoteIds,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Finds a single performer by remote endpoint + remote ID, including Aliases and RemoteIds.
+    /// Returns null if not found.
+    /// </summary>
+    Task<Performer?> FindByRemoteIdAsync(string remoteEndpoint, string remoteId, CancellationToken ct = default);
 }
 
 public interface ITagRepository : IRepository<Tag>
@@ -30,6 +49,12 @@ public interface ITagRepository : IRepository<Tag>
     Task<Tag?> GetByIdWithRelationsAsync(int id, CancellationToken ct = default);
     Task<Tag?> GetByNameAsync(string name, CancellationToken ct = default);
     Task<IReadOnlyList<Tag>> FindByNamesAsync(IReadOnlyList<string> names, CancellationToken ct = default);
+    /// <summary>
+    /// Finds all tags whose names match <paramref name="names"/> (case-insensitive), creating any that
+    /// don't exist yet. Handles unique-constraint races with automatic retry.
+    /// Returns a case-insensitive dictionary of tag name → Tag.
+    /// </summary>
+    Task<Dictionary<string, Tag>> FindOrCreateByNamesAsync(IReadOnlyList<string> names, CancellationToken ct = default);
 }
 
 public interface IStudioRepository : IRepository<Studio>
@@ -48,6 +73,12 @@ public interface IImageRepository : IRepository<Image>
 {
     Task<(IReadOnlyList<Image> Items, int TotalCount)> FindAsync(ImageFilter? filter, FindFilter? findFilter, CancellationToken ct = default);
     Task<Image?> GetByIdWithRelationsAsync(int id, CancellationToken ct = default);
+    /// <summary>Returns ImagePerformer join rows (with Performer.RemoteIds included) for the given image IDs.</summary>
+    Task<IReadOnlyList<ImagePerformer>> GetImagePerformersAsync(IReadOnlyList<int> imageIds, CancellationToken ct = default);
+    /// <summary>Returns the tag IDs currently linked to <paramref name="imageId"/> via the ImageTag join table.</summary>
+    Task<IReadOnlyList<int>> GetTagIdsAsync(int imageId, CancellationToken ct = default);
+    /// <summary>Adds an ImageTag join row (change-tracked). Call SaveChangesAsync on any repo to commit.</summary>
+    void AddTagLink(int imageId, int tagId);
 }
 
 public interface IGroupRepository : IRepository<Group>
@@ -105,8 +136,9 @@ public class TagDurationCriterion : TagDurationClause
     public List<TagDurationClause> Clauses { get; set; } = [];
 }
 
-public class SceneFilter
+public class VideoFilter
 {
+    public List<int>? Ids { get; set; }
     public string? Title { get; set; }
     public string? Code { get; set; }
     public string? Path { get; set; }
@@ -189,7 +221,7 @@ public class PerformerFilter
     public BoolCriterion? FavoriteCriterion { get; set; }
     public MultiIdCriterion? TagsCriterion { get; set; }
     public MultiIdCriterion? StudiosCriterion { get; set; }
-    public IntCriterion? SceneCountCriterion { get; set; }
+    public IntCriterion? VideoCountCriterion { get; set; }
     public IntCriterion? StudioCountCriterion { get; set; }
     public IntCriterion? ImageCountCriterion { get; set; }
     public IntCriterion? GalleryCountCriterion { get; set; }
@@ -234,8 +266,8 @@ public class TagFilter
     public bool? Favorite { get; set; }
     // Advanced criteria
     public BoolCriterion? FavoriteCriterion { get; set; }
-    public IntCriterion? SceneCountCriterion { get; set; }
-    public bool SceneCountIncludesChildren { get; set; }
+    public IntCriterion? VideoCountCriterion { get; set; }
+    public bool VideoCountIncludesChildren { get; set; }
     public IntCriterion? PerformerCountCriterion { get; set; }
     public bool PerformerCountIncludesChildren { get; set; }
     public MultiIdCriterion? ParentsCriterion { get; set; }
@@ -276,7 +308,7 @@ public class StudioFilter
     public IntCriterion? RatingCriterion { get; set; }
     public BoolCriterion? FavoriteCriterion { get; set; }
     public MultiIdCriterion? TagsCriterion { get; set; }
-    public IntCriterion? SceneCountCriterion { get; set; }
+    public IntCriterion? VideoCountCriterion { get; set; }
     public IntCriterion? GalleryCountCriterion { get; set; }
     public IntCriterion? ImageCountCriterion { get; set; }
     public StringCriterion? UrlCriterion { get; set; }
@@ -333,7 +365,7 @@ public class GalleryFilter
     public IntCriterion? PerformerCountCriterion { get; set; }
     public IntCriterion? PerformerAgeCriterion { get; set; }
     public IntCriterion? TypicalResolutionCriterion { get; set; }
-    public MultiIdCriterion? ScenesCriterion { get; set; }
+    public MultiIdCriterion? VideosCriterion { get; set; }
     public MultiIdCriterion? PerformerTagsCriterion { get; set; }
     public CustomFieldCriterion? CustomFieldCriterion { get; set; }
     public List<CustomFieldCriterion> CustomFieldCriteria { get; set; } = [];
@@ -341,6 +373,7 @@ public class GalleryFilter
 
 public class ImageFilter
 {
+    public List<int>? Ids { get; set; }
     public string? Title { get; set; }
     public int? Rating { get; set; }
     public bool? Organized { get; set; }
@@ -479,13 +512,13 @@ public class GroupFilter
     public StringCriterion? QuerySourceKeyCriterion { get; set; }
     public StringCriterion? AllowedHostTypesCriterion { get; set; }
     public BoolCriterion? HasQueryCriterion { get; set; }
-    public BoolCriterion? ShowInSceneListsCriterion { get; set; }
+    public BoolCriterion? ShowInVideoListsCriterion { get; set; }
     public TimestampCriterion? LastResolvedAtCriterion { get; set; }
     public IntCriterion? SortOrderCriterion { get; set; }
     public IntCriterion? CachedItemCountCriterion { get; set; }
     public MultiIdCriterion? PerformersCriterion { get; set; }
     public IntCriterion? ItemCountCriterion { get; set; }
-    public IntCriterion? SceneCountCriterion { get; set; }
+    public IntCriterion? VideoCountCriterion { get; set; }
     public IntCriterion? ImageCountCriterion { get; set; }
     public IntCriterion? AudioCountCriterion { get; set; }
     public IntCriterion? TextCountCriterion { get; set; }
@@ -501,3 +534,4 @@ public class GroupFilter
     public CustomFieldCriterion? CustomFieldCriterion { get; set; }
     public List<CustomFieldCriterion> CustomFieldCriteria { get; set; } = [];
 }
+

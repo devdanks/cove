@@ -246,7 +246,7 @@ public class DownloaderService(
 
         var importedEntityId = request.Entity switch
         {
-            DownloaderEntity.Scene => await ImportSceneAsync(scanService, libraryPath, entityId, progress, ct),
+            DownloaderEntity.Video => await ImportVideoAsync(scanService, libraryPath, entityId, progress, ct),
             DownloaderEntity.Image => await ImportImageAsync(scanService, libraryPath, entityId, progress, ct),
             DownloaderEntity.Gallery => await ImportGalleryAsync(scanService, libraryPath, entityId, progress, ct),
             DownloaderEntity.Audio => await ImportAudioAsync(scanService, libraryPath, entityId, progress, ct),
@@ -323,7 +323,7 @@ public class DownloaderService(
                         resolvedItem.EntityId,
                         progress: null,
                         token,
-                        autoApplyMetadata: resolvedItem.AutoApplyMetadata || (followUp.ScrapeScenes && resolvedItem.Request.Entity == DownloaderEntity.Scene),
+                        autoApplyMetadata: resolvedItem.AutoApplyMetadata || (followUp.ScrapeVideos && resolvedItem.Request.Entity == DownloaderEntity.Video),
                         metadataApplyOptions: resolvedItem.MetadataApplyOptions,
                         allowDuplicateDownload: followUp.AllowDuplicateDownloads);
 
@@ -503,12 +503,12 @@ public class DownloaderService(
         };
     }
 
-    internal static ScrapedSceneDto? ConvertScrapeResultToSceneMetadata(IReadOnlyDictionary<string, object> result, string sourceUrl, string? sourceScraperId = null)
+    internal static ScrapedVideoDto? ConvertScrapeResultToVideoMetadata(IReadOnlyDictionary<string, object> result, string sourceUrl, string? sourceScraperId = null)
     {
         if (result.Count == 0)
             return null;
 
-        var dto = new ScrapedSceneDto
+        var dto = new ScrapedVideoDto
         {
             SourceScraperId = sourceScraperId,
             Title = GetScrapeResultString(result, "Title", "title", "Name", "name"),
@@ -669,7 +669,7 @@ public class DownloaderService(
         };
     }
 
-    internal static ScrapedSceneDto? MergeSceneMetadata(ScrapedSceneDto? primary, ScrapedSceneDto? secondary)
+    internal static ScrapedVideoDto? MergeVideoMetadata(ScrapedVideoDto? primary, ScrapedVideoDto? secondary)
     {
         if (primary == null)
             return secondary;
@@ -776,20 +776,20 @@ public class DownloaderService(
     {
         switch (request.Entity)
         {
-            case DownloaderEntity.Scene:
+            case DownloaderEntity.Video:
             {
-                var metadata = result.InlineSceneMetadata;
+                var metadata = result.InlineVideoMetadata;
                 if (metadata == null)
                 {
-                    progress?.Report(0.97d, "Looking up downloaded scene metadata...");
-                    metadata = await BuildMergedSceneMetadataAsync(services, request, ct);
+                    progress?.Report(0.97d, "Looking up downloaded video metadata...");
+                    metadata = await BuildMergedVideoMetadataAsync(services, request, ct);
                 }
 
                 if (metadata != null)
                 {
                     metadata = metadata with { Urls = ResolveDownloadedMetadataUrls(metadata.Urls, request) };
-                    progress?.Report(0.99d, "Applying downloaded scene metadata...");
-                    var metadataApplyService = services.GetRequiredService<ISceneMetadataApplyService>();
+                    progress?.Report(0.99d, "Applying downloaded video metadata...");
+                    var metadataApplyService = services.GetRequiredService<IVideoMetadataApplyService>();
                     await metadataApplyService.ApplyAsync(importedEntityId, metadata, options, ct);
                 }
 
@@ -855,17 +855,17 @@ public class DownloaderService(
         return MergeImageMetadata(primary, secondary);
     }
 
-    private async Task<ScrapedSceneDto?> BuildMergedSceneMetadataAsync(IServiceProvider services, DownloaderRequest request, CancellationToken ct)
+    private async Task<ScrapedVideoDto?> BuildMergedVideoMetadataAsync(IServiceProvider services, DownloaderRequest request, CancellationToken ct)
     {
         var scraperService = services.GetRequiredService<ScraperService>();
         var primaryUrl = request.Url;
         var secondaryUrl = ResolveSourceMetadataUrl(request, primaryUrl);
-        var primaryScrape = await ScrapeMetadataAsync(scraperService, primaryUrl, "scene", ct);
-        var primary = ConvertScrapeResultToSceneMetadata(primaryScrape?.Result ?? [], primaryUrl, primaryScrape?.ScraperId);
+        var primaryScrape = await ScrapeMetadataAsync(scraperService, primaryUrl, "video", ct);
+        var primary = ConvertScrapeResultToVideoMetadata(primaryScrape?.Result ?? [], primaryUrl, primaryScrape?.ScraperId);
         var secondary = secondaryUrl == null
             ? null
-            : await ConvertScrapedSceneMetadataAsync(scraperService, secondaryUrl, ct);
-        return MergeSceneMetadata(primary, secondary);
+            : await ConvertScrapedVideoMetadataAsync(scraperService, secondaryUrl, ct);
+        return MergeVideoMetadata(primary, secondary);
     }
 
     private async Task<ScrapedAudioMetadata?> BuildMergedAudioMetadataAsync(IServiceProvider services, DownloaderRequest request, CancellationToken ct)
@@ -900,10 +900,10 @@ public class DownloaderService(
         return ConvertScrapeResultToImageMetadata(scrape?.Result ?? [], url, scrape?.ScraperId);
     }
 
-    private static async Task<ScrapedSceneDto?> ConvertScrapedSceneMetadataAsync(ScraperService scraperService, string url, CancellationToken ct)
+    private static async Task<ScrapedVideoDto?> ConvertScrapedVideoMetadataAsync(ScraperService scraperService, string url, CancellationToken ct)
     {
-        var scrape = await ScrapeMetadataAsync(scraperService, url, "scene", ct);
-        return ConvertScrapeResultToSceneMetadata(scrape?.Result ?? [], url, scrape?.ScraperId);
+        var scrape = await ScrapeMetadataAsync(scraperService, url, "video", ct);
+        return ConvertScrapeResultToVideoMetadata(scrape?.Result ?? [], url, scrape?.ScraperId);
     }
 
     private static async Task<ScrapedAudioMetadata?> ConvertScrapedAudioMetadataAsync(ScraperService scraperService, string url, CancellationToken ct)
@@ -1052,7 +1052,7 @@ public class DownloaderService(
             fieldProvenance["details"] = audio.Details;
         }
 
-        if (ScrapedSceneDateParser.TryParse(metadata.Date, out var parsedDate))
+        if (ScrapedVideoDateParser.TryParse(metadata.Date, out var parsedDate))
         {
             audio.Date = parsedDate;
             fieldProvenance["date"] = parsedDate.ToString("yyyy-MM-dd");
@@ -1140,7 +1140,7 @@ public class DownloaderService(
             fieldProvenance["photographer"] = image.Photographer;
         }
 
-        if (ScrapedSceneDateParser.TryParse(metadata.Date, out var parsedDate))
+        if (ScrapedVideoDateParser.TryParse(metadata.Date, out var parsedDate))
         {
             image.Date = parsedDate;
             fieldProvenance["date"] = parsedDate.ToString("yyyy-MM-dd");
@@ -1227,7 +1227,7 @@ public class DownloaderService(
             fieldProvenance["details"] = textDocument.Details;
         }
 
-        if (ScrapedSceneDateParser.TryParse(metadata.Date, out var parsedDate))
+        if (ScrapedVideoDateParser.TryParse(metadata.Date, out var parsedDate))
         {
             textDocument.Date = parsedDate;
             fieldProvenance["date"] = parsedDate.ToString("yyyy-MM-dd");
@@ -1880,7 +1880,7 @@ public class DownloaderService(
         {
             var currentHasFiles = entity switch
             {
-                DownloaderEntity.Scene => await db.VideoFiles.AnyAsync(item => item.SceneId == entityId.Value, ct),
+                DownloaderEntity.Video => await db.VideoFiles.AnyAsync(item => item.VideoId == entityId.Value, ct),
                 DownloaderEntity.Image => await db.ImageFiles.AnyAsync(item => item.ImageId == entityId.Value, ct),
                 DownloaderEntity.Gallery => await db.GalleryFiles.AnyAsync(item => item.GalleryId == entityId.Value, ct),
                 DownloaderEntity.Audio => await db.AudioFiles.AnyAsync(item => item.AudioId == entityId.Value, ct),
@@ -1898,7 +1898,7 @@ public class DownloaderService(
 
         var duplicateLabel = entity switch
         {
-            DownloaderEntity.Scene => await FindDuplicateSceneLabelAsync(db, entityId, normalizedUrl, ct),
+            DownloaderEntity.Video => await FindDuplicateVideoLabelAsync(db, entityId, normalizedUrl, ct),
             DownloaderEntity.Image => await FindDuplicateImageLabelAsync(db, entityId, normalizedUrl, ct),
             DownloaderEntity.Gallery => await FindDuplicateGalleryLabelAsync(db, entityId, normalizedUrl, ct),
             DownloaderEntity.Audio => await FindDuplicateAudioLabelAsync(db, entityId, normalizedUrl, ct),
@@ -1924,13 +1924,13 @@ public class DownloaderService(
         if (db == null)
             return result;
 
-        if (entities.Contains(DownloaderEntity.Scene))
+        if (entities.Contains(DownloaderEntity.Video))
         {
-            var rows = await db.Set<Cove.Core.Entities.SceneUrl>()
+            var rows = await db.Set<Cove.Core.Entities.VideoUrl>()
                 .AsNoTracking()
-                .Select(item => new { item.SceneId, item.Url, item.Scene!.Title })
+                .Select(item => new { item.VideoId, item.Url, item.Video!.Title })
                 .ToListAsync(ct);
-            result[DownloaderEntity.Scene] = BuildExistingUrlLookup(rows.Select(item => new ExistingUrlRow(item.SceneId, item.Url, item.Title ?? $"Scene {item.SceneId}")));
+            result[DownloaderEntity.Video] = BuildExistingUrlLookup(rows.Select(item => new ExistingUrlRow(item.VideoId, item.Url, item.Title ?? $"Video {item.VideoId}")));
         }
 
         if (entities.Contains(DownloaderEntity.Image))
@@ -1985,15 +1985,15 @@ public class DownloaderService(
         if (db == null)
             return result;
 
-        if (entities.Contains(DownloaderEntity.Scene))
+        if (entities.Contains(DownloaderEntity.Video))
         {
             var ids = await db.VideoFiles
                 .AsNoTracking()
-                .Where(item => item.SceneId != null)
-                .Select(item => item.SceneId!.Value)
+                .Where(item => item.VideoId != null)
+                .Select(item => item.VideoId!.Value)
                 .Distinct()
                 .ToListAsync(ct);
-            result[DownloaderEntity.Scene] = ids.ToHashSet();
+            result[DownloaderEntity.Video] = ids.ToHashSet();
         }
 
         if (entities.Contains(DownloaderEntity.Image))
@@ -2102,7 +2102,7 @@ public class DownloaderService(
 
         var root = entity switch
         {
-            DownloaderEntity.Scene => config.CovePaths.FirstOrDefault(path => !path.ExcludeVideo)?.Path,
+            DownloaderEntity.Video => config.CovePaths.FirstOrDefault(path => !path.ExcludeVideo)?.Path,
             DownloaderEntity.Image => config.CovePaths.FirstOrDefault(path => !path.ExcludeImage)?.Path,
             DownloaderEntity.Gallery => config.CovePaths.FirstOrDefault(path => !path.ExcludeImage)?.Path,
             DownloaderEntity.Audio => config.CovePaths.FirstOrDefault(path => !path.ExcludeAudio)?.Path,
@@ -2357,7 +2357,7 @@ public class DownloaderService(
         if (!entityId.HasValue && item.CreateEntityIfMissing)
             entityId = await CreatePlaceholderEntityAsync(entity, effectiveUrl, ResolvePlaceholderTitle(item, effectiveUrl, resolvedLabel), ct);
 
-        if (!entityId.HasValue && entity is DownloaderEntity.Scene or DownloaderEntity.Image or DownloaderEntity.Gallery)
+        if (!entityId.HasValue && entity is DownloaderEntity.Video or DownloaderEntity.Image or DownloaderEntity.Gallery)
             throw new InvalidOperationException($"Batch download item {index + 1} is missing an entity id.");
 
         return new ResolvedBatchItem(
@@ -2403,17 +2403,17 @@ public class DownloaderService(
 
         switch (entity)
         {
-            case DownloaderEntity.Scene:
+            case DownloaderEntity.Video:
             {
-                var scene = new Scene
+                var video = new Video
                 {
                     Title = title,
                     Organized = false,
-                    Urls = [new SceneUrl { Url = url }],
+                    Urls = [new VideoUrl { Url = url }],
                 };
-                db.Scenes.Add(scene);
+                db.Videos.Add(video);
                 await db.SaveChangesAsync(ct);
-                return scene.Id;
+                return video.Id;
             }
             case DownloaderEntity.Image:
             {
@@ -2478,9 +2478,9 @@ public class DownloaderService(
 
         switch (entity)
         {
-            case DownloaderEntity.Scene:
-                if (!await db.Set<Cove.Core.Entities.SceneUrl>().AnyAsync(item => item.SceneId == entityId && item.Url == url, ct))
-                    db.Set<Cove.Core.Entities.SceneUrl>().Add(new Cove.Core.Entities.SceneUrl { SceneId = entityId, Url = url });
+            case DownloaderEntity.Video:
+                if (!await db.Set<Cove.Core.Entities.VideoUrl>().AnyAsync(item => item.VideoId == entityId && item.Url == url, ct))
+                    db.Set<Cove.Core.Entities.VideoUrl>().Add(new Cove.Core.Entities.VideoUrl { VideoId = entityId, Url = url });
                 break;
             case DownloaderEntity.Image:
                 if (!await db.Set<Cove.Core.Entities.ImageUrl>().AnyAsync(item => item.ImageId == entityId && item.Url == url, ct))
@@ -2546,7 +2546,7 @@ public class DownloaderService(
             var existingGroupIds = await LoadExistingBatchGroupIdsAsync(db, entity, entityId, groupTarget.Kind, groupTarget.HostType, targetGroupIds, ct);
             var groupItemsToAdd = groupInputs
                 .Where(group => !existingGroupIds.Contains(group.GroupId))
-                .Select(group => CreateBatchGroupItem(groupTarget.Kind, groupTarget.HostType, entityId, group.GroupId, group.SceneIndex, item.Title ?? item.Label))
+                .Select(group => CreateBatchGroupItem(groupTarget.Kind, groupTarget.HostType, entityId, group.GroupId, group.VideoIndex, item.Title ?? item.Label))
                 .ToList();
             if (groupItemsToAdd.Count > 0)
             {
@@ -2574,7 +2574,7 @@ public class DownloaderService(
         IQueryable<GroupItem> query = db.GroupItems.Where(item => groupIds.Contains(item.GroupId) && item.Kind == kind);
         query = entity switch
         {
-            DownloaderEntity.Scene => query.Where(item => (item.HostType == hostType && item.HostId == entityId) || item.SceneId == entityId),
+            DownloaderEntity.Video => query.Where(item => (item.HostType == hostType && item.HostId == entityId) || item.VideoId == entityId),
             DownloaderEntity.Image => query.Where(item => (item.HostType == hostType && item.HostId == entityId) || item.ImageId == entityId),
             _ => query.Where(item => item.HostType == hostType && item.HostId == entityId),
         };
@@ -2595,8 +2595,8 @@ public class DownloaderService(
             Title = string.IsNullOrWhiteSpace(title) ? null : title.Trim(),
         };
 
-        if (kind == GroupItemKind.Scene)
-            item.SceneId = entityId;
+        if (kind == GroupItemKind.Video)
+            item.VideoId = entityId;
         else if (kind == GroupItemKind.Image)
             item.ImageId = entityId;
 
@@ -2607,7 +2607,7 @@ public class DownloaderService(
     {
         target = entity switch
         {
-            DownloaderEntity.Scene => (GroupItemKind.Scene, "scene"),
+            DownloaderEntity.Video => (GroupItemKind.Video, "video"),
             DownloaderEntity.Image => (GroupItemKind.Image, "image"),
             DownloaderEntity.Gallery => (GroupItemKind.Gallery, "gallery"),
             DownloaderEntity.Audio => (GroupItemKind.Audio, "audio"),
@@ -2721,23 +2721,23 @@ public class DownloaderService(
         return trimmed.StartsWith("www.", StringComparison.Ordinal) ? trimmed[4..] : trimmed;
     }
 
-    private static async Task<string?> FindDuplicateSceneLabelAsync(CoveContext db, int? entityId, string normalizedUrl, CancellationToken ct)
+    private static async Task<string?> FindDuplicateVideoLabelAsync(CoveContext db, int? entityId, string normalizedUrl, CancellationToken ct)
     {
-        var candidateUrls = await db.Set<Cove.Core.Entities.SceneUrl>()
-            .Where(item => !entityId.HasValue || item.SceneId != entityId.Value)
-            .Select(item => new { item.SceneId, item.Url })
+        var candidateUrls = await db.Set<Cove.Core.Entities.VideoUrl>()
+            .Where(item => !entityId.HasValue || item.VideoId != entityId.Value)
+            .Select(item => new { item.VideoId, item.Url })
             .AsNoTracking()
             .ToListAsync(ct);
         var duplicateId = candidateUrls
             .Where(item => NormalizeUrlForLookup(item.Url) == normalizedUrl)
-            .Select(item => item.SceneId)
+            .Select(item => item.VideoId)
             .FirstOrDefault();
 
         if (duplicateId == 0)
             return null;
 
-        var duplicate = await db.Scenes.FirstOrDefaultAsync(item => item.Id == duplicateId, ct);
-        return duplicate == null ? null : duplicate.Title ?? $"Scene {duplicate.Id}";
+        var duplicate = await db.Videos.FirstOrDefaultAsync(item => item.Id == duplicateId, ct);
+        return duplicate == null ? null : duplicate.Title ?? $"Video {duplicate.Id}";
     }
 
     private static async Task<string?> FindDuplicateImageLabelAsync(CoveContext db, int? entityId, string normalizedUrl, CancellationToken ct)
@@ -2836,7 +2836,7 @@ public class DownloaderService(
     {
         return entity switch
         {
-            DownloaderEntity.Scene => "scenes",
+            DownloaderEntity.Video => "videos",
             DownloaderEntity.Image => "images",
             DownloaderEntity.Gallery => "galleries",
             DownloaderEntity.Audio => "audio",
@@ -2845,10 +2845,10 @@ public class DownloaderService(
         };
     }
 
-    private static async Task<int> ImportSceneAsync(IScanService scanService, string libraryPath, int? entityId, Cove.Core.Interfaces.IJobProgress? progress, CancellationToken ct)
+    private static async Task<int> ImportVideoAsync(IScanService scanService, string libraryPath, int? entityId, Cove.Core.Interfaces.IJobProgress? progress, CancellationToken ct)
     {
-        progress?.Report(0.98d, entityId.HasValue ? "Importing downloaded scene..." : "Creating scene from download...");
-        return await scanService.ImportDownloadedSceneAsync(libraryPath, entityId, ct);
+        progress?.Report(0.98d, entityId.HasValue ? "Importing downloaded video..." : "Creating video from download...");
+        return await scanService.ImportDownloadedVideoAsync(libraryPath, entityId, ct);
     }
 
     private static async Task<int> ImportImageAsync(IScanService scanService, string libraryPath, int? entityId, Cove.Core.Interfaces.IJobProgress? progress, CancellationToken ct)

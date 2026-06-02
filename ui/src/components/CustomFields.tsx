@@ -342,7 +342,7 @@ function normalizeDefinedFieldValue(value: string, type: CustomFieldType): unkno
     case "tag":
     case "performer":
     case "studio":
-    case "scene":
+    case "video":
     case "gallery":
     case "image":
     case "group": {

@@ -7,7 +7,7 @@ internal sealed class NoOpScanService : IScanService
 {
     public string StartScan(ScanOperationOptions? options = null) => "test-scan-job";
 
-    public Task<int> ImportDownloadedSceneAsync(string path, int? sceneId, CancellationToken ct = default) => Task.FromResult(sceneId ?? 0);
+    public Task<int> ImportDownloadedVideoAsync(string path, int? videoId, CancellationToken ct = default) => Task.FromResult(videoId ?? 0);
 
     public Task<int> ImportDownloadedImageAsync(string path, int? imageId, CancellationToken ct = default) => Task.FromResult(imageId ?? 0);
 

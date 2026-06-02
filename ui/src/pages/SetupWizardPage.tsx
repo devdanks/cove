@@ -48,8 +48,8 @@ const TUTORIAL_STEPS = [
   {
     eyebrow: "Step 2",
     title: "Browse with the view that fits the media",
-    description: "Scenes and images each have multiple layouts. Start with grid, then try feed, wall, or Infinite page size when you want long browsing sessions.",
-    actionLabel: "Open Scenes or Images",
+    description: "Videos and images each have multiple layouts. Start with grid, then try feed, wall, or Infinite page size when you want long browsing sessions.",
+    actionLabel: "Open Videos or Images",
     highlight: "Feed is better for reading details. Wall is better for visual skimming. Infinite keeps the list moving.",
     checklist: ["Switch between grid, wall, and feed", "Use page size to turn on Infinite", "Open detail pages when something needs cleanup"],
     icon: Play,
@@ -58,7 +58,7 @@ const TUTORIAL_STEPS = [
   {
     eyebrow: "Step 3",
     title: "Scrape and identify when titles are incomplete",
-    description: "If a scene or image is missing tags, performers, studios, or dates, use Scrape or Identify from the media pages and then tune providers in Settings.",
+    description: "If a video or image is missing tags, performers, studios, or dates, use Scrape or Identify from the media pages and then tune providers in Settings.",
     actionLabel: "Use Scrape or Identify",
     highlight: "Start from a single item first so you can verify the source and field mappings before doing it in bulk.",
     checklist: ["Open one item and inspect the current fields", "Run Scrape or Identify", "Adjust scrapers or MetadataServer settings if the match looks wrong"],
@@ -422,8 +422,8 @@ export function SetupWizardPage({ config, onComplete }: Props) {
     saveMut.mutate(updatedConfig);
   };
 
-  const handleFinish = (target: "scenes" | "settings" = "scenes") => {
-    const path = target === "settings" ? "/settings" : "/scenes";
+  const handleFinish = (target: "videos" | "settings" = "videos") => {
+    const path = target === "settings" ? "/settings" : "/videos";
     navigateToUrl(backupRestoreResult ? `${path}?tutorial=getting-started` : path);
 
     onComplete({ showTutorial: true });
@@ -743,7 +743,7 @@ export function SetupWizardPage({ config, onComplete }: Props) {
                     <h3 className="text-xs font-medium uppercase tracking-wide text-muted mb-3">Database Summary</h3>
                     <div className="grid grid-cols-3 gap-3">
                       {([
-                        { label: "Scenes", value: stashPreview.scenes },
+                        { label: "Videos", value: stashPreview.videos },
                         { label: "Images", value: stashPreview.images },
                         { label: "Galleries", value: stashPreview.galleries },
                         { label: "Performers", value: stashPreview.performers },
@@ -796,7 +796,7 @@ export function SetupWizardPage({ config, onComplete }: Props) {
               <h2 className="text-xl font-bold text-foreground mb-2">Library Paths</h2>
               <p className="text-sm text-secondary mb-6">
                 Add the directories containing your media files. Cove will scan these
-                directories for scenes, images, and galleries.
+                directories for videos, images, and galleries.
               </p>
 
               <div className="space-y-3 mb-4">
@@ -1001,7 +1001,7 @@ export function SetupWizardPage({ config, onComplete }: Props) {
                   </p>
                   <div className="grid grid-cols-3 gap-3 max-w-sm mx-auto mb-2">
                     {([
-                      { label: "Scenes", value: stashResult.scenes },
+                      { label: "Videos", value: stashResult.videos },
                       { label: "Images", value: stashResult.images },
                       { label: "Galleries", value: stashResult.galleries },
                       { label: "Performers", value: stashResult.performers },
@@ -1040,7 +1040,7 @@ export function SetupWizardPage({ config, onComplete }: Props) {
                 </div>
               ) : (
                 <p className="text-secondary mb-6 max-w-md mx-auto">
-                  Your library paths have been configured. Run Scan to start indexing files, or jump straight into your scenes.
+                  Your library paths have been configured. Run Scan to start indexing files, or jump straight into your videos.
                 </p>
               )}
               <p className="text-xs text-muted mb-6">
@@ -1048,10 +1048,10 @@ export function SetupWizardPage({ config, onComplete }: Props) {
               </p>
               <div className="flex flex-wrap justify-center gap-3">
                 <button
-                  onClick={() => handleFinish("scenes")}
+                  onClick={() => handleFinish("videos")}
                   className="inline-flex items-center gap-2 px-6 py-3 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium transition-colors"
                 >
-                  Go to Scenes <ChevronRight className="w-4 h-4" />
+                  Go to Videos <ChevronRight className="w-4 h-4" />
                 </button>
                 <button
                   onClick={() => { setError(null); scanMut.mutate(); }}
@@ -1068,7 +1068,7 @@ export function SetupWizardPage({ config, onComplete }: Props) {
                   <Settings className="w-4 h-4" /> Open Settings
                 </button>
               </div>
-              {scanJobId ? <p className="mt-4 text-xs text-green-300">Scan started. You can stay here or open Scenes while it runs.</p> : null}
+              {scanJobId ? <p className="mt-4 text-xs text-green-300">Scan started. You can stay here or open Videos while it runs.</p> : null}
               {error ? <div className="mx-auto mt-4 max-w-md rounded-lg border border-red-700/50 bg-red-900/20 p-3 text-sm text-red-300">{error}</div> : null}
             </div>
           )}
@@ -1173,3 +1173,4 @@ function SetupImportProgressCard({ job }: { job: JobInfo }) {
     </div>
   );
 }
+

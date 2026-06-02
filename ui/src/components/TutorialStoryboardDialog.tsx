@@ -7,7 +7,7 @@ import { normalizeManualContext, uniqueManualContexts, type TutorialOpenRequest 
 export const TUTORIAL_STORYBOARD_STORAGE_KEY = "cove-tutorial-storyboard-complete";
 export const TUTORIAL_STORYBOARD_EVENT = "cove:tutorial-storyboard-open";
 
-export type TutorialSlideMockKind = "tasks" | "feed" | "metadata" | "settings" | "scenePlayer" | "tagging" | "images" | "extension";
+export type TutorialSlideMockKind = "tasks" | "feed" | "metadata" | "settings" | "videoPlayer" | "tagging" | "images" | "extension";
 type ManualBoxTone = "green" | "blue" | "purple" | "orange" | "pink" | "teal";
 type ManualBoxPointContent = {
   tone?: ManualBoxTone;
@@ -57,7 +57,7 @@ export const builtinTutorialTopics: TutorialStoryboardTopic[] = [
       {
         id: "welcome",
         title: "Welcome to Cove",
-        caption: "Cove organizes your media into scenes, images, performers, tags, and more so you can browse and find things fast.",
+        caption: "Cove organizes your media into videos, images, performers, tags, and more so you can browse and find things fast.",
         imageSrc: "/manual/screenshots/nav-bar.png",
         imageAlt: "Cove top navigation bar with content type links",
         points: [
@@ -85,7 +85,7 @@ export const builtinTutorialTopics: TutorialStoryboardTopic[] = [
       {
         id: "viewing-content",
         title: "Where your content lives",
-        caption: "Each content type has its own page in the top navigation bar. Scenes, images, performers, studios, tags, and groups all have a home there.",
+        caption: "Each content type has its own page in the top navigation bar. Videos, images, performers, studios, tags, and groups all have a home there.",
         imageSrc: "/manual/screenshots/nav-bar.png",
         imageAlt: "Cove top navigation bar with content type links",
         points: [
@@ -120,7 +120,7 @@ export const builtinTutorialTopics: TutorialStoryboardTopic[] = [
     id: "list-pages",
     title: "List Pages",
     description: "Sorting, filtering, views, and the controls every content page shares.",
-    pages: ["scenes", "images", "galleries", "performers", "studios", "audios", "texts"],
+    pages: ["videos", "images", "galleries", "performers", "studios", "audios", "texts"],
     order: 20,
     slides: [
       {
@@ -160,7 +160,7 @@ export const builtinTutorialTopics: TutorialStoryboardTopic[] = [
   {
     id: "content-types",
     title: "Content Types",
-    description: "What scenes, images, performers, tags, and groups are for.",
+    description: "What videos, images, performers, tags, and groups are for.",
     order: 30,
     slides: [
       {
@@ -170,13 +170,13 @@ export const builtinTutorialTopics: TutorialStoryboardTopic[] = [
         imageSrc: "/manual/screenshots/nav-bar.png",
         imageAlt: "Top navigation bar showing the content type pages",
         points: [
-          "Scenes are videos, with playback, a timeline, and rich metadata",
+          "Videos are videos, with playback, a timeline, and rich metadata",
           "Images and galleries hold single pictures and collections of them",
           "Audio and text cover everything else you want to keep and organize",
         ],
         topicLinks: [
-          { label: "Watching and browsing scenes", topicId: "special-views" },
-          { label: "Segments inside a scene", topicId: "segments" },
+          { label: "Watching and browsing videos", topicId: "special-views" },
+          { label: "Segments inside a video", topicId: "segments" },
         ],
       },
       {
@@ -184,7 +184,7 @@ export const builtinTutorialTopics: TutorialStoryboardTopic[] = [
         title: "People, studios, and labels",
         caption: "These connect your media together so you can find related items quickly.",
         imageSrc: "/manual/screenshots/people-labels.png",
-        imageAlt: "A scene detail page showing its studio, tags, performers, and groups",
+        imageAlt: "A video detail page showing its studio, tags, performers, and groups",
         points: [
           "[blue] performers are the people in your media, with their own pages and filters",
           "[green] studios are the sources your media came from",
@@ -213,7 +213,7 @@ export const builtinTutorialTopics: TutorialStoryboardTopic[] = [
         imageAlt: "Discover page showing downloader extensions you can add",
         points: [
           "Each downloader knows how to fetch from a specific kind of source",
-          "Downloaded items land in your library like any other scene or image",
+          "Downloaded items land in your library like any other video or image",
           "You add the downloaders you want, so Cove only does what you need",
         ],
       },
@@ -357,7 +357,7 @@ export const builtinTutorialTopics: TutorialStoryboardTopic[] = [
       {
         id: "tagging-basics",
         title: "Tags describe what something is",
-        caption: "Tags are reusable labels. Add them to scenes, images, galleries, performers, groups, and other content so related things stay easy to find.",
+        caption: "Tags are reusable labels. Add them to videos, images, galleries, performers, groups, and other content so related things stay easy to find.",
         imageSrc: "/manual/screenshots/tagging-basics.png",
         imageAlt: "A tag detail page showing aliases and related content types",
         points: [
@@ -373,9 +373,9 @@ export const builtinTutorialTopics: TutorialStoryboardTopic[] = [
       {
         id: "occurrence-tagging",
         title: "Tag when something appears",
-        caption: "Some tags are about a whole item. Others are about where a performer, face, tag, or other thing appears inside a scene.",
+        caption: "Some tags are about a whole item. Others are about where a performer, face, tag, or other thing appears inside a video.",
         imageSrc: "/manual/screenshots/occurrence-tagging.png",
-        imageAlt: "A scene edit page showing whole-scene tags, performer occurrence tags, and the timeline overlay",
+        imageAlt: "A video edit page showing whole-video tags, performer occurrence tags, and the timeline overlay",
         points: [
           "[green] use normal tags when the whole item should carry the label",
           "[blue] use occurrence tagging when timing matters and you want to know where something appears",
@@ -391,19 +391,19 @@ export const builtinTutorialTopics: TutorialStoryboardTopic[] = [
   {
     id: "segments",
     title: "Segments",
-    description: "Track meaningful time ranges inside scenes and reuse them.",
+    description: "Track meaningful time ranges inside videos and reuse them.",
     pages: ["segments", "segment"],
     order: 70,
     slides: [
       {
         id: "segments-overview",
-        title: "Scene moments become reusable",
-        caption: "Segments are time ranges inside a scene. They let Cove show when tags, performers, faces, and other entities are present, then reuse those ranges in playback and organization.",
+        title: "Video moments become reusable",
+        caption: "Segments are time ranges inside a video. They let Cove show when tags, performers, faces, and other entities are present, then reuse those ranges in playback and organization.",
         imageSrc: "/manual/screenshots/segments-derived.png",
-        imageAlt: "Segments marked along a scene timeline",
+        imageAlt: "Segments marked along a video timeline",
         points: [
-          "Use segments to see where tags, performers, faces, and other entities appear in a scene",
-          "Watch dedicated parts of scenes, build compilations, or turn a segment into a sub-scene",
+          "Use segments to see where tags, performers, faces, and other entities appear in a video",
+          "Watch dedicated parts of videos, build compilations, or turn a segment into a sub-video",
           "Derived segments are usually the ones you browse, play, filter, and add to compilations",
         ],
         topicLinks: [
@@ -424,9 +424,9 @@ export const builtinTutorialTopics: TutorialStoryboardTopic[] = [
       {
         id: "raw-derived",
         title: "Raw and derived segments",
-        caption: "Raw segments are the marks recorded directly on a scene. Derived segments are Cove's calculated results from raw marks, tags, performers, faces, and display settings.",
+        caption: "Raw segments are the marks recorded directly on a video. Derived segments are Cove's calculated results from raw marks, tags, performers, faces, and display settings.",
         imageSrc: "/manual/screenshots/segments-derived.png",
-        imageAlt: "A scene timeline showing raw and derived segments",
+        imageAlt: "A video timeline showing raw and derived segments",
         points: [
           "[green] raw segments, the original marks on the timeline",
           "[blue] derived segments, the ranges most useful for player bars, filters, and compilations",
@@ -445,7 +445,7 @@ export const builtinTutorialTopics: TutorialStoryboardTopic[] = [
       {
         id: "display-profiles",
         title: "Shape your results with profiles",
-        caption: "A display profile is a saved set of rules for turning raw segments into the derived ones you see. Switch profiles to get different views of the same scenes.",
+        caption: "A display profile is a saved set of rules for turning raw segments into the derived ones you see. Switch profiles to get different views of the same videos.",
         imageSrc: "/manual/screenshots/display-profiles.png",
         imageAlt: "Display profile selector with derived results",
         points: [
@@ -472,7 +472,7 @@ export const builtinTutorialTopics: TutorialStoryboardTopic[] = [
         points: [
           "[green] a group of content ready to play as a compilation",
           "[blue] the compilation player moving from one item to the next",
-          "Use segments for precise scene excerpts, or mix in other content when the group calls for it",
+          "Use segments for precise video excerpts, or mix in other content when the group calls for it",
         ],
         topicLinks: [
           { label: "Groups and dynamic groups", topicId: "groups" },
@@ -528,7 +528,7 @@ export const builtinTutorialTopics: TutorialStoryboardTopic[] = [
         imageAlt: "A group detail page with its items",
         points: [
           "[green] the items collected inside the group",
-          "Add scenes, images, segments, and more to the same group",
+          "Add videos, images, segments, and more to the same group",
           "Groups can even contain other groups for deeper organizing",
         ],
       },
@@ -1283,7 +1283,7 @@ function ManualMarkdown({ markdown }: { markdown: string }) {
 }
 
 function normalizeMockKind(value?: string): TutorialSlideMockKind | undefined {
-  const knownKinds = new Set<TutorialSlideMockKind>(["tasks", "feed", "metadata", "settings", "scenePlayer", "tagging", "images", "extension"]);
+  const knownKinds = new Set<TutorialSlideMockKind>(["tasks", "feed", "metadata", "settings", "videoPlayer", "tagging", "images", "extension"]);
   return knownKinds.has(value as TutorialSlideMockKind) ? value as TutorialSlideMockKind : undefined;
 }
 
@@ -1407,7 +1407,7 @@ function StoryboardPreview({ slide }: { slide: TutorialStoryboardSlide }) {
       <div className="grid min-h-[calc(100%-2.5rem)] grid-cols-[10rem_minmax(0,1fr)] bg-background">
         <div className="border-r border-border bg-nav/90 p-3">
           <div className="mb-4 h-7 rounded bg-accent/25" />
-          {["Scenes", "Images", "Texts", "Settings"].map((item, index) => (
+          {["Videos", "Images", "Texts", "Settings"].map((item, index) => (
             <div key={item} className={`mb-2 flex items-center gap-2 rounded px-2 py-2 text-xs ${index === 0 ? "bg-accent/20 text-accent" : "text-secondary"}`}>
               <div className="h-3 w-3 rounded bg-current opacity-60" />
               <span>{item}</span>
@@ -1419,7 +1419,7 @@ function StoryboardPreview({ slide }: { slide: TutorialStoryboardSlide }) {
           {slide.mockKind === "feed" ? <FeedMock /> : null}
           {slide.mockKind === "metadata" ? <MetadataMock /> : null}
           {slide.mockKind === "settings" ? <SettingsMock /> : null}
-          {slide.mockKind === "scenePlayer" ? <ScenePlayerMock /> : null}
+          {slide.mockKind === "videoPlayer" ? <VideoPlayerMock /> : null}
           {slide.mockKind === "tagging" ? <TaggingMock /> : null}
           {slide.mockKind === "images" ? <ImagesMock /> : null}
           {slide.mockKind === "extension" || !slide.mockKind ? <ExtensionMock /> : null}
@@ -1508,7 +1508,7 @@ function SettingsMock() {
     <div className="space-y-3">
       <div className="flex items-center gap-2 text-lg font-semibold text-foreground"><Settings className="h-5 w-5 text-accent" /> Settings</div>
       <div className="grid gap-3 md:grid-cols-2">
-        {["Navigation", "Scene Player", "Feed & Viewer", "Extensions"].map((label, index) => (
+        {["Navigation", "Video Player", "Feed & Viewer", "Extensions"].map((label, index) => (
           <div key={label} className="rounded-lg border border-border bg-card p-3">
             <div className="mb-3 flex items-center gap-2 text-sm font-medium text-foreground">
               {index === 0 ? <LayoutGrid className="h-4 w-4 text-accent" /> : <Play className="h-4 w-4 text-accent" />}
@@ -1525,7 +1525,7 @@ function SettingsMock() {
   );
 }
 
-function ScenePlayerMock() {
+function VideoPlayerMock() {
   return (
     <div className="space-y-3">
       <div className="overflow-hidden rounded-lg border border-border bg-card">
@@ -1584,3 +1584,4 @@ function ExtensionMock() {
     </div>
   );
 }
+

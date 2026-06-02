@@ -60,9 +60,9 @@ public class VideoFile : BaseFileEntity
     public bool Interactive { get; set; }
     public int? InteractiveSpeed { get; set; }
 
-    // FK to Scene
-    public int? SceneId { get; set; }
-    public Scene? Scene { get; set; }
+    // FK to Video
+    public int? VideoId { get; set; }
+    public Video? Video { get; set; }
 
     // Navigation
     public ICollection<VideoCaption> Captions { get; set; } = [];
@@ -131,3 +131,4 @@ public class VideoCaption
     public string Filename { get; set; } = string.Empty; // Sidecar caption filename
     public VideoFile? File { get; set; }
 }
+

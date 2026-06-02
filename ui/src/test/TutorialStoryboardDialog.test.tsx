@@ -162,7 +162,7 @@ describe("TutorialStoryboardDialog", () => {
         title: "Related Docs",
         description: "Related item workflows.",
         contexts: ["detail-tab:related", "panel:related-docs"],
-        pages: ["scene"],
+        pages: ["video"],
         extensionId: "docs.bundle",
         order: 83,
         slides: [{ id: "related", title: "Find related items", bodyMarkdown: "Use Related." }],
@@ -173,8 +173,8 @@ describe("TutorialStoryboardDialog", () => {
       <TutorialStoryboardDialog
         open
         onClose={vi.fn()}
-        request={{ page: "scenes", contexts: ["page:scenes", "detail-tab:related"] }}
-        currentPage="scene"
+        request={{ page: "videos", contexts: ["page:videos", "detail-tab:related"] }}
+        currentPage="video"
         extensionTopics={extensionTopics}
       />,
     );
@@ -183,3 +183,4 @@ describe("TutorialStoryboardDialog", () => {
     expect(screen.getByRole("heading", { name: "Find related items" })).toBeInTheDocument();
   });
 });
+

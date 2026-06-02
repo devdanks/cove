@@ -5,7 +5,7 @@ import { Check, Download, FolderOpen, Image as ImageIcon, Layers3, Loader2, X } 
 import { galleries, groups, system } from "../api/client";
 import type { DownloaderMatch, ImageCreate } from "../api/types";
 import { formatBatchDownloadSummary, type BatchDownloadResult } from "../utils/batchDownloads";
-import { loadScrapeApplyPreferences } from "./sceneScrapeUtils";
+import { loadScrapeApplyPreferences } from "./videoScrapeUtils";
 
 type ContainerMode = "none" | "existing" | "create";
 
@@ -201,7 +201,7 @@ export function ImageSourceDownloadDialog({ open, sourceUrl, matches, baseTitle,
             autoApplyMetadata,
             ...metadataApplyOptions,
             galleryIds: selectedGalleryIds.length > 0 ? selectedGalleryIds : undefined,
-            groupIds: groupId ? [{ groupId, sceneIndex: index }] : undefined,
+            groupIds: groupId ? [{ groupId, videoIndex: index }] : undefined,
           };
         }),
         followUp: {

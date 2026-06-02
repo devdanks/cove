@@ -10,7 +10,7 @@ namespace Cove.Api.Extensions;
 
 public sealed class DirectFileDownloaderExtension : IDownloaderProvider
 {
-    private const string SceneDownloaderId = "builtin.direct-file/scene";
+    private const string VideoDownloaderId = "builtin.direct-file/video";
     private const string ImageDownloaderId = "builtin.direct-file/image";
     private const string AudioDownloaderId = "builtin.direct-file/audio";
     private const string TextDownloaderId = "builtin.direct-file/text";
@@ -21,10 +21,10 @@ public sealed class DirectFileDownloaderExtension : IDownloaderProvider
     private static readonly string[] AudioExtensions = [".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".opus"];
     private static readonly string[] TextExtensions = [".txt", ".md", ".markdown", ".pdf", ".epub", ".rtf", ".nfo", ".log", ".srt", ".vtt", ".ass", ".ssa", ".lrc", ".html", ".htm"];
 
-    private static readonly DownloaderDescriptor SceneDownloader = new(
-        SceneDownloaderId,
+    private static readonly DownloaderDescriptor VideoDownloader = new(
+        VideoDownloaderId,
         "Direct Video File",
-        DownloaderEntity.Scene,
+        DownloaderEntity.Video,
         VideoExtensions.Select(extension => $"*{extension}*").ToList(),
         DownloaderCapabilities.None);
 
@@ -58,7 +58,7 @@ public sealed class DirectFileDownloaderExtension : IDownloaderProvider
 
     private static readonly IReadOnlyDictionary<string, DownloaderDescriptor> Downloaders = new Dictionary<string, DownloaderDescriptor>(StringComparer.OrdinalIgnoreCase)
     {
-        [SceneDownloader.Id] = SceneDownloader,
+        [VideoDownloader.Id] = VideoDownloader,
         [ImageDownloader.Id] = ImageDownloader,
         [AudioDownloader.Id] = AudioDownloader,
         [TextDownloader.Id] = TextDownloader,
@@ -127,7 +127,7 @@ public sealed class DirectFileDownloaderExtension : IDownloaderProvider
     {
     }
 
-    public IReadOnlyList<DownloaderDescriptor> GetDownloaders() => [SceneDownloader, ImageDownloader, AudioDownloader, TextDownloader, WebTextDownloader];
+    public IReadOnlyList<DownloaderDescriptor> GetDownloaders() => [VideoDownloader, ImageDownloader, AudioDownloader, TextDownloader, WebTextDownloader];
 
     public Task<DownloaderUrlMatch?> MatchAsync(string url, CancellationToken ct)
     {
@@ -265,7 +265,7 @@ public sealed class DirectFileDownloaderExtension : IDownloaderProvider
 
         if (VideoExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
         {
-            descriptor = SceneDownloader;
+            descriptor = VideoDownloader;
             return true;
         }
 
@@ -638,7 +638,7 @@ public sealed class DirectFileDownloaderExtension : IDownloaderProvider
     {
         return entity switch
         {
-            DownloaderEntity.Scene => ".mp4",
+            DownloaderEntity.Video => ".mp4",
             DownloaderEntity.Image => ".jpg",
             DownloaderEntity.Audio => ".mp3",
             DownloaderEntity.Text => ".txt",

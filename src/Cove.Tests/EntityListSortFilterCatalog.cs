@@ -17,7 +17,7 @@ public static class EntityListSortFilterCatalog
 {
     private static readonly IReadOnlyDictionary<string, Type> FilterTypesByEntity = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase)
     {
-        ["scenes"] = typeof(SceneFilter),
+        ["videos"] = typeof(VideoFilter),
         ["images"] = typeof(ImageFilter),
         ["audios"] = typeof(AudioFilter),
         ["texts"] = typeof(TextDocumentFilter),
@@ -30,7 +30,7 @@ public static class EntityListSortFilterCatalog
 
     public static IReadOnlyList<string> Entities { get; } =
     [
-        "scenes",
+        "videos",
         "images",
         "audios",
         "texts",
@@ -45,34 +45,34 @@ public static class EntityListSortFilterCatalog
 
     public static IReadOnlyList<EntityListSortDefinition> Sorts { get; } =
     [
-        // Scenes
-        new("scenes", "updated_at", "Updated At"),
-        new("scenes", "created_at", "Created At"),
-        new("scenes", "title", "Title"),
-        new("scenes", "date", "Date"),
-        new("scenes", "rating", "Rating"),
-        new("scenes", "play_count", "Play Count"),
-        new("scenes", "like_counter", "Likes"),
-        new("scenes", "last_like_at", "Last Like Date"),
-        new("scenes", "duration", "Duration"),
-        new("scenes", "file_size", "File Size"),
-        new("scenes", "file_mod_time", "File Modification Time"),
-        new("scenes", "file_count", "File Count"),
-        new("scenes", "path", "Path"),
-        new("scenes", "resolution", "Resolution"),
-        new("scenes", "framerate", "Frame Rate"),
-        new("scenes", "bitrate", "Bitrate"),
-        new("scenes", "phash", "pHash"),
-        new("scenes", "tag_count", "Tag Count"),
-        new("scenes", "performer_count", "Performer Count"),
-        new("scenes", "performer_age", "Performer Age"),
-        new("scenes", "studio", "Studio"),
-        new("scenes", "code", "Studio Code"),
-        new("scenes", "last_played_at", "Last Played"),
-        new("scenes", "play_duration", "Play Duration"),
-        new("scenes", "resume_time", "Resume Time"),
-        new("scenes", "organized", "Organized"),
-        new("scenes", "random", "Random"),
+        // Videos
+        new("videos", "updated_at", "Updated At"),
+        new("videos", "created_at", "Created At"),
+        new("videos", "title", "Title"),
+        new("videos", "date", "Date"),
+        new("videos", "rating", "Rating"),
+        new("videos", "play_count", "Play Count"),
+        new("videos", "like_counter", "Likes"),
+        new("videos", "last_like_at", "Last Like Date"),
+        new("videos", "duration", "Duration"),
+        new("videos", "file_size", "File Size"),
+        new("videos", "file_mod_time", "File Modification Time"),
+        new("videos", "file_count", "File Count"),
+        new("videos", "path", "Path"),
+        new("videos", "resolution", "Resolution"),
+        new("videos", "framerate", "Frame Rate"),
+        new("videos", "bitrate", "Bitrate"),
+        new("videos", "phash", "pHash"),
+        new("videos", "tag_count", "Tag Count"),
+        new("videos", "performer_count", "Performer Count"),
+        new("videos", "performer_age", "Performer Age"),
+        new("videos", "studio", "Studio"),
+        new("videos", "code", "Studio Code"),
+        new("videos", "last_played_at", "Last Played"),
+        new("videos", "play_duration", "Play Duration"),
+        new("videos", "resume_time", "Resume Time"),
+        new("videos", "organized", "Organized"),
+        new("videos", "random", "Random"),
 
         // Images
         new("images", "updated_at", "Updated At"),
@@ -152,7 +152,7 @@ public static class EntityListSortFilterCatalog
         new("groups", "created_at", "Created At"),
         new("groups", "updated_at", "Updated At"),
         new("groups", "item_count", "Item Count"),
-        new("groups", "scene_count", "Scene Count"),
+        new("groups", "video_count", "Video Count"),
         new("groups", "image_count", "Image Count"),
         new("groups", "audio_count", "Audio Count"),
         new("groups", "text_count", "Text Count"),
@@ -168,7 +168,7 @@ public static class EntityListSortFilterCatalog
         new("groups", "cached_item_count", "Cached Item Count"),
         new("groups", "last_resolved_at", "Last Resolved"),
         new("groups", "query_source_key", "Query Source Key"),
-        new("groups", "show_in_scene_lists", "Show In Scene Lists"),
+        new("groups", "show_in_video_lists", "Show In Video Lists"),
         new("groups", "aliases", "Aliases"),
 
         // Segments
@@ -179,7 +179,7 @@ public static class EntityListSortFilterCatalog
         new("segments", "duration", "Duration"),
         new("segments", "confidence", "Confidence"),
         new("segments", "title", "Title"),
-        new("segments", "scene_title", "Scene Title"),
+        new("segments", "video_title", "Video Title"),
         new("segments", "kind", "Kind"),
         new("segments", "source_key", "Source Key"),
         new("segments", "tag_name", "Tag Name"),
@@ -189,10 +189,10 @@ public static class EntityListSortFilterCatalog
         // Performers
         new("performers", "name", "Name"),
         new("performers", "rating", "Rating"),
-        new("performers", "scene_count", "Scene Count"),
+        new("performers", "video_count", "Video Count"),
         new("performers", "image_count", "Image Count"),
         new("performers", "gallery_count", "Gallery Count"),
-        new("performers", "latest_scene_date", "Latest Scene Date"),
+        new("performers", "latest_video_date", "Latest Video Date"),
         new("performers", "total_file_size", "Total File Size"),
         new("performers", "tag_count", "Tag Count"),
         new("performers", "career_length", "Career Length"),
@@ -211,10 +211,10 @@ public static class EntityListSortFilterCatalog
         // Studios
         new("studios", "name", "Name"),
         new("studios", "rating", "Rating"),
-        new("studios", "scene_count", "Scene Count"),
+        new("studios", "video_count", "Video Count"),
         new("studios", "gallery_count", "Gallery Count"),
         new("studios", "image_count", "Image Count"),
-        new("studios", "latest_scene_date", "Latest Scene Date"),
+        new("studios", "latest_video_date", "Latest Video Date"),
         new("studios", "total_file_size", "Total File Size"),
         new("studios", "parent_count", "Parent Studio Count"),
         new("studios", "child_count", "Substudios Count"),
@@ -226,13 +226,13 @@ public static class EntityListSortFilterCatalog
         // Tags
         new("tags", "name", "Name"),
         new("tags", "tag_group", "Tag Group"),
-        new("tags", "scene_count", "Scene Count"),
+        new("tags", "video_count", "Video Count"),
         new("tags", "gallery_count", "Gallery Count"),
         new("tags", "group_count", "Group Count"),
         new("tags", "image_count", "Image Count"),
         new("tags", "performer_count", "Performer Count"),
         new("tags", "studio_count", "Studio Count"),
-        new("tags", "latest_scene_date", "Latest Scene Date"),
+        new("tags", "latest_video_date", "Latest Video Date"),
         new("tags", "total_file_size", "Total File Size"),
         new("tags", "random", "Random"),
         new("tags", "created_at", "Created At"),
@@ -243,7 +243,7 @@ public static class EntityListSortFilterCatalog
         new("faces", "updated_desc", "Recently updated"),
         new("faces", "created_desc", "Recently created"),
         new("faces", "appearance_desc", "Most appearances"),
-        new("faces", "scene_count_desc", "Most scenes"),
+        new("faces", "video_count_desc", "Most videos"),
         new("faces", "image_count_desc", "Most images"),
         new("faces", "label_asc", "Label A-Z"),
         new("faces", "label_desc", "Label Z-A"),
@@ -263,7 +263,7 @@ public static class EntityListSortFilterCatalog
         new("faces", "appearance_count_desc", "Appearance Count Desc"),
         new("faces", "frame_sample_count_asc", "Frame Sample Count Asc"),
         new("faces", "frame_sample_count_desc", "Frame Sample Count Desc"),
-        new("faces", "scene_count_asc", "Scene Count Asc"),
+        new("faces", "video_count_asc", "Video Count Asc"),
         new("faces", "image_count_asc", "Image Count Asc"),
     ];
 
@@ -279,7 +279,7 @@ public static class EntityListSortFilterCatalog
         {
             foreach (var property in filterType.GetProperties(BindingFlags.Public | BindingFlags.Instance))
             {
-                if (property.Name is nameof(SceneFilter.CustomFieldCriteria) or nameof(SceneFilter.CustomFieldCriterion))
+                if (property.Name is nameof(VideoFilter.CustomFieldCriteria) or nameof(VideoFilter.CustomFieldCriterion))
                     continue;
 
                 var propertyType = Nullable.GetUnderlyingType(property.PropertyType) ?? property.PropertyType;
@@ -302,13 +302,13 @@ public static class EntityListSortFilterCatalog
             new EntityListFilterDefinition("faces", "detectionCount", "query-param:int", ["equals", "not_equals", "greater_than", "less_than", "between", "not_between"]),
             new EntityListFilterDefinition("faces", "appearanceCount", "query-param:int", ["equals", "not_equals", "greater_than", "less_than", "between", "not_between"]),
             new EntityListFilterDefinition("faces", "frameSampleCount", "query-param:int", ["equals", "not_equals", "greater_than", "less_than", "between", "not_between"]),
-            new EntityListFilterDefinition("faces", "sceneCount", "query-param:int", ["equals", "not_equals", "greater_than", "less_than", "between", "not_between"]),
+            new EntityListFilterDefinition("faces", "videoCount", "query-param:int", ["equals", "not_equals", "greater_than", "less_than", "between", "not_between"]),
             new EntityListFilterDefinition("faces", "imageCount", "query-param:int", ["equals", "not_equals", "greater_than", "less_than", "between", "not_between"]),
             new EntityListFilterDefinition("segments", "ids", "query-param:int-list", ["includes"]),
-            new EntityListFilterDefinition("segments", "sceneId", "query-param:int", ["equals"]),
-            new EntityListFilterDefinition("segments", "sceneIds", "query-param:int-list", ["includes"]),
-            new EntityListFilterDefinition("segments", "excludeSceneIds", "query-param:int-list", ["excludes"]),
-            new EntityListFilterDefinition("segments", "sceneTitle", "query-param:string", ["includes"]),
+            new EntityListFilterDefinition("segments", "videoId", "query-param:int", ["equals"]),
+            new EntityListFilterDefinition("segments", "videoIds", "query-param:int-list", ["includes"]),
+            new EntityListFilterDefinition("segments", "excludeVideoIds", "query-param:int-list", ["excludes"]),
+            new EntityListFilterDefinition("segments", "videoTitle", "query-param:string", ["includes"]),
             new EntityListFilterDefinition("segments", "tagId", "query-param:int", ["equals"]),
             new EntityListFilterDefinition("segments", "tagIds", "query-param:int-list", ["includes"]),
             new EntityListFilterDefinition("segments", "kind", "query-param:string", ["includes"]),

@@ -7,10 +7,10 @@ vi.mock("../components/Rating", () => ({
   RatingBadge: () => null,
 }));
 
-import { GalleryTile, GroupTile, PerformerTile, SceneCard, SceneCardPopovers } from "../components/EntityCards";
-import { DetailsTab, FileInfoTab } from "../pages/SceneDetailPage";
+import { GalleryTile, GroupTile, PerformerTile, VideoCard, VideoCardPopovers } from "../components/EntityCards";
+import { DetailsTab, FileInfoTab } from "../pages/VideoDetailPage";
 
-const sceneFile = {
+const videoFile = {
   id: 10,
   basename: "alpha.mp4",
   path: "C:\\library\\alpha.mp4",
@@ -25,11 +25,11 @@ const sceneFile = {
   fingerprints: [],
 };
 
-const baseScene = {
+const baseVideo = {
   id: 42,
-  title: "Sample Scene",
+  title: "Sample Video",
   updatedAt: "2024-01-12T00:00:00Z",
-  files: [sceneFile],
+  files: [videoFile],
   performers: [],
   groups: [],
   galleries: [],
@@ -59,8 +59,8 @@ const baseGallery = {
   tags: [],
   performers: [],
   imageCount: 12,
-  sceneCount: 3,
-  sceneIds: [],
+  videoCount: 3,
+  videoIds: [],
   folderPath: null,
   files: [],
   customFields: undefined,
@@ -90,41 +90,41 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("SceneCard navigation", () => {
-  it("renders the main scene surface as a real link", () => {
+describe("VideoCard navigation", () => {
+  it("renders the main video surface as a real link", () => {
     const onClick = vi.fn();
-    render(<SceneCard scene={baseScene as any} onClick={onClick} />);
+    render(<VideoCard video={baseVideo as any} onClick={onClick} />);
 
-    expect(screen.getByRole("link", { name: /Open scene Sample Scene/i })).toHaveAttribute("href", "/scene/42");
+    expect(screen.getByRole("link", { name: /Open video Sample Video/i })).toHaveAttribute("href", "/video/42");
     expect(onClick).not.toHaveBeenCalled();
   });
 
-  it("navigates in-place on a plain left click through the scene link", () => {
+  it("navigates in-place on a plain left click through the video link", () => {
     const onClick = vi.fn();
-    render(<SceneCard scene={baseScene as any} onClick={onClick} />);
+    render(<VideoCard video={baseVideo as any} onClick={onClick} />);
 
-    fireEvent.click(screen.getByRole("link", { name: /Open scene Sample Scene/i }));
+    fireEvent.click(screen.getByRole("link", { name: /Open video Sample Video/i }));
 
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 
   it("lets modified clicks fall through to normal browser link behavior", () => {
     const onClick = vi.fn();
-    render(<SceneCard scene={baseScene as any} onClick={onClick} />);
+    render(<VideoCard video={baseVideo as any} onClick={onClick} />);
 
-    fireEvent.click(screen.getByRole("link", { name: /Open scene Sample Scene/i }), { ctrlKey: true });
+    fireEvent.click(screen.getByRole("link", { name: /Open video Sample Video/i }), { ctrlKey: true });
 
     expect(onClick).not.toHaveBeenCalled();
   });
 
-  it("renders performer badges as real links without triggering scene navigation on modified clicks", () => {
+  it("renders performer badges as real links without triggering video navigation on modified clicks", () => {
     const onClick = vi.fn();
     const onNavigate = vi.fn();
 
     render(
-      <SceneCard
-        scene={{
-          ...baseScene,
+      <VideoCard
+        video={{
+          ...baseVideo,
           performers: [{ id: 7, name: "Alice Example", imagePath: null }],
         } as any}
         onClick={onClick}
@@ -144,9 +144,9 @@ describe("SceneCard navigation", () => {
     vi.useFakeTimers();
 
     render(
-      <SceneCardPopovers
-        scene={{
-          ...baseScene,
+      <VideoCardPopovers
+        video={{
+          ...baseVideo,
           performers: [{ id: 9, name: "Popover Performer", imagePath: null }],
         } as any}
       />
@@ -161,31 +161,31 @@ describe("SceneCard navigation", () => {
   });
 
   it("renders a likes counter instead of the legacy O badge", () => {
-    render(<SceneCard scene={baseScene as any} engagement={{ hostId: 42, isFavorite: false, resumeTime: 0, playDuration: 0, playCount: 0, likeCount: 1, derivedLikeCount: 0, pageVisitCount: 0, completeCount: 0 }} onClick={vi.fn()} />);
+    render(<VideoCard video={baseVideo as any} engagement={{ hostId: 42, isFavorite: false, resumeTime: 0, playDuration: 0, playCount: 0, likeCount: 1, derivedLikeCount: 0, pageVisitCount: 0, completeCount: 0 }} onClick={vi.fn()} />);
 
     expect(screen.getByTitle("Likes: 1")).toBeInTheDocument();
     expect(screen.queryByText(/^O$/)).not.toBeInTheDocument();
   });
 
   it("does not render a favorite card control when the card is not favorited", () => {
-    render(<SceneCard scene={baseScene as any} engagement={{ hostId: 42, isFavorite: false, resumeTime: 0, playDuration: 0, playCount: 0, likeCount: 0, derivedLikeCount: 0, pageVisitCount: 0, completeCount: 0 }} onClick={vi.fn()} />);
+    render(<VideoCard video={baseVideo as any} engagement={{ hostId: 42, isFavorite: false, resumeTime: 0, playDuration: 0, playCount: 0, likeCount: 0, derivedLikeCount: 0, pageVisitCount: 0, completeCount: 0 }} onClick={vi.fn()} />);
 
     expect(screen.queryByTitle("Favorite")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Favorite" })).not.toBeInTheDocument();
   });
 
   it("renders a non-interactive favorite indicator when the card is favorited", () => {
-    render(<SceneCard scene={baseScene as any} engagement={{ hostId: 42, isFavorite: true, resumeTime: 0, playDuration: 0, playCount: 0, likeCount: 0, derivedLikeCount: 0, pageVisitCount: 0, completeCount: 0 }} onClick={vi.fn()} />);
+    render(<VideoCard video={baseVideo as any} engagement={{ hostId: 42, isFavorite: true, resumeTime: 0, playDuration: 0, playCount: 0, likeCount: 0, derivedLikeCount: 0, pageVisitCount: 0, completeCount: 0 }} onClick={vi.fn()} />);
 
     expect(screen.getByTitle("Favorite")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Favorite" })).not.toBeInTheDocument();
   });
 
-  it("shows the hovered absolute timestamp above the scene scrub preview bar", () => {
+  it("shows the hovered absolute timestamp above the video scrub preview bar", () => {
     const { container } = render(
-      <SceneCard
-        scene={{
-          ...baseScene,
+      <VideoCard
+        video={{
+          ...baseVideo,
           clipStartSec: 35,
           clipEndSec: 95,
         } as any}
@@ -233,18 +233,18 @@ describe("PerformerTile", () => {
 });
 
 describe("GalleryTile", () => {
-  it("shows image and scene counts once in the footer popovers", () => {
+  it("shows image and video counts once in the footer popovers", () => {
     const { container } = render(<GalleryTile gallery={baseGallery as any} onClick={vi.fn()} />);
 
     const imagesButton = screen.getByTitle("Images");
-    const scenesButton = screen.getByTitle("Scenes");
+    const videosButton = screen.getByTitle("Videos");
 
     expect(imagesButton).toHaveTextContent("12");
     expect(imagesButton.querySelector("svg")).toBeInTheDocument();
-    expect(scenesButton).toHaveTextContent("3");
-    expect(scenesButton.querySelector("svg")).toBeInTheDocument();
+    expect(videosButton).toHaveTextContent("3");
+    expect(videosButton.querySelector("svg")).toBeInTheDocument();
     expect(screen.queryByLabelText("12 images")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("3 scenes")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("3 videos")).not.toBeInTheDocument();
     expect(container.querySelector(".card-body")).not.toHaveTextContent("12 images");
   });
 
@@ -266,7 +266,7 @@ describe("GroupTile", () => {
   it("uses hover popovers for dynamic mixed group counts", async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({
       items: [
-        { id: -1, groupId: 4, orderIndex: 0, kind: "scene", sceneId: 10, sceneTitle: "Dynamic Scene", hostType: "scene", hostId: 10, title: "Dynamic Scene", createdAt: "2026-05-01T00:00:00Z", updatedAt: "2026-05-01T00:00:00Z" },
+        { id: -1, groupId: 4, orderIndex: 0, kind: "video", videoId: 10, videoTitle: "Dynamic Video", hostType: "video", hostId: 10, title: "Dynamic Video", createdAt: "2026-05-01T00:00:00Z", updatedAt: "2026-05-01T00:00:00Z" },
         { id: -2, groupId: 4, orderIndex: 1, kind: "image", imageId: 20, imageTitle: "Group Image", hostType: "image", hostId: 20, title: "Group Image", createdAt: "2026-05-01T00:00:00Z", updatedAt: "2026-05-01T00:00:00Z" },
         { id: -3, groupId: 4, orderIndex: 2, kind: "audio", hostType: "audio", hostId: 30, title: "Group Audio", createdAt: "2026-05-01T00:00:00Z", updatedAt: "2026-05-01T00:00:00Z" },
         { id: -4, groupId: 4, orderIndex: 3, kind: "text", hostType: "text", hostId: 40, title: "Group Text", createdAt: "2026-05-01T00:00:00Z", updatedAt: "2026-05-01T00:00:00Z" },
@@ -286,7 +286,7 @@ describe("GroupTile", () => {
           kind: "dynamic",
           frontImagePath: null,
           tags: [],
-          sceneCount: 1,
+          videoCount: 1,
           imageCount: 1,
           audioCount: 1,
           textCount: 1,
@@ -300,27 +300,27 @@ describe("GroupTile", () => {
       />,
     );
 
-    expect(screen.getByTitle("Scenes").tagName).toBe("BUTTON");
+    expect(screen.getByTitle("Videos").tagName).toBe("BUTTON");
     expect(screen.getByTitle("Images").tagName).toBe("BUTTON");
     expect(screen.getByTitle("Audios").tagName).toBe("BUTTON");
     expect(screen.getByTitle("Texts").tagName).toBe("BUTTON");
     expect(screen.getByTitle("Segments").tagName).toBe("BUTTON");
 
-    fireEvent.mouseEnter(screen.getByTitle("Scenes"));
+    fireEvent.mouseEnter(screen.getByTitle("Videos"));
 
-    expect(await screen.findByText("Dynamic Scene")).toBeInTheDocument();
+    expect(await screen.findByText("Dynamic Video")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith("/api/groups/4/items/page?page=1&perPage=0&sort=order&direction=asc", expect.any(Object));
   });
 });
 
 describe("FileInfoTab", () => {
-  it("renders every underlying scene file", () => {
+  it("renders every underlying video file", () => {
     renderWithQueryClient(
       <FileInfoTab
         files={[
-          sceneFile,
+          videoFile,
           {
-            ...sceneFile,
+            ...videoFile,
             id: 11,
             basename: "beta.mp4",
             path: "D:\\archive\\beta.mp4",
@@ -337,9 +337,9 @@ describe("FileInfoTab", () => {
 });
 
 describe("DetailsTab performers", () => {
-  it("shows performer age at scene date and uses a paired grid for multiple performers", () => {
-    const scene = {
-      ...baseScene,
+  it("shows performer age at video date and uses a paired grid for multiple performers", () => {
+    const video = {
+      ...baseVideo,
       date: "2024-01-12",
       remoteIds: [],
       urls: [],
@@ -350,7 +350,7 @@ describe("DetailsTab performers", () => {
       ],
     };
 
-    renderWithQueryClient(<DetailsTab scene={scene as any} onNavigate={vi.fn()} />);
+    renderWithQueryClient(<DetailsTab video={video as any} onNavigate={vi.fn()} />);
 
     expect(screen.getByText("24 yrs old")).toBeInTheDocument();
 
@@ -363,3 +363,4 @@ describe("DetailsTab performers", () => {
   });
 
 });
+

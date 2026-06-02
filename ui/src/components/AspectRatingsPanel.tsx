@@ -19,7 +19,7 @@ interface AspectDefinition {
 }
 
 const DEFAULT_ASPECTS: Partial<Record<AffinityHostType, AspectDefinition[]>> = {
-  scene: [
+  video: [
     { key: "audio", label: "Audio" },
     { key: "video_quality", label: "Video Quality" },
     { key: "content", label: "Content" },

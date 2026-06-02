@@ -384,7 +384,7 @@ function getNodeRadiusRange(nodeScale: number) {
 
 function getUsageBreakdown(node: TagGraphNode) {
   return [
-    { label: "Scenes", value: node.sceneCount },
+    { label: "Videos", value: node.videoCount },
     { label: "Segments", value: node.segmentCount },
     { label: "Images", value: node.imageCount },
     { label: "Galleries", value: node.galleryCount },

@@ -10,22 +10,22 @@ namespace Cove.Tests;
 public class RepositorySortBehaviorTests
 {
     [Fact]
-    public async Task TagRepository_SceneCountSort_UsesSceneAssociations()
+    public async Task TagRepository_VideoCountSort_UsesVideoAssociations()
     {
         await using var context = CreateContext();
         var busy = new Tag { Name = "Busy", CreatedAt = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc) };
         var quiet = new Tag { Name = "Quiet", CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc) };
 
-        context.Scenes.AddRange(
-            CreateSceneWithTag("first", busy),
-            CreateSceneWithTag("second", busy),
-            CreateSceneWithTag("third", quiet));
+        context.Videos.AddRange(
+            CreateVideoWithTag("first", busy),
+            CreateVideoWithTag("second", busy),
+            CreateVideoWithTag("third", quiet));
         await context.SaveChangesAsync();
 
         var repository = new TagRepository(context);
         var (items, totalCount) = await repository.FindAsync(
             filter: null,
-            new FindFilter { Page = 1, PerPage = 20, Sort = "scene_count", Direction = Cove.Core.Enums.SortDirection.Desc });
+            new FindFilter { Page = 1, PerPage = 20, Sort = "video_count", Direction = Cove.Core.Enums.SortDirection.Desc });
 
         Assert.Equal(2, totalCount);
         Assert.Equal(["Busy", "Quiet"], items.Select(tag => tag.Name).ToArray());
@@ -92,15 +92,15 @@ public class RepositorySortBehaviorTests
     }
 
     [Fact]
-    public async Task StudioRepository_SceneCountSort_UsesSceneAssociations()
+    public async Task StudioRepository_VideoCountSort_UsesVideoAssociations()
     {
         await using var context = CreateContext();
         var busiest = new Studio { Name = "Busiest", CreatedAt = new DateTime(2024, 1, 2, 0, 0, 0, DateTimeKind.Utc) };
         var quieter = new Studio { Name = "Quieter", CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc) };
 
-        busiest.Scenes.Add(new Scene { Title = "one" });
-        busiest.Scenes.Add(new Scene { Title = "two" });
-        quieter.Scenes.Add(new Scene { Title = "three" });
+        busiest.Videos.Add(new Video { Title = "one" });
+        busiest.Videos.Add(new Video { Title = "two" });
+        quieter.Videos.Add(new Video { Title = "three" });
 
         context.Studios.AddRange(busiest, quieter);
         await context.SaveChangesAsync();
@@ -108,7 +108,7 @@ public class RepositorySortBehaviorTests
         var repository = new StudioRepository(context);
         var (items, totalCount) = await repository.FindAsync(
             filter: null,
-            new FindFilter { Page = 1, PerPage = 20, Sort = "scene_count", Direction = Cove.Core.Enums.SortDirection.Desc });
+            new FindFilter { Page = 1, PerPage = 20, Sort = "video_count", Direction = Cove.Core.Enums.SortDirection.Desc });
 
         Assert.Equal(2, totalCount);
         Assert.Equal(["Busiest", "Quieter"], items.Select(studio => studio.Name).ToArray());
@@ -328,37 +328,37 @@ public class RepositorySortBehaviorTests
             HeightCm = 0,
         };
 
-        var leaderScene = new Scene
+        var leaderVideo = new Video
         {
-            Title = "leader-scene",
+            Title = "leader-video",
         };
-        leaderScene.ScenePerformers.Add(new ScenePerformer { Scene = leaderScene, Performer = leader });
-        leaderScene.LikeHistory.Add(new SceneLikeHistory { OccurredAt = new DateTime(2024, 1, 16, 12, 0, 0, DateTimeKind.Utc) });
+        leaderVideo.VideoPerformers.Add(new VideoPerformer { Video = leaderVideo, Performer = leader });
+        leaderVideo.LikeHistory.Add(new VideoLikeHistory { OccurredAt = new DateTime(2024, 1, 16, 12, 0, 0, DateTimeKind.Utc) });
 
-        var middleScene = new Scene
+        var middleVideo = new Video
         {
-            Title = "middle-scene",
+            Title = "middle-video",
         };
-        middleScene.ScenePerformers.Add(new ScenePerformer { Scene = middleScene, Performer = middle });
-        middleScene.LikeHistory.Add(new SceneLikeHistory { OccurredAt = new DateTime(2024, 1, 11, 12, 0, 0, DateTimeKind.Utc) });
+        middleVideo.VideoPerformers.Add(new VideoPerformer { Video = middleVideo, Performer = middle });
+        middleVideo.LikeHistory.Add(new VideoLikeHistory { OccurredAt = new DateTime(2024, 1, 11, 12, 0, 0, DateTimeKind.Utc) });
 
-        var compactScene = new Scene
+        var compactVideo = new Video
         {
-            Title = "compact-scene",
+            Title = "compact-video",
         };
-        compactScene.ScenePerformers.Add(new ScenePerformer { Scene = compactScene, Performer = compact });
-        compactScene.LikeHistory.Add(new SceneLikeHistory { OccurredAt = new DateTime(2024, 1, 6, 12, 0, 0, DateTimeKind.Utc) });
+        compactVideo.VideoPerformers.Add(new VideoPerformer { Video = compactVideo, Performer = compact });
+        compactVideo.LikeHistory.Add(new VideoLikeHistory { OccurredAt = new DateTime(2024, 1, 6, 12, 0, 0, DateTimeKind.Utc) });
 
         context.Performers.AddRange(leader, middle, compact, quiet);
-        context.Scenes.AddRange(leaderScene, middleScene, compactScene);
+        context.Videos.AddRange(leaderVideo, middleVideo, compactVideo);
         await context.SaveChangesAsync();
 
-        AddSceneAffinity(context, leaderScene.Id, viewCount: 12, likeCount: 8, lastConsumedAt: new DateTime(2024, 1, 15, 12, 0, 0, DateTimeKind.Utc));
-        AddSceneAffinity(context, middleScene.Id, viewCount: 4, likeCount: 2, lastConsumedAt: new DateTime(2024, 1, 10, 12, 0, 0, DateTimeKind.Utc));
-        AddSceneAffinity(context, compactScene.Id, viewCount: 1, likeCount: 1, lastConsumedAt: new DateTime(2024, 1, 5, 12, 0, 0, DateTimeKind.Utc));
-        AddLikeInteraction(context, leaderScene.Id, new DateTime(2024, 1, 16, 12, 0, 0, DateTimeKind.Utc));
-        AddLikeInteraction(context, middleScene.Id, new DateTime(2024, 1, 11, 12, 0, 0, DateTimeKind.Utc));
-        AddLikeInteraction(context, compactScene.Id, new DateTime(2024, 1, 6, 12, 0, 0, DateTimeKind.Utc));
+        AddVideoAffinity(context, leaderVideo.Id, viewCount: 12, likeCount: 8, lastConsumedAt: new DateTime(2024, 1, 15, 12, 0, 0, DateTimeKind.Utc));
+        AddVideoAffinity(context, middleVideo.Id, viewCount: 4, likeCount: 2, lastConsumedAt: new DateTime(2024, 1, 10, 12, 0, 0, DateTimeKind.Utc));
+        AddVideoAffinity(context, compactVideo.Id, viewCount: 1, likeCount: 1, lastConsumedAt: new DateTime(2024, 1, 5, 12, 0, 0, DateTimeKind.Utc));
+        AddLikeInteraction(context, leaderVideo.Id, new DateTime(2024, 1, 16, 12, 0, 0, DateTimeKind.Utc));
+        AddLikeInteraction(context, middleVideo.Id, new DateTime(2024, 1, 11, 12, 0, 0, DateTimeKind.Utc));
+        AddLikeInteraction(context, compactVideo.Id, new DateTime(2024, 1, 6, 12, 0, 0, DateTimeKind.Utc));
         await context.SaveChangesAsync();
 
         var repository = new PerformerRepository(context);
@@ -417,11 +417,11 @@ public class RepositorySortBehaviorTests
             new Gallery { Title = "Gallery Zero" },
             new Gallery { Title = "Gallery Unrated" });
 
-        context.Scenes.AddRange(
-            new Scene { Title = "Scene Low" },
-            new Scene { Title = "Scene High" },
-            new Scene { Title = "Scene Zero" },
-            new Scene { Title = "Scene Unrated" });
+        context.Videos.AddRange(
+            new Video { Title = "Video Low" },
+            new Video { Title = "Video High" },
+            new Video { Title = "Video Zero" },
+            new Video { Title = "Video Unrated" });
 
         await context.SaveChangesAsync();
 
@@ -440,9 +440,9 @@ public class RepositorySortBehaviorTests
         AddRating(context, RatingHostType.Gallery, context.Galleries.Single(entity => entity.Title == "Gallery Low").Id, 20);
         AddRating(context, RatingHostType.Gallery, context.Galleries.Single(entity => entity.Title == "Gallery High").Id, 80);
         AddRating(context, RatingHostType.Gallery, context.Galleries.Single(entity => entity.Title == "Gallery Zero").Id, 0);
-        AddRating(context, RatingHostType.Scene, context.Scenes.Single(entity => entity.Title == "Scene Low").Id, 20);
-        AddRating(context, RatingHostType.Scene, context.Scenes.Single(entity => entity.Title == "Scene High").Id, 80);
-        AddRating(context, RatingHostType.Scene, context.Scenes.Single(entity => entity.Title == "Scene Zero").Id, 0);
+        AddRating(context, RatingHostType.Video, context.Videos.Single(entity => entity.Title == "Video Low").Id, 20);
+        AddRating(context, RatingHostType.Video, context.Videos.Single(entity => entity.Title == "Video High").Id, 80);
+        AddRating(context, RatingHostType.Video, context.Videos.Single(entity => entity.Title == "Video Zero").Id, 0);
         await context.SaveChangesAsync();
 
         var performerRepository = new PerformerRepository(context);
@@ -450,7 +450,7 @@ public class RepositorySortBehaviorTests
         var groupRepository = new GroupRepository(context);
         var studioRepository = new StudioRepository(context);
         var galleryRepository = new GalleryRepository(context);
-        var sceneRepository = new SceneRepository(context);
+        var videoRepository = new VideoRepository(context);
 
         var (performerItems, _) = await performerRepository.FindAsync(
             filter: null,
@@ -472,7 +472,7 @@ public class RepositorySortBehaviorTests
             filter: null,
             new FindFilter { Page = 1, PerPage = 20, Sort = "rating", Direction = Cove.Core.Enums.SortDirection.Asc });
 
-        var (sceneItems, _) = await sceneRepository.FindAsync(
+        var (videoItems, _) = await videoRepository.FindAsync(
             filter: null,
             new FindFilter { Page = 1, PerPage = 20, Sort = "rating", Direction = Cove.Core.Enums.SortDirection.Asc });
 
@@ -481,11 +481,11 @@ public class RepositorySortBehaviorTests
         Assert.Equal(["Group Unrated", "Group Zero", "Group Low", "Group High"], groupItems.Select(group => group.Name).ToArray());
         Assert.Equal(["Studio Unrated", "Studio Zero", "Studio Low", "Studio High"], studioItems.Select(studio => studio.Name).ToArray());
         Assert.Equal(["Gallery Unrated", "Gallery Zero", "Gallery Low", "Gallery High"], galleryItems.Select(gallery => gallery.Title ?? string.Empty).ToArray());
-        Assert.Equal(["Scene Unrated", "Scene Zero", "Scene Low", "Scene High"], sceneItems.Select(scene => scene.Title ?? string.Empty).ToArray());
+        Assert.Equal(["Video Unrated", "Video Zero", "Video Low", "Video High"], videoItems.Select(video => video.Title ?? string.Empty).ToArray());
     }
 
     [Fact]
-    public async Task SceneRepository_SupportsParitySceneSorts()
+    public async Task VideoRepository_SupportsParityVideoSorts()
     {
         await using var context = CreateContext();
 
@@ -495,8 +495,8 @@ public class RepositorySortBehaviorTests
         var youngerPerformer = new Performer { Name = "Younger", Birthdate = new DateOnly(2004, 1, 1) };
         var olderPerformer = new Performer { Name = "Older", Birthdate = new DateOnly(1984, 1, 1) };
 
-        var alphaScene = CreateSceneWithFile(
-            "alpha-scene",
+        var alphaVideo = CreateVideoWithFile(
+            "alpha-video",
             folderPath: @"C:\library\a",
             basename: "a.mp4",
             fileModTime: new DateTime(2024, 1, 5, 0, 0, 0, DateTimeKind.Utc),
@@ -504,11 +504,11 @@ public class RepositorySortBehaviorTests
             studio: alphaStudio,
             performer: youngerPerformer,
             fingerprints: [new FileFingerprint { Type = "phash", Value = "00aa" }]);
-        alphaScene.Date = new DateOnly(2024, 1, 20);
-        alphaScene.LikeHistory.Add(new SceneLikeHistory { OccurredAt = new DateTime(2024, 1, 5, 12, 0, 0, DateTimeKind.Utc) });
+        alphaVideo.Date = new DateOnly(2024, 1, 20);
+        alphaVideo.LikeHistory.Add(new VideoLikeHistory { OccurredAt = new DateTime(2024, 1, 5, 12, 0, 0, DateTimeKind.Utc) });
 
-        var betaScene = CreateSceneWithFile(
-            "beta-scene",
+        var betaVideo = CreateVideoWithFile(
+            "beta-video",
             folderPath: @"C:\library\z",
             basename: "z.mp4",
             fileModTime: new DateTime(2024, 1, 10, 0, 0, 0, DateTimeKind.Utc),
@@ -516,13 +516,13 @@ public class RepositorySortBehaviorTests
             studio: betaStudio,
             performer: olderPerformer,
             fingerprints: [new FileFingerprint { Type = "phash", Value = "00ff" }]);
-        betaScene.Date = new DateOnly(2024, 1, 20);
-        betaScene.LikeHistory.Add(new SceneLikeHistory { OccurredAt = new DateTime(2024, 1, 10, 12, 0, 0, DateTimeKind.Utc) });
+        betaVideo.Date = new DateOnly(2024, 1, 20);
+        betaVideo.LikeHistory.Add(new VideoLikeHistory { OccurredAt = new DateTime(2024, 1, 10, 12, 0, 0, DateTimeKind.Utc) });
 
-        context.Scenes.AddRange(alphaScene, betaScene);
+        context.Videos.AddRange(alphaVideo, betaVideo);
         await context.SaveChangesAsync();
 
-        var repository = new SceneRepository(context);
+        var repository = new VideoRepository(context);
 
         var (fileModItems, _) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "file_mod_time", Direction = Cove.Core.Enums.SortDirection.Desc });
         var (favoriteItems, _) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "last_like_at", Direction = Cove.Core.Enums.SortDirection.Desc });
@@ -532,13 +532,13 @@ public class RepositorySortBehaviorTests
         var (studioItems, _) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "studio", Direction = Cove.Core.Enums.SortDirection.Asc });
         var (codeItems, _) = await repository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "code", Direction = Cove.Core.Enums.SortDirection.Asc });
 
-        Assert.Equal(["beta-scene", "alpha-scene"], fileModItems.Select(scene => scene.Title ?? string.Empty).ToArray());
-        Assert.Equal(["beta-scene", "alpha-scene"], favoriteItems.Select(scene => scene.Title ?? string.Empty).ToArray());
-        Assert.Equal(["alpha-scene", "beta-scene"], pathItems.Select(scene => scene.Title ?? string.Empty).ToArray());
-        Assert.Equal(["alpha-scene", "beta-scene"], phashItems.Select(scene => scene.Title ?? string.Empty).ToArray());
-        Assert.Equal(["alpha-scene", "beta-scene"], ageItems.Select(scene => scene.Title ?? string.Empty).ToArray());
-        Assert.Equal(["alpha-scene", "beta-scene"], studioItems.Select(scene => scene.Title ?? string.Empty).ToArray());
-        Assert.Equal(["alpha-scene", "beta-scene"], codeItems.Select(scene => scene.Title ?? string.Empty).ToArray());
+        Assert.Equal(["beta-video", "alpha-video"], fileModItems.Select(video => video.Title ?? string.Empty).ToArray());
+        Assert.Equal(["beta-video", "alpha-video"], favoriteItems.Select(video => video.Title ?? string.Empty).ToArray());
+        Assert.Equal(["alpha-video", "beta-video"], pathItems.Select(video => video.Title ?? string.Empty).ToArray());
+        Assert.Equal(["alpha-video", "beta-video"], phashItems.Select(video => video.Title ?? string.Empty).ToArray());
+        Assert.Equal(["alpha-video", "beta-video"], ageItems.Select(video => video.Title ?? string.Empty).ToArray());
+        Assert.Equal(["alpha-video", "beta-video"], studioItems.Select(video => video.Title ?? string.Empty).ToArray());
+        Assert.Equal(["alpha-video", "beta-video"], codeItems.Select(video => video.Title ?? string.Empty).ToArray());
     }
 
     [Fact]
@@ -588,13 +588,13 @@ public class RepositorySortBehaviorTests
             new Group { Name = "Group Four" },
             new Group { Name = "Group Five" },
             new Group { Name = "Group Six" });
-        context.Scenes.AddRange(
-            new Scene { Title = "Scene One" },
-            new Scene { Title = "Scene Two" },
-            new Scene { Title = "Scene Three" },
-            new Scene { Title = "Scene Four" },
-            new Scene { Title = "Scene Five" },
-            new Scene { Title = "Scene Six" });
+        context.Videos.AddRange(
+            new Video { Title = "Video One" },
+            new Video { Title = "Video Two" },
+            new Video { Title = "Video Three" },
+            new Video { Title = "Video Four" },
+            new Video { Title = "Video Five" },
+            new Video { Title = "Video Six" });
         await context.SaveChangesAsync();
 
         const int seed = 17;
@@ -604,7 +604,7 @@ public class RepositorySortBehaviorTests
         var galleryRepository = new GalleryRepository(context);
         var imageRepository = new ImageRepository(context);
         var groupRepository = new GroupRepository(context);
-        var sceneRepository = new SceneRepository(context);
+        var videoRepository = new VideoRepository(context);
 
         var (performerAsc, _) = await performerRepository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "random", Direction = Cove.Core.Enums.SortDirection.Asc, Seed = seed });
         var (performerDesc, _) = await performerRepository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "random", Direction = Cove.Core.Enums.SortDirection.Desc, Seed = seed });
@@ -618,8 +618,8 @@ public class RepositorySortBehaviorTests
         var (imageDesc, _) = await imageRepository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "random", Direction = Cove.Core.Enums.SortDirection.Desc, Seed = seed });
         var (groupAsc, _) = await groupRepository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "random", Direction = Cove.Core.Enums.SortDirection.Asc, Seed = seed });
         var (groupDesc, _) = await groupRepository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "random", Direction = Cove.Core.Enums.SortDirection.Desc, Seed = seed });
-        var (sceneAsc, _) = await sceneRepository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "random", Direction = Cove.Core.Enums.SortDirection.Asc, Seed = seed });
-        var (sceneDesc, _) = await sceneRepository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "random", Direction = Cove.Core.Enums.SortDirection.Desc, Seed = seed });
+        var (videoAsc, _) = await videoRepository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "random", Direction = Cove.Core.Enums.SortDirection.Asc, Seed = seed });
+        var (videoDesc, _) = await videoRepository.FindAsync(null, new FindFilter { Page = 1, PerPage = 20, Sort = "random", Direction = Cove.Core.Enums.SortDirection.Desc, Seed = seed });
 
         Assert.NotEqual(["Performer One", "Performer Two", "Performer Three", "Performer Four", "Performer Five", "Performer Six"], performerAsc.Select(item => item.Name).ToArray());
         Assert.NotEqual(["Tag One", "Tag Two", "Tag Three", "Tag Four", "Tag Five", "Tag Six"], tagAsc.Select(item => item.Name).ToArray());
@@ -627,24 +627,24 @@ public class RepositorySortBehaviorTests
         Assert.NotEqual(["Gallery One", "Gallery Two", "Gallery Three", "Gallery Four", "Gallery Five", "Gallery Six"], galleryAsc.Select(item => item.Title ?? string.Empty).ToArray());
         Assert.NotEqual(["Image One", "Image Two", "Image Three", "Image Four", "Image Five", "Image Six"], imageAsc.Select(item => item.Title ?? string.Empty).ToArray());
         Assert.NotEqual(["Group One", "Group Two", "Group Three", "Group Four", "Group Five", "Group Six"], groupAsc.Select(item => item.Name).ToArray());
-        Assert.NotEqual(["Scene One", "Scene Two", "Scene Three", "Scene Four", "Scene Five", "Scene Six"], sceneAsc.Select(item => item.Title ?? string.Empty).ToArray());
+        Assert.NotEqual(["Video One", "Video Two", "Video Three", "Video Four", "Video Five", "Video Six"], videoAsc.Select(item => item.Title ?? string.Empty).ToArray());
         Assert.Equal(performerAsc.Select(item => item.Name).Reverse().ToArray(), performerDesc.Select(item => item.Name).ToArray());
         Assert.Equal(tagAsc.Select(item => item.Name).Reverse().ToArray(), tagDesc.Select(item => item.Name).ToArray());
         Assert.Equal(studioAsc.Select(item => item.Name).Reverse().ToArray(), studioDesc.Select(item => item.Name).ToArray());
         Assert.Equal(galleryAsc.Select(item => item.Title ?? string.Empty).Reverse().ToArray(), galleryDesc.Select(item => item.Title ?? string.Empty).ToArray());
         Assert.Equal(imageAsc.Select(item => item.Title ?? string.Empty).Reverse().ToArray(), imageDesc.Select(item => item.Title ?? string.Empty).ToArray());
         Assert.Equal(groupAsc.Select(item => item.Name).Reverse().ToArray(), groupDesc.Select(item => item.Name).ToArray());
-        Assert.Equal(sceneAsc.Select(item => item.Title ?? string.Empty).Reverse().ToArray(), sceneDesc.Select(item => item.Title ?? string.Empty).ToArray());
+        Assert.Equal(videoAsc.Select(item => item.Title ?? string.Empty).Reverse().ToArray(), videoDesc.Select(item => item.Title ?? string.Empty).ToArray());
     }
 
-    private static Scene CreateSceneWithTag(string title, Tag tag)
+    private static Video CreateVideoWithTag(string title, Tag tag)
     {
-        var scene = new Scene { Title = title };
-        scene.SceneTags.Add(new SceneTag { Scene = scene, Tag = tag });
-        return scene;
+        var video = new Video { Title = title };
+        video.VideoTags.Add(new VideoTag { Video = video, Tag = tag });
+        return video;
     }
 
-    private static Scene CreateSceneWithFile(
+    private static Video CreateVideoWithFile(
         string title,
         string folderPath,
         string basename,
@@ -654,18 +654,18 @@ public class RepositorySortBehaviorTests
         Performer performer,
         IEnumerable<FileFingerprint> fingerprints)
     {
-        var scene = new Scene
+        var video = new Video
         {
             Title = title,
             Code = code,
             Studio = studio,
         };
 
-        scene.ScenePerformers.Add(new ScenePerformer { Scene = scene, Performer = performer });
+        video.VideoPerformers.Add(new VideoPerformer { Video = video, Performer = performer });
 
         var file = new VideoFile
         {
-            Scene = scene,
+            Video = video,
             Basename = basename,
             ParentFolder = new Folder { Path = folderPath, ModTime = fileModTime },
             Format = "mp4",
@@ -685,9 +685,9 @@ public class RepositorySortBehaviorTests
             file.Fingerprints.Add(fingerprint);
         }
 
-        scene.Files.Add(file);
+        video.Files.Add(file);
 
-        return scene;
+        return video;
     }
 
     private const int TestUserId = 1;
@@ -698,14 +698,14 @@ public class RepositorySortBehaviorTests
             context.Ratings.Add(new Rating { UserId = TestUserId, HostType = hostType, HostId = hostId, Value = value.Value });
     }
 
-    private static void AddSceneAffinity(CoveContext context, int sceneId, int viewCount = 0, int likeCount = 0, DateTime? lastConsumedAt = null)
+    private static void AddVideoAffinity(CoveContext context, int videoId, int viewCount = 0, int likeCount = 0, DateTime? lastConsumedAt = null)
     {
-        context.UserEntityAffinities.Add(new UserEntityAffinity { UserId = TestUserId, HostType = AffinityHostType.Scene, HostId = sceneId, ViewCount = viewCount, LikeCount = likeCount, LastConsumedAt = lastConsumedAt });
+        context.UserEntityAffinities.Add(new UserEntityAffinity { UserId = TestUserId, HostType = AffinityHostType.Video, HostId = videoId, ViewCount = viewCount, LikeCount = likeCount, LastConsumedAt = lastConsumedAt });
     }
 
-    private static void AddLikeInteraction(CoveContext context, int sceneId, DateTime at)
+    private static void AddLikeInteraction(CoveContext context, int videoId, DateTime at)
     {
-        context.Interactions.Add(new Interaction { UserId = TestUserId, HostType = InteractionHostType.Scene, HostId = sceneId, Kind = InteractionKind.LikeCount, At = at });
+        context.Interactions.Add(new Interaction { UserId = TestUserId, HostType = InteractionHostType.Video, HostId = videoId, Kind = InteractionKind.LikeCount, At = at });
     }
 
     private static CoveContext CreateContext()
@@ -736,3 +736,4 @@ public class RepositorySortBehaviorTests
         }
     }
 }
+

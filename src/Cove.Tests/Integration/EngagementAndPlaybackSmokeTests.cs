@@ -9,26 +9,26 @@ namespace Cove.Tests.Integration;
 public sealed class EntityEngagementControllerSmokeTests
 {
     [Fact]
-    public async Task GetSnapshot_ReturnsOkForKnownScene()
+    public async Task GetSnapshot_ReturnsOkForKnownVideo()
     {
         using var factory = new CoveWebApplicationFactory();
         await factory.ResetDatabaseAsync();
 
-        var sceneId = await factory.WithDbContextAsync(async db =>
+        var videoId = await factory.WithDbContextAsync(async db =>
         {
-            var scene = new Scene { Title = "Engagement Scene" };
-            db.Scenes.Add(scene);
+            var video = new Video { Title = "Engagement Video" };
+            db.Videos.Add(video);
             await db.SaveChangesAsync();
-            return scene.Id;
+            return video.Id;
         });
 
         using var client = factory.CreateAuthenticatedClient();
-        var response = await client.GetAsync($"/api/engagement/scene/{sceneId}");
+        var response = await client.GetAsync($"/api/engagement/video/{videoId}");
         response.EnsureSuccessStatusCode();
 
         var payload = await response.Content.ReadApiJsonAsync<EntityEngagementDto>();
         Assert.NotNull(payload);
-        Assert.Equal(sceneId, payload.HostId);
+        Assert.Equal(videoId, payload.HostId);
     }
 }
 
@@ -40,20 +40,20 @@ public sealed class PlaybackControllerSmokeTests
         using var factory = new CoveWebApplicationFactory();
         await factory.ResetDatabaseAsync();
 
-        var sceneId = await factory.WithDbContextAsync(async db =>
+        var videoId = await factory.WithDbContextAsync(async db =>
         {
-            var scene = new Scene { Title = "Playback Scene" };
-            db.Scenes.Add(scene);
+            var video = new Video { Title = "Playback Video" };
+            db.Videos.Add(video);
             await db.SaveChangesAsync();
-            return scene.Id;
+            return video.Id;
         });
 
         using var client = factory.CreateAuthenticatedClient();
         var sessionId = Guid.NewGuid();
 
         var first = await client.PostAsJsonAsync("/api/playback/intervals", new PlaybackIntervalsRequestDto(
-            "scene",
-            sceneId,
+            "video",
+            videoId,
             sessionId,
             180.0,
             12.0,
@@ -62,8 +62,8 @@ public sealed class PlaybackControllerSmokeTests
         Assert.Equal(HttpStatusCode.NoContent, first.StatusCode);
 
         var second = await client.PostAsJsonAsync("/api/playback/intervals", new PlaybackIntervalsRequestDto(
-            "scene",
-            sceneId,
+            "video",
+            videoId,
             sessionId,
             180.0,
             27.0,
@@ -75,8 +75,8 @@ public sealed class PlaybackControllerSmokeTests
         {
             var session = await db.PlaybackSessions.IgnoreQueryFilters().SingleAsync();
             Assert.Equal(CoveWebApplicationFactory.TestUserId, session.UserId);
-            Assert.Equal(InteractionHostType.Scene, session.HostType);
-            Assert.Equal(sceneId, session.HostId);
+            Assert.Equal(InteractionHostType.Video, session.HostType);
+            Assert.Equal(videoId, session.HostId);
             Assert.Equal(sessionId, session.SessionId);
             Assert.Equal(27.0, session.TotalWatchedSec, precision: 5);
 
@@ -95,12 +95,12 @@ public sealed class PlaybackControllerSmokeTests
         using var factory = new CoveWebApplicationFactory();
         await factory.ResetDatabaseAsync();
 
-        var sceneId = await factory.WithDbContextAsync(async db =>
+        var videoId = await factory.WithDbContextAsync(async db =>
         {
-            var scene = new Scene { Title = "Rate Limit Scene" };
-            db.Scenes.Add(scene);
+            var video = new Video { Title = "Rate Limit Video" };
+            db.Videos.Add(video);
             await db.SaveChangesAsync();
-            return scene.Id;
+            return video.Id;
         });
 
         using var client = factory.CreateAuthenticatedClient();
@@ -108,8 +108,8 @@ public sealed class PlaybackControllerSmokeTests
         for (var attempt = 0; attempt < 240; attempt++)
         {
             var response = await client.PostAsJsonAsync("/api/engagement/interactions", new EngagementInteractionWriteDto(
-                "scene",
-                sceneId,
+                "video",
+                videoId,
                 "openDetail",
                 null));
 
@@ -117,8 +117,8 @@ public sealed class PlaybackControllerSmokeTests
         }
 
         var rateLimited = await client.PostAsJsonAsync("/api/playback/intervals", new PlaybackIntervalsRequestDto(
-            "scene",
-            sceneId,
+            "video",
+            videoId,
             Guid.NewGuid(),
             180.0,
             12.0,

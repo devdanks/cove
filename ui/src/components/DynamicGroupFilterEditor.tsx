@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, SlidersHorizontal } from "lucide-react";
 import type { FindFilter } from "../api/types";
-import { AUDIO_CRITERIA, FilterDialog, IMAGE_CRITERIA, SCENE_CRITERIA, TEXT_CRITERIA, type CriterionDefinition } from "./FilterDialog";
+import { AUDIO_CRITERIA, FilterDialog, IMAGE_CRITERIA, VIDEO_CRITERIA, TEXT_CRITERIA, type CriterionDefinition } from "./FilterDialog";
 import { Field } from "./EditModal";
 
 export const FILTER_DYNAMIC_SOURCE_KEY = "filter";
@@ -20,7 +20,7 @@ const DEFAULT_FIND_FILTER: FindFilter = {
   direction: "desc",
 };
 
-const SCENE_SORT_OPTIONS = [
+const VIDEO_SORT_OPTIONS = [
   { value: "updated_at", label: "Recently Updated" },
   { value: "created_at", label: "Recently Added" },
   { value: "date", label: "Date" },
@@ -31,7 +31,7 @@ const SCENE_SORT_OPTIONS = [
 ];
 
 const SORT_OPTIONS_BY_ENTITY: Record<string, { value: string; label: string }[]> = {
-  scene: SCENE_SORT_OPTIONS,
+  video: VIDEO_SORT_OPTIONS,
   image: [
     { value: "updated_at", label: "Recently Updated" },
     { value: "created_at", label: "Recently Added" },
@@ -85,7 +85,7 @@ const SORT_OPTIONS_BY_ENTITY: Record<string, { value: string; label: string }[]>
     { value: "tag_name", label: "Tag" },
     { value: "performer", label: "Performer" },
     { value: "ref", label: "Face/Reference" },
-    { value: "scene_title", label: "Scene Title" },
+    { value: "video_title", label: "Video Title" },
     { value: "host_type", label: "Host Type" },
     { value: "host_id", label: "Host ID" },
   ],
@@ -94,10 +94,10 @@ const SORT_OPTIONS_BY_ENTITY: Record<string, { value: string; label: string }[]>
 const SEGMENT_NUMBER_MODIFIERS = ["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"] as const;
 
 const SEGMENT_CRITERIA: CriterionDefinition[] = [
-  { id: "sceneTitle", label: "Scene Title", type: "string", filterKey: "sceneTitleCriterion" },
-  { id: "scenes", label: "Scenes", type: "multiId", entityType: "scenes", filterKey: "scenesCriterion" },
+  { id: "videoTitle", label: "Video Title", type: "string", filterKey: "videoTitleCriterion" },
+  { id: "videos", label: "Videos", type: "multiId", entityType: "videos", filterKey: "videosCriterion" },
   { id: "title", label: "Title", type: "string", filterKey: "titleCriterion" },
-  { id: "hostType", label: "Host Type", type: "enum", filterKey: "hostTypeCriterion", modifiers: ["EQUALS", "NOT_EQUALS"], options: [{ value: "scene", label: "Scene" }, { value: "image", label: "Image" }, { value: "audio", label: "Audio" }] },
+  { id: "hostType", label: "Host Type", type: "enum", filterKey: "hostTypeCriterion", modifiers: ["EQUALS", "NOT_EQUALS"], options: [{ value: "video", label: "Video" }, { value: "image", label: "Image" }, { value: "audio", label: "Audio" }] },
   { id: "sourceCategory", label: "Source Category", type: "enum", filterKey: "sourceCategoryCriterion", modifiers: ["EQUALS", "NOT_EQUALS"], options: [{ value: "extensions", label: "Extensions" }, { value: "user", label: "User-created" }] },
   { id: "kind", label: "Kind", type: "string", filterKey: "kindCriterion" },
   { id: "sourceKey", label: "Source", type: "string", filterKey: "sourceKeyCriterion" },
@@ -117,7 +117,7 @@ const SEGMENT_CRITERIA: CriterionDefinition[] = [
 ];
 
 const ENTITY_OPTIONS = [
-  { value: "scene", label: "Scenes" },
+  { value: "video", label: "Videos" },
   { value: "image", label: "Images" },
   { value: "audio", label: "Audios" },
   { value: "text", label: "Texts" },
@@ -147,24 +147,24 @@ interface DynamicGroupFilterEditorProps {
 }
 
 export function defaultDynamicGroupFilterQueryJson() {
-  return serializeDynamicGroupFilterQuery(["scene"], { scene: DEFAULT_FIND_FILTER }, {});
+  return serializeDynamicGroupFilterQuery(["video"], { video: DEFAULT_FIND_FILTER }, {});
 }
 
 export function parseDynamicGroupFilterQuery(queryJson?: string | null): ParsedDynamicGroupFilterQuery {
   if (!queryJson) {
-    return { entityTypes: ["scene"], findFilters: { scene: DEFAULT_FIND_FILTER }, objectFilters: {} };
+    return { entityTypes: ["video"], findFilters: { video: DEFAULT_FIND_FILTER }, objectFilters: {} };
   }
 
   try {
     const parsed = JSON.parse(queryJson) as DynamicGroupFilterQuery;
-    const entityTypes = normalizeEntityTypes(parsed.entityTypes?.length ? parsed.entityTypes : [parsed.entityType ?? "scene"]);
+    const entityTypes = normalizeEntityTypes(parsed.entityTypes?.length ? parsed.entityTypes : [parsed.entityType ?? "video"]);
     return {
       entityTypes,
       findFilters: normalizeFindFilters(parsed, entityTypes),
       objectFilters: normalizeObjectFilters(parsed, entityTypes),
     };
   } catch {
-    return { entityTypes: ["scene"], findFilters: { scene: DEFAULT_FIND_FILTER }, objectFilters: {} };
+    return { entityTypes: ["video"], findFilters: { video: DEFAULT_FIND_FILTER }, objectFilters: {} };
   }
 }
 
@@ -302,13 +302,13 @@ function normalizeEntityTypes(entityTypes: string[]): DynamicEntityType[] {
   const values = entityTypes
     .map(normalizeEntityType)
     .filter((entityType, index, all) => all.indexOf(entityType) === index);
-  return values.length > 0 ? values : ["scene"];
+  return values.length > 0 ? values : ["video"];
 }
 
 function normalizeEntityType(entityType?: string | null): DynamicEntityType {
-  const normalized = (entityType || "scene").trim().toLowerCase();
+  const normalized = (entityType || "video").trim().toLowerCase();
   const singular = normalized.endsWith("s") ? normalized.slice(0, -1) : normalized;
-  return ENTITY_OPTIONS.find((option) => option.value === singular)?.value ?? "scene";
+  return ENTITY_OPTIONS.find((option) => option.value === singular)?.value ?? "video";
 }
 
 function normalizeFindFilters(parsed: DynamicGroupFilterQuery, entityTypes: DynamicEntityType[]) {
@@ -346,12 +346,12 @@ function normalizeObjectFilters(parsed: DynamicGroupFilterQuery, entityTypes: Dy
 }
 
 function getSortOptions(entityType: DynamicEntityType) {
-  return SORT_OPTIONS_BY_ENTITY[entityType] ?? SORT_OPTIONS_BY_ENTITY.scene;
+  return SORT_OPTIONS_BY_ENTITY[entityType] ?? SORT_OPTIONS_BY_ENTITY.video;
 }
 
 function getCriteriaDefinitions(entityType: DynamicEntityType): CriterionDefinition[] | null {
   switch (entityType) {
-    case "scene": return SCENE_CRITERIA;
+    case "video": return VIDEO_CRITERIA;
     case "image": return IMAGE_CRITERIA;
     case "audio": return AUDIO_CRITERIA;
     case "text": return TEXT_CRITERIA;

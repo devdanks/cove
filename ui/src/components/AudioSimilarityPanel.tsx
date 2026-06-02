@@ -2,10 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { Film, Volume2 } from "lucide-react";
 import { useAudioSimilarityApi } from "../hooks/useAudioSimilarityApi";
-import type { AudioSimilarScene } from "../api/types";
+import type { AudioSimilarVideo } from "../api/types";
 import { formatDuration } from "./shared";
 import { EntityCardGrid } from "./EntityCardGrid";
-import { SceneCard } from "./EntityCards";
+import { VideoCard } from "./EntityCards";
 import { useManualContext } from "./ManualContext";
 
 const SIMILAR_PER_PAGE = 8;
@@ -15,24 +15,24 @@ interface PanelProps {
   onNavigate: (route: any) => void;
 }
 
-export function useSceneAudioSimilarityAvailable(sceneId?: number) {
+export function useVideoAudioSimilarityAvailable(videoId?: number) {
   const audioSimilarity = useAudioSimilarityApi();
   const preview = useQuery({
-    queryKey: ["audio-similarity", "scene", sceneId, "similar-scenes", "preview"],
-    queryFn: () => audioSimilarity!.similarScenesForScene(sceneId!, { perPage: AVAILABILITY_PER_PAGE }),
-    enabled: audioSimilarity != null && typeof sceneId === "number" && sceneId > 0,
+    queryKey: ["audio-similarity", "video", videoId, "similar-videos", "preview"],
+    queryFn: () => audioSimilarity!.similarVideosForVideo(videoId!, { perPage: AVAILABILITY_PER_PAGE }),
+    enabled: audioSimilarity != null && typeof videoId === "number" && videoId > 0,
     retry: false,
   });
 
   return audioSimilarity != null && (preview.data?.items.length ?? 0) > 0;
 }
 
-export function SceneAudioSimilarityPanel({ sceneId, onNavigate }: PanelProps & { sceneId: number }) {
+export function VideoAudioSimilarityPanel({ videoId, onNavigate }: PanelProps & { videoId: number }) {
   useManualContext(["panel:audio-similarity", "feature:audio-similarity"]);
   const audioSimilarity = useAudioSimilarityApi();
-  const similarScenes = useQuery({
-    queryKey: ["audio-similarity", "scene", sceneId, "similar-scenes"],
-    queryFn: () => audioSimilarity!.similarScenesForScene(sceneId, { perPage: SIMILAR_PER_PAGE }),
+  const similarVideos = useQuery({
+    queryKey: ["audio-similarity", "video", videoId, "similar-videos"],
+    queryFn: () => audioSimilarity!.similarVideosForVideo(videoId, { perPage: SIMILAR_PER_PAGE }),
     enabled: audioSimilarity != null,
     retry: false,
   });
@@ -41,14 +41,14 @@ export function SceneAudioSimilarityPanel({ sceneId, onNavigate }: PanelProps & 
     return <UnavailablePanel message="No audio embedding provider is available." />;
   }
 
-  if (similarScenes.isError) {
+  if (similarVideos.isError) {
     return <UnavailablePanel message="Audio similarity could not be loaded." />;
   }
 
   return (
     <div className="space-y-6">
       <SimilarityHeader />
-      <SimilarSceneSection title="Similar Scenes" items={similarScenes.data?.items ?? []} loading={similarScenes.isLoading} error={similarScenes.isError} onNavigate={onNavigate} />
+      <SimilarVideoSection title="Similar Videos" items={similarVideos.data?.items ?? []} loading={similarVideos.isLoading} error={similarVideos.isError} onNavigate={onNavigate} />
     </div>
   );
 }
@@ -62,7 +62,7 @@ function SimilarityHeader() {
   );
 }
 
-function SimilarSceneSection({ title, items, loading, error, onNavigate }: { title: string; items: AudioSimilarScene[]; loading: boolean; error: boolean; onNavigate: (route: any) => void }) {
+function SimilarVideoSection({ title, items, loading, error, onNavigate }: { title: string; items: AudioSimilarVideo[]; loading: boolean; error: boolean; onNavigate: (route: any) => void }) {
   if (error) {
     return null;
   }
@@ -77,7 +77,7 @@ function SimilarSceneSection({ title, items, loading, error, onNavigate }: { tit
       ) : (
         <EntityCardGrid minCardWidth="240px" gapClassName="gap-4" className="mt-3">
           {items.map((item) => (
-            <SimilarSceneCard key={item.scene.id} item={item} onNavigate={onNavigate} />
+            <SimilarVideoCard key={item.video.id} item={item} onNavigate={onNavigate} />
           ))}
         </EntityCardGrid>
       )}
@@ -94,14 +94,14 @@ function SectionTitle({ title, count }: { title: string; count: number }) {
   );
 }
 
-function SimilarSceneCard({ item, onNavigate }: { item: AudioSimilarScene; onNavigate: (route: any) => void }) {
-  const scene = item.scene;
+function SimilarVideoCard({ item, onNavigate }: { item: AudioSimilarVideo; onNavigate: (route: any) => void }) {
+  const video = item.video;
   const matchStart = item.sectionIndex > 0 ? item.startSec : undefined;
 
   return (
     <div className="relative h-full">
-      <SceneCard scene={scene} onClick={() => onNavigate(matchStart != null ? { page: "scene", id: scene.id, seekTo: matchStart } : { page: "scene", id: scene.id })} onNavigate={onNavigate} />
-      <SimilarityOverlay distance={item.distance} label={getSceneMeta(item)} />
+      <VideoCard video={video} onClick={() => onNavigate(matchStart != null ? { page: "video", id: video.id, seekTo: matchStart } : { page: "video", id: video.id })} onNavigate={onNavigate} />
+      <SimilarityOverlay distance={item.distance} label={getVideoMeta(item)} />
     </div>
   );
 }
@@ -133,7 +133,7 @@ function UnavailablePanel({ message }: { message: string }) {
   return <EmptyPanel icon={<Volume2 className="h-10 w-10" />} message={message} />;
 }
 
-function getSceneMeta(item: AudioSimilarScene) {
+function getVideoMeta(item: AudioSimilarVideo) {
   if (item.sectionIndex > 0 && item.startSec != null) {
     return item.endSec != null ? `${formatDuration(item.startSec)} - ${formatDuration(item.endSec)}` : formatDuration(item.startSec);
   }

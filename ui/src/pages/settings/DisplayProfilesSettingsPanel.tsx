@@ -40,7 +40,7 @@ export function DisplayProfilesSettingsPanel({ canWrite }: Props) {
           <RulesPreviewPane
             title="Rule Preview"
             description="Compare the saved profile against this draft before saving."
-            previewScene={state.previewScene}
+            previewVideo={state.previewVideo}
             cards={[
               {
                 title: "Current profile",
@@ -53,7 +53,7 @@ export function DisplayProfilesSettingsPanel({ canWrite }: Props) {
                 loading: state.draftPreviewQuery.isLoading || state.draftPreviewQuery.isFetching,
               },
             ]}
-            emptyMessage="Pick a preview scene in the panel to compare the current rules against this draft before saving."
+            emptyMessage="Pick a preview video in the panel to compare the current rules against this draft before saving."
           />
         )}
         onClose={state.closeRuleModal}
@@ -81,7 +81,7 @@ export function DisplayProfilesSettingsPanel({ canWrite }: Props) {
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-4">
         <div>
           <h3 className="text-lg font-semibold text-foreground">Display Profiles</h3>
-          <p className="mt-1 text-sm text-secondary">Edit rules against real source keys and kinds, preview them on a scene, and drag rows to change precedence.</p>
+          <p className="mt-1 text-sm text-secondary">Edit rules against real source keys and kinds, preview them on a video, and drag rows to change precedence.</p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -191,15 +191,15 @@ export function DisplayProfilesSettingsPanel({ canWrite }: Props) {
           ) : null}
 
           <RulesPreviewPane
-            title="Preview Scene"
-            description="Pick a scene to compare the saved profile against a draft rule before saving."
-            previewScene={state.previewScene}
-            previewSceneSearch={state.previewSceneSearch}
-            onPreviewSceneSearchChange={state.setPreviewSceneSearch}
-            previewSceneResults={state.previewSceneResults}
-            onSelectPreviewScene={(sceneId) => {
-              state.setPreviewSceneId(sceneId);
-              state.setPreviewSceneSearch("");
+            title="Preview Video"
+            description="Pick a video to compare the saved profile against a draft rule before saving."
+            previewVideo={state.previewVideo}
+            previewVideoSearch={state.previewVideoSearch}
+            onPreviewVideoSearchChange={state.setPreviewVideoSearch}
+            previewVideoResults={state.previewVideoResults}
+            onSelectPreviewVideo={(videoId) => {
+              state.setPreviewVideoId(videoId);
+              state.setPreviewVideoSearch("");
             }}
             cards={[
               {
@@ -208,7 +208,7 @@ export function DisplayProfilesSettingsPanel({ canWrite }: Props) {
                 loading: state.currentPreviewQuery.isLoading || state.currentPreviewQuery.isFetching,
               },
             ]}
-            emptyMessage="Select a scene to enable live preview."
+            emptyMessage="Select a video to enable live preview."
           />
 
           <div className="rounded-xl border border-border bg-card p-4">
@@ -325,3 +325,4 @@ function openTagDetail(tagId: number) {
   const route = { page: "tag", id: tagId } as const;
   navigateToUrl(buildRouteUrl(route), { state: route });
 }
+

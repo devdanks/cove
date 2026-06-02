@@ -1,27 +1,27 @@
 import { useMemo, useState, useCallback, useEffect, useRef, lazy, Suspense } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { entityEngagement, entityImages, scenes } from "../api/client";
-import type { BoolCriterion, EntityEngagement, FindFilter, Group, Scene, SceneCreate, SceneFilterCriteria, SceneListEntry } from "../api/types";
+import { entityEngagement, entityImages, videos } from "../api/client";
+import type { BoolCriterion, EntityEngagement, FindFilter, Group, Video, VideoCreate, VideoFilterCriteria, VideoListEntry } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { EntityCardGrid } from "../components/EntityCardGrid";
 import { useListUrlState } from "../hooks/useListUrlState";
 import { usePaginatedInfiniteQuery } from "../hooks/usePaginatedInfiniteQuery";
 import { useVisualSimilarityApi } from "../hooks/useVisualSimilarityApi";
-import { SceneTagger } from "../components/SceneTagger";
+import { VideoTagger } from "../components/VideoTagger";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
 import { CustomFieldsEditor, formatDuration, formatFileSize, getResolutionLabel, RatingBadge } from "../components/shared";
-import { SCENE_CRITERIA, type CriterionDefinition } from "../components/FilterDialog";
-import { BulkEditDialog, SCENE_BULK_FIELDS } from "../components/BulkEditDialog";
+import { VIDEO_CRITERIA, type CriterionDefinition } from "../components/FilterDialog";
+import { BulkEditDialog, VIDEO_BULK_FIELDS } from "../components/BulkEditDialog";
 import { CreateModalActions, EditModal, Field, TextArea, TextInput } from "../components/EditModal";
 import { Film, Eye, Trash2, Loader2, Edit, Merge, Search, Play, Pause, Download, Layers, Maximize2, Minimize2, Volume2, VolumeX, ThumbsUp, Heart, Shuffle } from "lucide-react";
-import { useSceneQueue } from "../state/SceneQueueContext";
-import { SceneCard } from "../components/EntityCards";
+import { useVideoQueue } from "../state/VideoQueueContext";
+import { VideoCard } from "../components/EntityCards";
 import { CardSelectionToggle, RouteCardLinkOverlay } from "../components/RouteCardLinkOverlay";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canReadEntity, canWriteEntity, hasAnyPermission } from "../auth/visibility";
 import { StringListEditor } from "../components/StringListEditor";
-import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
+import { VIDEO_SORT_OPTIONS } from "../components/videoSortOptions";
 import { useWallColumns } from "../hooks/useWallColumns";
 import { useAppConfig } from "../state/AppConfigContext";
 import { StudioSelector } from "../components/StudioSelector";
@@ -51,8 +51,8 @@ import { fetchAllMatchingIds } from "../utils/selectAllMatching";
 
 import { getDefaultFilter } from "../components/SavedFilterMenu";
 
-const SceneDownloadDialog = lazy(() => import("../components/SceneDownloadDialog").then((module) => ({ default: module.SceneDownloadDialog })));
-const SceneBatchScrapeDialog = lazy(() => import("../components/SceneBatchScrapeDialog").then((module) => ({ default: module.SceneBatchScrapeDialog })));
+const VideoDownloadDialog = lazy(() => import("../components/VideoDownloadDialog").then((module) => ({ default: module.VideoDownloadDialog })));
+const VideoBatchScrapeDialog = lazy(() => import("../components/VideoBatchScrapeDialog").then((module) => ({ default: module.VideoBatchScrapeDialog })));
 const BatchDownloadOptionsDialog = lazy(() => import("../components/BatchDownloadOptionsDialog").then((module) => ({ default: module.BatchDownloadOptionsDialog })));
 const MergeDialog = lazy(() => import("../components/MergeDialog").then((module) => ({ default: module.MergeDialog })));
 const IdentifyDialog = lazy(() => import("../components/IdentifyDialog").then((module) => ({ default: module.IdentifyDialog })));
@@ -68,8 +68,8 @@ const INCLUDE_COMPILATIONS_FILTER_KEY = "includeCompilationGroups";
 const IS_VR_FILTER_KEY = "isVrCriterion";
 const VERTICAL_PORTRAIT_FILTER_KEY = "orientationCriterion";
 const MOBILE_VIEWER_MEDIA_QUERY = "(max-width: 767px), (hover: none) and (pointer: coarse)";
-const SCENE_FILTER_CRITERIA: CriterionDefinition[] = [
-  ...SCENE_CRITERIA,
+const VIDEO_FILTER_CRITERIA: CriterionDefinition[] = [
+  ...VIDEO_CRITERIA,
   { id: "includeCompilations", label: "Include Compilations", type: "bool", filterKey: INCLUDE_COMPILATIONS_FILTER_KEY },
 ];
 
@@ -96,9 +96,9 @@ interface Props {
   onNavigate: (r: any) => void;
 }
 
-export function ScenesPage({ onNavigate }: Props) {
+export function VideosPage({ onNavigate }: Props) {
   const defaultState = useMemo(() => {
-    const savedFilter = getDefaultFilter("scenes");
+    const savedFilter = getDefaultFilter("videos");
     return {
       filter: savedFilter?.findFilter ?? { page: 1, perPage: 40, sort: "date", direction: "desc" },
       objectFilter: savedFilter?.objectFilter ?? {},
@@ -108,7 +108,7 @@ export function ScenesPage({ onNavigate }: Props) {
   const visualSimilarity = useVisualSimilarityApi();
   const visualSimilarityAvailable = visualSimilarity != null;
   const { filter, setFilter, objectFilter, setObjectFilter, displayMode, setDisplayMode, searchMode, setSearchMode } = useListUrlState({
-    resetKey: "scenes",
+    resetKey: "videos",
     defaultFilter: defaultState.filter,
     defaultObjectFilter: defaultState.objectFilter,
     defaultDisplayMode: defaultState.displayMode,
@@ -133,23 +133,23 @@ export function ScenesPage({ onNavigate }: Props) {
   const [verticalViewerTop, setVerticalViewerTop] = useState(0);
   const [verticalViewerHeight, setVerticalViewerHeight] = useState<number | null>(null);
   const [verticalSoundEnabled, setVerticalSoundEnabled] = useState(false);
-  const [activeVerticalSceneId, setActiveVerticalSceneId] = useState<number | null>(null);
+  const [activeVerticalVideoId, setActiveVerticalVideoId] = useState<number | null>(null);
   const [verticalAutoScrollEnabled, setVerticalAutoScrollEnabled] = useState(false);
   const [verticalAutoScrollSeconds, setVerticalAutoScrollSeconds] = useState(8);
   const [verticalAutoScrollAwake, setVerticalAutoScrollAwake] = useState(true);
-  const [feedAudioSceneId, setFeedAudioSceneId] = useState<number | null>(null);
+  const [feedAudioVideoId, setFeedAudioVideoId] = useState<number | null>(null);
   const lastPagedFilterRef = useRef<Pick<FindFilter, "page" | "perPage">>({ page: defaultState.filter.page ?? 1, perPage: defaultState.filter.perPage });
-  const [downloadTarget, setDownloadTarget] = useState<Scene | "new" | null>(null);
+  const [downloadTarget, setDownloadTarget] = useState<Video | "new" | null>(null);
   const queryClient = useQueryClient();
-  const { setQueue } = useSceneQueue();
+  const { setQueue } = useVideoQueue();
   const { hasPermission, user } = useAuth();
   const { config } = useAppConfig();
-  const canWriteScene = canWriteEntity("scene", hasPermission);
-  const canDeleteScene = canDeleteEntity("scene", hasPermission);
-  const canEngageScene = canReadEntity("scene", hasPermission) && (user?.kind === "user" || user?.kind === "system");
-  const canScrapeScene = hasAnyPermission(hasPermission, ["scenes.scrape", "scenes.write"]);
-  const canIdentifyScene = hasPermission("library.autotag") && canWriteScene;
-  const canDownloadScene = hasPermission("jobs.run") && canWriteScene;
+  const canWriteVideo = canWriteEntity("video", hasPermission);
+  const canDeleteVideo = canDeleteEntity("video", hasPermission);
+  const canEngageVideo = canReadEntity("video", hasPermission) && (user?.kind === "user" || user?.kind === "system");
+  const canScrapeVideo = hasAnyPermission(hasPermission, ["videos.scrape", "videos.write"]);
+  const canIdentifyVideo = hasPermission("library.autotag") && canWriteVideo;
+  const canDownloadVideo = hasPermission("jobs.run") && canWriteVideo;
   const feedVideoSource = config?.ui.feedVideoSource ?? "preview";
   const feedVideoSound = config?.ui.feedVideoSound ?? false;
   const defaultFeedVideoSound = feedVideoSound && !isMobileViewer;
@@ -183,7 +183,7 @@ export function ScenesPage({ onNavigate }: Props) {
       setVerticalFullscreen(false);
       setVerticalFullscreenDismissed(false);
       setVerticalAutoScrollEnabled(false);
-      setActiveVerticalSceneId(null);
+      setActiveVerticalVideoId(null);
       return;
     }
 
@@ -253,7 +253,7 @@ export function ScenesPage({ onNavigate }: Props) {
 
   useEffect(() => {
     if (displayMode !== "feed") {
-      setFeedAudioSceneId(null);
+      setFeedAudioVideoId(null);
     }
   }, [displayMode]);
 
@@ -285,8 +285,8 @@ export function ScenesPage({ onNavigate }: Props) {
     Object.entries(backendObjectFilter).filter(([key, value]) => key !== IS_VR_FILTER_KEY || getBoolCriterionValue(value) !== false),
   ), [backendObjectFilter]);
   const hasCompilationBlockingObjectFilter = Object.keys(compilationBlockingObjectFilter).length > 0;
-  const sceneVrFilterValue = getBoolCriterionValue(backendObjectFilter[IS_VR_FILTER_KEY]);
-  const compilationQueryExtra = useMemo(() => sceneVrFilterValue === false ? { isVr: false } : undefined, [sceneVrFilterValue]);
+  const videoVrFilterValue = getBoolCriterionValue(backendObjectFilter[IS_VR_FILTER_KEY]);
+  const compilationQueryExtra = useMemo(() => videoVrFilterValue === false ? { isVr: false } : undefined, [videoVrFilterValue]);
   const visualSearchActive = visualSimilarityAvailable && searchMode === "visual" && Boolean(filter.q?.trim());
   const infinitePageSize = filter.perPage === 0 || infiniteOnlyDisplayMode;
   const defaultInfiniteChunkSize = defaultState.filter.perPage && defaultState.filter.perPage > 0 ? defaultState.filter.perPage : 40;
@@ -309,7 +309,7 @@ export function ScenesPage({ onNavigate }: Props) {
   }, [filter, infiniteOnlyDisplayMode, setFilter]);
   const searchModeOptions = useMemo(() => visualSimilarityAvailable ? SEARCH_MODE_OPTIONS : SEARCH_MODE_OPTIONS.filter((mode) => mode.value === "text"), [visualSimilarityAvailable]);
   const sortOptions = useMemo(
-    () => visualSimilarityAvailable && searchMode === "visual" ? [VISUAL_MATCH_SORT_OPTION, ...SCENE_SORT_OPTIONS] : SCENE_SORT_OPTIONS,
+    () => visualSimilarityAvailable && searchMode === "visual" ? [VISUAL_MATCH_SORT_OPTION, ...VIDEO_SORT_OPTIONS] : VIDEO_SORT_OPTIONS,
     [visualSimilarityAvailable, searchMode],
   );
 
@@ -375,90 +375,90 @@ export function ScenesPage({ onNavigate }: Props) {
   const canShowCompilationGroups = !infinitePageSize && includeCompilationGroups && searchMode === "text" && !hasCompilationBlockingObjectFilter && (displayMode === "grid" || displayMode === "list");
 
   const { data, isLoading } = useQuery({
-    queryKey: ["scenes", filter, backendObjectFilter, searchMode],
+    queryKey: ["videos", filter, backendObjectFilter, searchMode],
     queryFn: () => {
       if (visualSearchActive) {
-        return visualSimilarity.searchScenes({
+        return visualSimilarity.searchVideos({
           findFilter: filter,
-          objectFilter: hasObjectFilter ? backendObjectFilter as SceneFilterCriteria : undefined,
+          objectFilter: hasObjectFilter ? backendObjectFilter as VideoFilterCriteria : undefined,
         });
       }
 
       return hasObjectFilter
-        ? scenes.findFiltered({ findFilter: filter, objectFilter: backendObjectFilter as SceneFilterCriteria })
-        : scenes.find(filter);
+        ? videos.findFiltered({ findFilter: filter, objectFilter: backendObjectFilter as VideoFilterCriteria })
+        : videos.find(filter);
     },
     enabled: !infinitePageSize && !canShowCompilationGroups,
   });
 
   const { data: unifiedData, isLoading: unifiedLoading } = useQuery({
-    queryKey: ["scenes", "with-compilations", filter, compilationQueryExtra],
-    queryFn: () => scenes.findWithCompilations(filter, compilationQueryExtra),
+    queryKey: ["videos", "with-compilations", filter, compilationQueryExtra],
+    queryFn: () => videos.findWithCompilations(filter, compilationQueryExtra),
     enabled: !infinitePageSize && canShowCompilationGroups,
   });
 
-  const infiniteScenesQuery = usePaginatedInfiniteQuery<Scene>({
-    queryKey: ["scenes", "infinite", infiniteFilterKey, backendObjectFilter, searchMode],
+  const infiniteVideosQuery = usePaginatedInfiniteQuery<Video>({
+    queryKey: ["videos", "infinite", infiniteFilterKey, backendObjectFilter, searchMode],
     enabled: infinitePageSize,
     chunkSize: infiniteChunkSize,
     queryFn: (page, perPage) => {
       const nextFilter = { ...filter, page, perPage };
       if (visualSearchActive) {
-        return visualSimilarity.searchScenes({
+        return visualSimilarity.searchVideos({
           findFilter: nextFilter,
-          objectFilter: hasObjectFilter ? backendObjectFilter as SceneFilterCriteria : undefined,
+          objectFilter: hasObjectFilter ? backendObjectFilter as VideoFilterCriteria : undefined,
         });
       }
 
       return hasObjectFilter
-        ? scenes.findFiltered({ findFilter: nextFilter, objectFilter: backendObjectFilter as SceneFilterCriteria })
-        : scenes.find(nextFilter);
+        ? videos.findFiltered({ findFilter: nextFilter, objectFilter: backendObjectFilter as VideoFilterCriteria })
+        : videos.find(nextFilter);
     },
   });
 
-  const defaultListEntries: SceneListEntry[] = canShowCompilationGroups
+  const defaultListEntries: VideoListEntry[] = canShowCompilationGroups
     ? (unifiedData?.items ?? [])
-    : (data?.items ?? []).map((scene) => ({ kind: "scene" as const, id: scene.id, scene }));
-  const defaultItems = defaultListEntries.flatMap((entry) => entry.kind === "scene" && entry.scene ? [entry.scene] : []);
-  const items = infinitePageSize ? infiniteScenesQuery.items : defaultItems;
+    : (data?.items ?? []).map((video) => ({ kind: "video" as const, id: video.id, video }));
+  const defaultItems = defaultListEntries.flatMap((entry) => entry.kind === "video" && entry.video ? [entry.video] : []);
+  const items = infinitePageSize ? infiniteVideosQuery.items : defaultItems;
   const listEntries = infinitePageSize
-    ? items.map((scene) => ({ kind: "scene" as const, id: scene.id, scene }))
+    ? items.map((video) => ({ kind: "video" as const, id: video.id, video }))
     : defaultListEntries;
   const totalCount = infinitePageSize
-    ? infiniteScenesQuery.totalCount
+    ? infiniteVideosQuery.totalCount
     : (canShowCompilationGroups ? unifiedData?.totalCount : data?.totalCount);
   const loading = infinitePageSize
-    ? infiniteScenesQuery.isPending
+    ? infiniteVideosQuery.isPending
     : (canShowCompilationGroups ? unifiedLoading : isLoading);
-  const loadMoreScenes = useCallback(() => {
-    if (infiniteScenesQuery.hasNextPage && !infiniteScenesQuery.isFetchingNextPage) {
-      void infiniteScenesQuery.fetchNextPage();
+  const loadMoreVideos = useCallback(() => {
+    if (infiniteVideosQuery.hasNextPage && !infiniteVideosQuery.isFetchingNextPage) {
+      void infiniteVideosQuery.fetchNextPage();
     }
-  }, [infiniteScenesQuery.fetchNextPage, infiniteScenesQuery.hasNextPage, infiniteScenesQuery.isFetchingNextPage]);
+  }, [infiniteVideosQuery.fetchNextPage, infiniteVideosQuery.hasNextPage, infiniteVideosQuery.isFetchingNextPage]);
 
   useEffect(() => {
     if (displayMode !== "feed") {
-      setFeedAudioSceneId(null);
+      setFeedAudioVideoId(null);
       return;
     }
-    if (!defaultFeedVideoSound) setFeedAudioSceneId(null);
+    if (!defaultFeedVideoSound) setFeedAudioVideoId(null);
   }, [defaultFeedVideoSound, displayMode]);
 
   useEffect(() => {
     if (displayMode !== "vertical") {
-      setActiveVerticalSceneId(null);
+      setActiveVerticalVideoId(null);
     }
   }, [displayMode]);
 
   useEffect(() => {
-    if (displayMode !== "vertical" || !verticalAutoScrollEnabled || activeVerticalSceneId == null) {
+    if (displayMode !== "vertical" || !verticalAutoScrollEnabled || activeVerticalVideoId == null) {
       return;
     }
 
     const timeoutId = window.setTimeout(() => {
       const root = verticalViewerRef.current;
       if (!root) return;
-      const currentIndex = items.findIndex((scene) => scene.id === activeVerticalSceneId);
+      const currentIndex = items.findIndex((video) => video.id === activeVerticalVideoId);
       const nextIndex = currentIndex >= 0 ? currentIndex + 1 : 0;
       if (nextIndex >= items.length) {
         setVerticalAutoScrollEnabled(false);
@@ -468,19 +468,19 @@ export function ScenesPage({ onNavigate }: Props) {
     }, verticalAutoScrollSeconds * 1000);
 
     return () => window.clearTimeout(timeoutId);
-  }, [activeVerticalSceneId, displayMode, items, verticalAutoScrollEnabled, verticalAutoScrollSeconds, verticalItemHeight]);
-  const { engagementById } = useEntityEngagementBatch("scene", items.map((item) => item.id));
-  const wallColumns = useWallColumns(items, wallColumnCount, (scene) => {
-    const file = scene.files[0];
+  }, [activeVerticalVideoId, displayMode, items, verticalAutoScrollEnabled, verticalAutoScrollSeconds, verticalItemHeight]);
+  const { engagementById } = useEntityEngagementBatch("video", items.map((item) => item.id));
+  const wallColumns = useWallColumns(items, wallColumnCount, (video) => {
+    const file = video.files[0];
     return file?.width && file.height ? file.height / file.width : 9 / 16;
   });
   const selectionResetKey = useMemo(() => JSON.stringify({ filter: infiniteFilterKey, objectFilter: backendObjectFilter, searchMode }), [backendObjectFilter, infiniteFilterKey, searchMode]);
   const { selectedIds, toggle, selectAll, selectIds, selectNone, invertSelection } = useMultiSelect(items, { preserveOnAppend: infinitePageSize, resetKey: selectionResetKey });
   const selecting = selectedIds.size > 0;
-  const selectedScene = selectedIds.size === 1 ? items.find((scene) => selectedIds.has(scene.id)) : undefined;
+  const selectedVideo = selectedIds.size === 1 ? items.find((video) => selectedIds.has(video.id)) : undefined;
   const selectedDownloadTargets = useMemo(() => getUndownloadedSelectionItems(items, selectedIds), [items, selectedIds]);
-  const canDownloadSelectedScene = canDownloadScene && selectedDownloadTargets.length > 0;
-  const batchDownloadStorageKey = getBatchDownloadOptionsStorageKey("page-scenes");
+  const canDownloadSelectedVideo = canDownloadVideo && selectedDownloadTargets.length > 0;
+  const batchDownloadStorageKey = getBatchDownloadOptionsStorageKey("page-videos");
   const [batchDownloadOptions, setBatchDownloadOptions] = useState<BatchDownloadOptions>(() => loadStoredBatchDownloadOptions(batchDownloadStorageKey));
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -488,78 +488,78 @@ export function ScenesPage({ onNavigate }: Props) {
     setBatchDownloadOptions(loadStoredBatchDownloadOptions(batchDownloadStorageKey));
   }, [batchDownloadStorageKey]);
 
-  const navigateToScene = useCallback((sceneId: number) => {
+  const navigateToVideo = useCallback((videoId: number) => {
     const ids = items.map((s) => s.id);
     if (ids.length > 0) {
-      setQueue(ids, sceneId, items.map((scene) => ({
-        id: scene.id,
-        title: scene.title || scene.files[0]?.basename || `Scene ${scene.id}`,
-        subtitle: scene.studioName || scene.date || undefined,
-        imagePath: scenes.screenshotUrl(scene.id, scene.updatedAt),
+      setQueue(ids, videoId, items.map((video) => ({
+        id: video.id,
+        title: video.title || video.files[0]?.basename || `Video ${video.id}`,
+        subtitle: video.studioName || video.date || undefined,
+        imagePath: videos.screenshotUrl(video.id, video.updatedAt),
       })));
     }
-    onNavigate({ page: "scene", id: sceneId });
+    onNavigate({ page: "video", id: videoId });
   }, [items, setQueue, onNavigate]);
 
   const handlePlaySelected = useCallback(() => {
-    const selectedScenes = items.filter((scene) => selectedIds.has(scene.id));
-    const ids = selectedScenes.map((scene) => scene.id);
+    const selectedVideos = items.filter((video) => selectedIds.has(video.id));
+    const ids = selectedVideos.map((video) => video.id);
     if (ids.length === 0) {
       return;
     }
 
-    setQueue(ids, ids[0], selectedScenes.map((scene) => ({
-      id: scene.id,
-      title: scene.title || scene.files[0]?.basename || `Scene ${scene.id}`,
-      subtitle: scene.studioName || scene.date || undefined,
-      imagePath: scenes.screenshotUrl(scene.id, scene.updatedAt),
+    setQueue(ids, ids[0], selectedVideos.map((video) => ({
+      id: video.id,
+      title: video.title || video.files[0]?.basename || `Video ${video.id}`,
+      subtitle: video.studioName || video.date || undefined,
+      imagePath: videos.screenshotUrl(video.id, video.updatedAt),
     })));
     selectNone();
-    onNavigate({ page: "scene", id: ids[0] });
+    onNavigate({ page: "video", id: ids[0] });
   }, [items, onNavigate, selectNone, selectedIds, setQueue]);
 
   const playRandomMutation = useMutation({
     mutationFn: async () => {
       const randomFilter = reshuffleRandomSort({ ...filter, page: 1, perPage: 1, sort: "random", direction: "asc" });
       const result = visualSearchActive && visualSimilarity
-        ? await visualSimilarity.searchScenes({
+        ? await visualSimilarity.searchVideos({
           findFilter: randomFilter,
-          objectFilter: hasObjectFilter ? backendObjectFilter as SceneFilterCriteria : undefined,
+          objectFilter: hasObjectFilter ? backendObjectFilter as VideoFilterCriteria : undefined,
         })
         : hasObjectFilter
-          ? await scenes.findFiltered({ findFilter: randomFilter, objectFilter: backendObjectFilter as SceneFilterCriteria })
-          : await scenes.find(randomFilter);
+          ? await videos.findFiltered({ findFilter: randomFilter, objectFilter: backendObjectFilter as VideoFilterCriteria })
+          : await videos.find(randomFilter);
       return result.items[0] ?? null;
     },
-    onSuccess: (scene) => {
-      if (!scene) {
+    onSuccess: (video) => {
+      if (!video) {
         return;
       }
 
-      setQueue([scene.id], scene.id, [{
-        id: scene.id,
-        title: scene.title || scene.files[0]?.basename || `Scene ${scene.id}`,
-        subtitle: scene.studioName || scene.date || undefined,
-        imagePath: scenes.screenshotUrl(scene.id, scene.updatedAt),
+      setQueue([video.id], video.id, [{
+        id: video.id,
+        title: video.title || video.files[0]?.basename || `Video ${video.id}`,
+        subtitle: video.studioName || video.date || undefined,
+        imagePath: videos.screenshotUrl(video.id, video.updatedAt),
       }]);
-      onNavigate({ page: "scene", id: scene.id });
+      onNavigate({ page: "video", id: video.id });
     },
   });
 
   const handleSelectAllMatching = useCallback(async () => {
     setSelectAllMatchingPending(true);
     try {
-      const ids = await fetchAllMatchingIds<Scene>(filter, (nextFilter) => {
+      const ids = await fetchAllMatchingIds<Video>(filter, (nextFilter) => {
         if (visualSearchActive && visualSimilarity) {
-          return visualSimilarity.searchScenes({
+          return visualSimilarity.searchVideos({
             findFilter: nextFilter,
-            objectFilter: hasObjectFilter ? backendObjectFilter as SceneFilterCriteria : undefined,
+            objectFilter: hasObjectFilter ? backendObjectFilter as VideoFilterCriteria : undefined,
           });
         }
 
         return hasObjectFilter
-          ? scenes.findFiltered({ findFilter: nextFilter, objectFilter: backendObjectFilter as SceneFilterCriteria })
-          : scenes.find(nextFilter);
+          ? videos.findFiltered({ findFilter: nextFilter, objectFilter: backendObjectFilter as VideoFilterCriteria })
+          : videos.find(nextFilter);
       });
       selectIds(ids);
     } finally {
@@ -574,36 +574,36 @@ export function ScenesPage({ onNavigate }: Props) {
 
   // Bulk delete
   const bulkDeleteMut = useMutation({
-    mutationFn: (options?: { deleteFile?: boolean; deleteGenerated?: boolean }) => scenes.bulkDelete([...selectedIds], options),
+    mutationFn: (options?: { deleteFile?: boolean; deleteGenerated?: boolean }) => videos.bulkDelete([...selectedIds], options),
     onSuccess: () => {
       setShowDeleteConfirm(false);
       selectNone();
-      queryClient.invalidateQueries({ queryKey: ["scenes"] });
+      queryClient.invalidateQueries({ queryKey: ["videos"] });
     },
   });
 
   // Bulk edit
   const bulkEditMut = useMutation({
     mutationFn: (values: Record<string, unknown>) =>
-      scenes.bulkUpdate({
+      videos.bulkUpdate({
         ids: [...selectedIds],
         ...values,
       } as any),
     onSuccess: () => {
       setShowBulkEdit(false);
       selectNone();
-      queryClient.invalidateQueries({ queryKey: ["scenes"] });
+      queryClient.invalidateQueries({ queryKey: ["videos"] });
     },
   });
 
   const batchDownloadMut = useMutation({
-    mutationFn: async (options: BatchDownloadOptions) => queueBatchDownloads("Scene", selectedDownloadTargets, options),
+    mutationFn: async (options: BatchDownloadOptions) => queueBatchDownloads("Video", selectedDownloadTargets, options),
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
       queryClient.invalidateQueries({ queryKey: ["jobs-active"] });
       queryClient.invalidateQueries({ queryKey: ["jobs-history"] });
-      queryClient.invalidateQueries({ queryKey: ["scenes"] });
-      window.alert(formatBatchDownloadSummary("scene", result));
+      queryClient.invalidateQueries({ queryKey: ["videos"] });
+      window.alert(formatBatchDownloadSummary("video", result));
       selectNone();
     },
     onError: (error: Error) => {
@@ -616,31 +616,31 @@ export function ScenesPage({ onNavigate }: Props) {
     ? (isMobileViewer ? "64%" : "50%")
     : verticalOverlayTop + (isMobileViewer ? 96 : 44);
   const verticalViewerStyle = verticalFullscreen ? undefined : { height: verticalViewerHeight != null ? `${verticalViewerHeight}px` : "calc(100dvh - 10rem)" };
-  const verticalActiveIndex = useMemo(() => items.findIndex((scene) => scene.id === activeVerticalSceneId), [items, activeVerticalSceneId]);
+  const verticalActiveIndex = useMemo(() => items.findIndex((video) => video.id === activeVerticalVideoId), [items, activeVerticalVideoId]);
 
   return (
     <>
-    <SceneCreateModal open={showCreate} onClose={() => setShowCreate(false)} onCreated={(id) => onNavigate({ page: "scene", id })} />
+    <VideoCreateModal open={showCreate} onClose={() => setShowCreate(false)} onCreated={(id) => onNavigate({ page: "video", id })} />
     <Suspense fallback={null}>
       {downloadTarget !== null ? (
-        <SceneDownloadDialog
+        <VideoDownloadDialog
           open={downloadTarget !== null}
-          scene={downloadTarget !== "new" ? downloadTarget : undefined}
+          video={downloadTarget !== "new" ? downloadTarget : undefined}
           onClose={() => setDownloadTarget(null)}
           onNavigate={onNavigate}
         />
       ) : null}
       {showBatchScrape ? (
-        <SceneBatchScrapeDialog
+        <VideoBatchScrapeDialog
           open={showBatchScrape}
           onClose={() => setShowBatchScrape(false)}
-          scenes={items.filter((scene) => selectedIds.has(scene.id))}
+          videos={items.filter((video) => selectedIds.has(video.id))}
         />
       ) : null}
       {showBatchDownloadOptions ? (
         <BatchDownloadOptionsDialog
           open={showBatchDownloadOptions}
-          entity="Scene"
+          entity="Video"
           itemCount={selectedDownloadTargets.length}
           initialOptions={batchDownloadOptions}
           isPending={batchDownloadMut.isPending}
@@ -655,16 +655,16 @@ export function ScenesPage({ onNavigate }: Props) {
       ) : null}
     </Suspense>
     <ListPage
-      title="Scenes"
-      pageKey="scenes"
-      filterMode="scenes"
+      title="Videos"
+      pageKey="videos"
+      filterMode="videos"
       filter={filter}
       onFilterChange={handleFilterChange}
       totalCount={totalCount ?? 0}
       isLoading={loading}
       searchMode={searchMode}
       searchModes={searchModeOptions}
-      searchPlaceholder={visualSimilarityAvailable && searchMode === "visual" ? "Search visuals..." : "Search scenes, tags, performers..."}
+      searchPlaceholder={visualSimilarityAvailable && searchMode === "visual" ? "Search visuals..." : "Search videos, tags, performers..."}
       onSearchModeChange={handleSearchModeChange}
       sortOptions={sortOptions}
       displayMode={displayMode}
@@ -672,17 +672,17 @@ export function ScenesPage({ onNavigate }: Props) {
       availableDisplayModes={["grid", "list", "wall", "tagger", "feed", "vertical"]}
       allowInfinitePageSize
       infinitePageSizeOnly={infiniteOnlyDisplayMode}
-      criteriaDefinitions={SCENE_FILTER_CRITERIA}
+      criteriaDefinitions={VIDEO_FILTER_CRITERIA}
       objectFilter={normalizedObjectFilter}
       onObjectFilterChange={setObjectFilter}
       wallColumnCount={wallColumnCount}
       onWallColumnCountChange={setWallColumnCount}
       infiniteScroll={infinitePageSize ? {
-        hasNextPage: Boolean(infiniteScenesQuery.hasNextPage),
-        isFetchingNextPage: infiniteScenesQuery.isFetchingNextPage,
-        onLoadMore: loadMoreScenes,
-        loadedCount: infiniteScenesQuery.loadedThroughCount,
-        totalCount: infiniteScenesQuery.totalCount,
+        hasNextPage: Boolean(infiniteVideosQuery.hasNextPage),
+        isFetchingNextPage: infiniteVideosQuery.isFetchingNextPage,
+        onLoadMore: loadMoreVideos,
+        loadedCount: infiniteVideosQuery.loadedThroughCount,
+        totalCount: infiniteVideosQuery.totalCount,
       } : undefined}
       autoScrollContainerRef={displayMode === "vertical" ? verticalViewerRef : undefined}
       showAutoScrollControls={displayMode !== "vertical"}
@@ -703,21 +703,21 @@ export function ScenesPage({ onNavigate }: Props) {
           {playRandomMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Shuffle className="h-3.5 w-3.5" />}
         </button>
       )}
-      onNew={canWriteScene ? () => setShowCreate(true) : undefined}
+      onNew={canWriteVideo ? () => setShowCreate(true) : undefined}
       selectedIds={selectedIds}
       onSelectNone={selectNone}
       onInvertSelection={invertSelection}
       selectionActions={
         <>
-          {canDownloadSelectedScene && (
+          {canDownloadSelectedVideo && (
             <button
               onClick={() => {
-                if (selectedDownloadTargets.length > 1 || !selectedScene) {
+                if (selectedDownloadTargets.length > 1 || !selectedVideo) {
                   setShowBatchDownloadOptions(true);
                   return;
                 }
 
-                setDownloadTarget(selectedScene);
+                setDownloadTarget(selectedVideo);
               }}
               disabled={batchDownloadMut.isPending}
               className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20 disabled:opacity-60"
@@ -726,7 +726,7 @@ export function ScenesPage({ onNavigate }: Props) {
               Download
             </button>
           )}
-          {canWriteScene && (
+          {canWriteVideo && (
             <button
               onClick={() => setShowBulkEdit(true)}
               className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"
@@ -735,7 +735,7 @@ export function ScenesPage({ onNavigate }: Props) {
               Edit
             </button>
           )}
-          {canIdentifyScene && (
+          {canIdentifyVideo && (
             <button
               onClick={() => setShowIdentify(true)}
               className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-accent hover:text-accent-hover hover:bg-accent/10"
@@ -744,7 +744,7 @@ export function ScenesPage({ onNavigate }: Props) {
               Identify
             </button>
           )}
-          {canScrapeScene && (
+          {canScrapeVideo && (
             <button
               onClick={() => setShowBatchScrape(true)}
               className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-cyan-400 hover:text-cyan-300 hover:bg-cyan-900/20"
@@ -753,7 +753,7 @@ export function ScenesPage({ onNavigate }: Props) {
               Scrape
             </button>
           )}
-          {canWriteScene && selectedIds.size >= 2 && (
+          {canWriteVideo && selectedIds.size >= 2 && (
             <button
               onClick={() => setShowMerge(true)}
               className="flex items-center gap-1 px-2 py-0.5 rounded text-xs text-yellow-400 hover:text-yellow-300 hover:bg-yellow-900/20"
@@ -769,8 +769,8 @@ export function ScenesPage({ onNavigate }: Props) {
             <Play className="w-3 h-3" />
             Play
           </button>
-          <ExtensionSelectionActions entityType="scene" selectedIds={selectedIds} />
-          {canDeleteScene && (
+          <ExtensionSelectionActions entityType="video" selectedIds={selectedIds} />
+          {canDeleteVideo && (
             <button
               onClick={() => setShowDeleteConfirm(true)}
               disabled={bulkDeleteMut.isPending}
@@ -785,8 +785,8 @@ export function ScenesPage({ onNavigate }: Props) {
     >
       <ConfirmDialog
         open={showDeleteConfirm}
-        title={`Delete ${selectedIds.size} scene${selectedIds.size === 1 ? "" : "s"}`}
-        message={`Delete ${selectedIds.size} selected scene${selectedIds.size === 1 ? "" : "s"}? This cannot be undone.`}
+        title={`Delete ${selectedIds.size} video${selectedIds.size === 1 ? "" : "s"}`}
+        message={`Delete ${selectedIds.size} selected video${selectedIds.size === 1 ? "" : "s"}? This cannot be undone.`}
         confirmLabel={bulkDeleteMut.isPending ? "Deleting..." : "Delete"}
         onConfirm={(options) => bulkDeleteMut.mutate(options)}
         onCancel={() => setShowDeleteConfirm(false)}
@@ -863,30 +863,30 @@ export function ScenesPage({ onNavigate }: Props) {
           >
             <VirtualizedInfiniteList
               items={items}
-              getItemKey={(scene) => scene.id}
+              getItemKey={(video) => video.id}
               estimateSize={verticalItemHeight}
               overscan={2}
-              hasNextPage={Boolean(infiniteScenesQuery.hasNextPage)}
-              isFetchingNextPage={infiniteScenesQuery.isFetchingNextPage}
-              loadMore={loadMoreScenes}
+              hasNextPage={Boolean(infiniteVideosQuery.hasNextPage)}
+              isFetchingNextPage={infiniteVideosQuery.isFetchingNextPage}
+              loadMore={loadMoreVideos}
               scrollElementRef={verticalViewerRef}
-              onActiveIndexChange={(idx) => setActiveVerticalSceneId(idx == null ? null : items[idx]?.id ?? null)}
+              onActiveIndexChange={(idx) => setActiveVerticalVideoId(idx == null ? null : items[idx]?.id ?? null)}
               itemClassName="snap-start"
-              renderItem={({ item: scene, index }) => (
-                <SceneVerticalViewerCard
-                  scene={scene}
+              renderItem={({ item: video, index }) => (
+                <VideoVerticalViewerCard
+                  video={video}
                   useVideo={verticalActiveIndex < 0 ? index === 0 : Math.abs(index - verticalActiveIndex) <= 1}
                   feedVideoSource={feedVideoSource}
-                  soundEnabled={verticalSoundEnabled && scene.id === activeVerticalSceneId}
+                  soundEnabled={verticalSoundEnabled && video.id === activeVerticalVideoId}
                   onToggleSound={() => setVerticalSoundEnabled((current) => !current)}
                   feedVideoStartPercent={feedVideoStartPercent}
                   feedVideoStartMinDuration={feedVideoStartMinDuration}
                   fullscreen={verticalFullscreen}
                   viewerHeight={verticalViewerHeight}
-                  selected={selectedIds.has(scene.id)}
+                  selected={selectedIds.has(video.id)}
                   selecting={selecting}
-                  onSelect={() => toggle(scene.id)}
-                  onNavigate={navigateToScene}
+                  onSelect={() => toggle(video.id)}
+                  onNavigate={navigateToVideo}
                 />
               )}
             />
@@ -897,31 +897,31 @@ export function ScenesPage({ onNavigate }: Props) {
         <div className="mx-auto w-full max-w-[64rem] px-3 sm:px-4">
           <VirtualizedInfiniteList
             items={items}
-            getItemKey={(scene) => scene.id}
+            getItemKey={(video) => video.id}
             estimateSize={760}
             overscan={2}
             adjustScrollOnItemSizeChange={!isMobileViewer}
-            hasNextPage={Boolean(infiniteScenesQuery.hasNextPage)}
-            isFetchingNextPage={infiniteScenesQuery.isFetchingNextPage}
-            loadMore={loadMoreScenes}
+            hasNextPage={Boolean(infiniteVideosQuery.hasNextPage)}
+            isFetchingNextPage={infiniteVideosQuery.isFetchingNextPage}
+            loadMore={loadMoreVideos}
             className={isMobileViewer ? "[overflow-anchor:none]" : undefined}
             itemClassName="pb-5 [touch-action:pan-y]"
-            renderItem={({ item: scene }) => (
-              <SceneFeedCard
-                scene={scene}
+            renderItem={({ item: video }) => (
+              <VideoFeedCard
+                video={video}
                 useVideo={true}
-                engagement={engagementById.get(scene.id)}
+                engagement={engagementById.get(video.id)}
                 feedVideoSource={feedVideoSource}
                 feedVideoStartPercent={feedVideoStartPercent}
                 feedVideoStartMinDuration={feedVideoStartMinDuration}
-                soundEnabled={feedAudioSceneId === scene.id}
-                onToggleSound={() => setFeedAudioSceneId((current) => current === scene.id ? null : scene.id)}
-                onPlaybackEligibilityChange={defaultFeedVideoSound ? (eligible) => setFeedAudioSceneId((current) => eligible ? scene.id : current === scene.id ? null : current) : undefined}
+                soundEnabled={feedAudioVideoId === video.id}
+                onToggleSound={() => setFeedAudioVideoId((current) => current === video.id ? null : video.id)}
+                onPlaybackEligibilityChange={defaultFeedVideoSound ? (eligible) => setFeedAudioVideoId((current) => eligible ? video.id : current === video.id ? null : current) : undefined}
                 onNavigate={onNavigate}
-                canEngage={canEngageScene}
-                selected={selectedIds.has(scene.id)}
+                canEngage={canEngageVideo}
+                selected={selectedIds.has(video.id)}
                 selecting={selecting}
-                onSelect={() => toggle(scene.id)}
+                onSelect={() => toggle(video.id)}
               />
             )}
           />
@@ -937,19 +937,19 @@ export function ScenesPage({ onNavigate }: Props) {
             estimateRowHeight={320}
             overscan={3}
             infinitePageSize={infinitePageSize}
-            hasNextPage={infiniteScenesQuery.hasNextPage}
-            isFetchingNextPage={infiniteScenesQuery.isFetchingNextPage}
-            loadMore={loadMoreScenes}
-            renderItem={(scene) => (
-              <SceneCard
-                scene={scene}
-                engagement={engagementById.get(scene.id)}
-                onClick={() => selecting ? toggle(scene.id) : navigateToScene(scene.id)}
+            hasNextPage={infiniteVideosQuery.hasNextPage}
+            isFetchingNextPage={infiniteVideosQuery.isFetchingNextPage}
+            loadMore={loadMoreVideos}
+            renderItem={(video) => (
+              <VideoCard
+                video={video}
+                engagement={engagementById.get(video.id)}
+                onClick={() => selecting ? toggle(video.id) : navigateToVideo(video.id)}
                 onNavigate={onNavigate}
-                selected={selectedIds.has(scene.id)}
-                onSelect={() => toggle(scene.id)}
+                selected={selectedIds.has(video.id)}
+                onSelect={() => toggle(video.id)}
                 selecting={selecting}
-                onQuickView={() => setQuickViewId(scene.id)}
+                onQuickView={() => setQuickViewId(video.id)}
               />
             )}
           />
@@ -957,55 +957,55 @@ export function ScenesPage({ onNavigate }: Props) {
           <EntityCardGrid minCardWidth="var(--card-min-width, 200px)">
             {listEntries.map((entry) => entry.kind === "compilation" && entry.group ? (
               <CompilationGroupCard key={`compilation-${entry.group.id}`} group={entry.group} onNavigate={onNavigate} />
-            ) : entry.scene ? (
-              <SceneCard
-                key={`scene-${entry.scene.id}`}
-                scene={entry.scene}
-                engagement={engagementById.get(entry.scene.id)}
-                onClick={() => selecting ? toggle(entry.scene!.id) : navigateToScene(entry.scene!.id)}
+            ) : entry.video ? (
+              <VideoCard
+                key={`video-${entry.video.id}`}
+                video={entry.video}
+                engagement={engagementById.get(entry.video.id)}
+                onClick={() => selecting ? toggle(entry.video!.id) : navigateToVideo(entry.video!.id)}
                 onNavigate={onNavigate}
-                selected={selectedIds.has(entry.scene.id)}
-                onSelect={() => toggle(entry.scene!.id)}
+                selected={selectedIds.has(entry.video.id)}
+                onSelect={() => toggle(entry.video!.id)}
                 selecting={selecting}
-                onQuickView={() => setQuickViewId(entry.scene!.id)}
+                onQuickView={() => setQuickViewId(entry.video!.id)}
               />
             ) : null)}
           </EntityCardGrid>
         )
       )}
       {displayMode === "list" && (
-        <SceneListTable entries={listEntries} engagementById={engagementById} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
+        <VideoListTable entries={listEntries} engagementById={engagementById} onNavigate={onNavigate} selectedIds={selectedIds} onToggle={toggle} selecting={selecting} />
       )}
       {displayMode === "wall" && (
         <VirtualizedWallColumns
           columns={wallColumns}
-          getItemKey={(scene) => scene.id}
+          getItemKey={(video) => video.id}
           infinitePageSize={infinitePageSize}
-          hasNextPage={infiniteScenesQuery.hasNextPage}
-          isFetchingNextPage={infiniteScenesQuery.isFetchingNextPage}
-          loadMore={loadMoreScenes}
+          hasNextPage={infiniteVideosQuery.hasNextPage}
+          isFetchingNextPage={infiniteVideosQuery.isFetchingNextPage}
+          loadMore={loadMoreVideos}
           estimateItemHeight={260}
           gap={4}
           className="flex gap-1 px-2"
           columnClassName="flex-1 flex flex-col gap-1 min-w-0"
-          renderItem={(scene) => (
-                <SceneWallCard
-                  scene={scene}
-                  onClick={() => selecting ? toggle(scene.id) : navigateToScene(scene.id)}
-                  selected={selectedIds.has(scene.id)}
+          renderItem={(video) => (
+                <VideoWallCard
+                  video={video}
+                  onClick={() => selecting ? toggle(video.id) : navigateToVideo(video.id)}
+                  selected={selectedIds.has(video.id)}
                   selecting={selecting}
-                  onSelect={() => toggle(scene.id)}
+                  onSelect={() => toggle(video.id)}
                 />
           )}
         />
       )}
       {displayMode === "tagger" && (
-        <SceneTagger scenes={items} onNavigate={navigateToScene} selectedIds={selectedIds} selecting={selecting} onSelect={toggle} />
+        <VideoTagger videos={items} onNavigate={navigateToVideo} selectedIds={selectedIds} selecting={selecting} onSelect={toggle} />
       )}
       {listEntries.length === 0 && !loading && (
         <div className="text-center py-20">
           <Film className="w-16 h-16 mx-auto mb-4 text-muted opacity-50" />
-          <p className="text-secondary text-lg">No scenes found</p>
+          <p className="text-secondary text-lg">No videos found</p>
           <p className="text-muted text-sm mt-1">Try scanning your library to discover content</p>
         </div>
       )}
@@ -1015,9 +1015,9 @@ export function ScenesPage({ onNavigate }: Props) {
     <BulkEditDialog
       open={showBulkEdit}
       onClose={() => setShowBulkEdit(false)}
-      title="Edit Scenes"
+      title="Edit Videos"
       selectedCount={selectedIds.size}
-      fields={SCENE_BULK_FIELDS}
+      fields={VIDEO_BULK_FIELDS}
       onApply={(values) => bulkEditMut.mutate(values)}
       isPending={bulkEditMut.isPending}
     />
@@ -1026,28 +1026,28 @@ export function ScenesPage({ onNavigate }: Props) {
         <MergeDialog
           open={showMerge}
           onClose={() => { setShowMerge(false); selectNone(); }}
-          entityType="scene"
-          items={items.filter((s) => selectedIds.has(s.id)).map((s) => ({ id: s.id, name: s.title || s.files[0]?.basename || `Scene ${s.id}` }))}
-          onMerge={scenes.merge}
-          queryKey="scenes"
+          entityType="video"
+          items={items.filter((s) => selectedIds.has(s.id)).map((s) => ({ id: s.id, name: s.title || s.files[0]?.basename || `Video ${s.id}` }))}
+          onMerge={videos.merge}
+          queryKey="videos"
         />
       ) : null}
       {showIdentify ? (
         <IdentifyDialog
           open={showIdentify}
           onClose={() => { setShowIdentify(false); selectNone(); }}
-          sceneIds={[...selectedIds]}
+          videoIds={[...selectedIds]}
         />
       ) : null}
       {quickViewId !== null ? (
-        <QuickViewDialog type="scene" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
+        <QuickViewDialog type="video" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
       ) : null}
     </Suspense>
     </>
   );
 }
 
-function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (id: number) => void }) {
+function VideoCreateModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (id: number) => void }) {
   const qc = useQueryClient();
   const [title, setTitle] = useState("");
   const [code, setCode] = useState("");
@@ -1062,7 +1062,7 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
   const [sourceMode, setSourceMode] = useState<CreateSourceMode>("metadata");
   const [filePath, setFilePath] = useState("");
   const [url, setUrl] = useState("");
-  const { urlDownloadMode, setUrlDownloadMode, scrapeMetadata, setScrapeMetadata } = useFileBackedCreatePreferences("Scene");
+  const { urlDownloadMode, setUrlDownloadMode, scrapeMetadata, setScrapeMetadata } = useFileBackedCreatePreferences("Video");
   const [noDownloaderFound, setNoDownloaderFound] = useState(false);
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [selectedPerformerIds, setSelectedPerformerIds] = useState<number[]>([]);
@@ -1088,9 +1088,9 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
   };
 
   const createMut = useMutation({
-    mutationFn: (data: SceneCreate) => scenes.create(data),
+    mutationFn: (data: VideoCreate) => videos.create(data),
     onSuccess: (created) => {
-      qc.invalidateQueries({ queryKey: ["scenes"] });
+      qc.invalidateQueries({ queryKey: ["videos"] });
       resetForm();
       if (createAnother) return;
       onClose();
@@ -1099,12 +1099,12 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
   });
 
   const createFromFileMut = useMutation({
-    mutationFn: async ({ path, data }: { path: string; data: SceneCreate }) => {
-      const created = await scenes.createFromFile({ filePath: path });
-      return created?.id ? scenes.update(created.id, data) : created;
+    mutationFn: async ({ path, data }: { path: string; data: VideoCreate }) => {
+      const created = await videos.createFromFile({ filePath: path });
+      return created?.id ? videos.update(created.id, data) : created;
     },
     onSuccess: (created) => {
-      qc.invalidateQueries({ queryKey: ["scenes"] });
+      qc.invalidateQueries({ queryKey: ["videos"] });
       resetForm();
       if (createAnother) return;
       onClose();
@@ -1113,10 +1113,10 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
   });
 
   const createFromUrlMut = useMutation({
-    mutationFn: ({ requestedUrl, data, downloadMode, scrapeMetadata }: { requestedUrl: string; data: SceneCreate; downloadMode: UrlDownloadMode; scrapeMetadata: boolean }) =>
-      createFromUrlWithOptionalDownload({ requestedUrl, data, entity: "Scene", downloadMode, scrapeMetadata, create: scenes.create }),
+    mutationFn: ({ requestedUrl, data, downloadMode, scrapeMetadata }: { requestedUrl: string; data: VideoCreate; downloadMode: UrlDownloadMode; scrapeMetadata: boolean }) =>
+      createFromUrlWithOptionalDownload({ requestedUrl, data, entity: "Video", downloadMode, scrapeMetadata, create: videos.create }),
     onSuccess: (created) => {
-      qc.invalidateQueries({ queryKey: ["scenes"] });
+      qc.invalidateQueries({ queryKey: ["videos"] });
       qc.invalidateQueries({ queryKey: ["jobs"] });
       resetForm();
       if (createAnother) return;
@@ -1128,7 +1128,7 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
     },
   });
 
-  const buildPayload = (extraUrls: string[] = []): SceneCreate => ({
+  const buildPayload = (extraUrls: string[] = []): VideoCreate => ({
     title: title || undefined,
     code: code || undefined,
     date: date || undefined,
@@ -1178,7 +1178,7 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
   const error = (createMut.error ?? createFromFileMut.error ?? createFromUrlMut.error) as Error | null;
 
   return (
-    <EditModal title="Create Scene" open={open} onClose={onClose}>
+    <EditModal title="Create Video" open={open} onClose={onClose}>
       <FileBackedCreateSource
         mode={sourceMode}
         onModeChange={handleSourceModeChange}
@@ -1194,14 +1194,14 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
         onCreateWithoutDownload={handleCreateWithoutDownload}
         onDismissNoDownloader={() => setNoDownloaderFound(false)}
         modes={["metadata", "file", "url"]}
-        filePlaceholder="C:\\Media\\scene.mp4"
-        urlPlaceholder="https://example.com/scene"
+        filePlaceholder="C:\\Media\\video.mp4"
+        urlPlaceholder="https://example.com/video"
       />
 
       <>
       <div className="grid grid-cols-2 gap-4">
         <Field label="Title">
-          <TextInput value={title} onChange={setTitle} placeholder="Scene title" />
+          <TextInput value={title} onChange={setTitle} placeholder="Video title" />
         </Field>
         <Field label="Date">
           <input
@@ -1223,7 +1223,7 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
       </div>
 
       <Field label="Details">
-        <TextArea value={details} onChange={setDetails} placeholder="Scene description" rows={3} />
+        <TextArea value={details} onChange={setDetails} placeholder="Video description" rows={3} />
       </Field>
 
       <Field label="Studio">
@@ -1259,7 +1259,7 @@ function SceneCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
       </Field>
 
       <Field label="Custom Fields">
-        <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="scene" />
+        <CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="video" />
       </Field>
 
       <CreateModalActions
@@ -1295,7 +1295,7 @@ function CompilationGroupCard({ group, onNavigate }: { group: Group; onNavigate:
           Compilation
         </div>
         <div className="absolute bottom-1 right-1 rounded bg-black/70 px-1.5 py-0.5 text-xs text-white">
-          {group.sceneCount} scenes
+          {group.videoCount} videos
         </div>
       </div>
       <div className="border-t border-border/50 px-2.5 py-2">
@@ -1306,38 +1306,38 @@ function CompilationGroupCard({ group, onNavigate }: { group: Group; onNavigate:
   );
 }
 
-function getSceneDisplayDuration(scene: Scene) {
-  if (typeof scene.clipStartSec === "number" && typeof scene.clipEndSec === "number") {
-    return Math.max(0, scene.clipEndSec - scene.clipStartSec);
+function getVideoDisplayDuration(video: Video) {
+  if (typeof video.clipStartSec === "number" && typeof video.clipEndSec === "number") {
+    return Math.max(0, video.clipEndSec - video.clipStartSec);
   }
 
-  return scene.files[0]?.duration ?? 0;
+  return video.files[0]?.duration ?? 0;
 }
 
-function getSceneFeedMedia(scene: Scene, feedVideoSource: string) {
-  const coverUrl = entityImages.sceneCoverUrl(scene.id, scene.updatedAt, 1280);
+function getVideoFeedMedia(video: Video, feedVideoSource: string) {
+  const coverUrl = entityImages.videoCoverUrl(video.id, video.updatedAt, 1280);
 
   if (feedVideoSource === "video") {
     return {
       coverUrl,
-      videoSrc: scenes.streamUrl(scene.id),
+      videoSrc: videos.streamUrl(video.id),
       videoStatusSrc: undefined,
     };
   }
 
   return {
     coverUrl,
-    videoSrc: scenes.previewUrl(scene.id),
-    videoStatusSrc: scenes.previewStatusUrl(scene.id),
+    videoSrc: videos.previewUrl(video.id),
+    videoStatusSrc: videos.previewStatusUrl(video.id),
   };
 }
 
-function getSceneFeedVideoStartTime(scene: Scene, feedVideoSource: string, startPercent: number, minDuration: number) {
+function getVideoFeedVideoStartTime(video: Video, feedVideoSource: string, startPercent: number, minDuration: number) {
   if (feedVideoSource !== "video" || startPercent <= 0) {
     return 0;
   }
 
-  const duration = getSceneDisplayDuration(scene);
+  const duration = getVideoDisplayDuration(video);
   if (duration <= Math.max(0, minDuration)) {
     return 0;
   }
@@ -1345,9 +1345,9 @@ function getSceneFeedVideoStartTime(scene: Scene, feedVideoSource: string, start
   return duration * (Math.min(95, Math.max(0, startPercent)) / 100);
 }
 
-/* ── Scene List Table ── */
+/* ── Video List Table ── */
 
-function SceneListTable({ entries, onNavigate, selectedIds, onToggle, selecting }: { entries: SceneListEntry[]; engagementById: ReadonlyMap<number, EntityEngagement>; onNavigate: (r: any) => void; selectedIds?: Set<number>; onToggle?: (id: number) => void; selecting?: boolean }) {
+function VideoListTable({ entries, onNavigate, selectedIds, onToggle, selecting }: { entries: VideoListEntry[]; engagementById: ReadonlyMap<number, EntityEngagement>; onNavigate: (r: any) => void; selectedIds?: Set<number>; onToggle?: (id: number) => void; selecting?: boolean }) {
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-2 px-2">
       {entries.map((entry) => {
@@ -1355,8 +1355,8 @@ function SceneListTable({ entries, onNavigate, selectedIds, onToggle, selecting 
           const group = entry.group;
           return <CompilationListRow key={`compilation-${group.id}`} group={group} onNavigate={onNavigate} />;
         }
-        if (!entry.scene) return null;
-        return <RelatedEntityListRow key={`scene-${entry.scene.id}`} entityType="scenes" item={entry.scene} selected={selectedIds?.has(entry.scene.id) ?? false} selecting={selecting} onToggle={onToggle} onNavigate={onNavigate} />;
+        if (!entry.video) return null;
+        return <RelatedEntityListRow key={`video-${entry.video.id}`} entityType="videos" item={entry.video} selected={selectedIds?.has(entry.video.id) ?? false} selecting={selecting} onToggle={onToggle} onNavigate={onNavigate} />;
       })}
     </div>
   );
@@ -1378,23 +1378,23 @@ function CompilationListRow({ group, onNavigate }: { group: Group; onNavigate: (
         </div>
         <p className="mt-1 truncate text-xs text-secondary">{[group.studioName, group.date].filter(Boolean).join(" · ") || "Compilation"}</p>
         <div className="mt-2 flex flex-wrap gap-1.5 text-[11px] text-muted">
-          <span className="rounded-full border border-border/70 bg-background/55 px-2 py-0.5">{group.sceneCount} scenes</span>
+          <span className="rounded-full border border-border/70 bg-background/55 px-2 py-0.5">{group.videoCount} videos</span>
         </div>
       </button>
     </article>
   );
 }
 
-/* ── Scene Wall Card ── */
+/* ── Video Wall Card ── */
 
-function SceneWallCard({ scene, onClick, selected, selecting, onSelect }: { scene: Scene; onClick: () => void; selected?: boolean; selecting?: boolean; onSelect?: () => void }) {
-  const file = scene.files[0];
-  const coverUrl = entityImages.sceneCoverUrl(scene.id, scene.updatedAt, 1280);
-  const previewUrl = scenes.previewUrl(scene.id);
-  const previewStatusUrl = scenes.previewStatusUrl(scene.id);
+function VideoWallCard({ video, onClick, selected, selecting, onSelect }: { video: Video; onClick: () => void; selected?: boolean; selecting?: boolean; onSelect?: () => void }) {
+  const file = video.files[0];
+  const coverUrl = entityImages.videoCoverUrl(video.id, video.updatedAt, 1280);
+  const previewUrl = videos.previewUrl(video.id);
+  const previewStatusUrl = videos.previewStatusUrl(video.id);
   const aspectRatio = file?.width && file.height ? `${file.width} / ${file.height}` : "16 / 9";
-  const title = scene.title || file?.basename || "Untitled";
-  const duration = getSceneDisplayDuration(scene);
+  const title = video.title || file?.basename || "Untitled";
+  const duration = getVideoDisplayDuration(video);
   const { config } = useAppConfig();
   const wallPreviewType = config?.ui.wallPreviewType ?? "video";
   const showTitle = config?.ui.wallShowTitle ?? true;
@@ -1413,7 +1413,7 @@ function SceneWallCard({ scene, onClick, selected, selecting, onSelect }: { scen
       className="group"
     >
       <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
-      <RouteCardLinkOverlay route={{ page: "scene", id: scene.id }} onClick={onClick} label={`Open scene ${title}`} selectionSafeZone />
+      <RouteCardLinkOverlay route={{ page: "video", id: video.id }} onClick={onClick} label={`Open video ${title}`} selectionSafeZone />
       <div className={`absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent transition-opacity ${showTitle ? "opacity-0 group-hover:opacity-100" : "opacity-0"}`} />
       {showTitle ? <div className="absolute bottom-0 left-0 right-0 p-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
           <p className="text-xs text-white font-medium truncate">
@@ -1429,40 +1429,40 @@ function SceneWallCard({ scene, onClick, selected, selecting, onSelect }: { scen
   );
 }
 
-function SceneFeedCard({ scene, engagement, feedVideoSource, useVideo, soundEnabled, onToggleSound, onPlaybackEligibilityChange, feedVideoStartPercent, feedVideoStartMinDuration, onNavigate, canEngage, selected, selecting, onSelect }: { scene: Scene; engagement?: EntityEngagement; feedVideoSource: string; useVideo: boolean; soundEnabled: boolean; onToggleSound: () => void; onPlaybackEligibilityChange?: (eligible: boolean) => void; feedVideoStartPercent: number; feedVideoStartMinDuration: number; onNavigate: (route: any) => void; canEngage: boolean; selected?: boolean; selecting?: boolean; onSelect?: () => void }) {
-  const file = scene.files[0];
-  const { coverUrl, videoSrc, videoStatusSrc } = getSceneFeedMedia(scene, feedVideoSource);
-  const title = scene.title || file?.basename || `Scene ${scene.id}`;
-  const duration = getSceneDisplayDuration(scene);
+function VideoFeedCard({ video, engagement, feedVideoSource, useVideo, soundEnabled, onToggleSound, onPlaybackEligibilityChange, feedVideoStartPercent, feedVideoStartMinDuration, onNavigate, canEngage, selected, selecting, onSelect }: { video: Video; engagement?: EntityEngagement; feedVideoSource: string; useVideo: boolean; soundEnabled: boolean; onToggleSound: () => void; onPlaybackEligibilityChange?: (eligible: boolean) => void; feedVideoStartPercent: number; feedVideoStartMinDuration: number; onNavigate: (route: any) => void; canEngage: boolean; selected?: boolean; selecting?: boolean; onSelect?: () => void }) {
+  const file = video.files[0];
+  const { coverUrl, videoSrc, videoStatusSrc } = getVideoFeedMedia(video, feedVideoSource);
+  const title = video.title || file?.basename || `Video ${video.id}`;
+  const duration = getVideoDisplayDuration(video);
   const aspectRatio = file?.width && file.height ? `${file.width} / ${file.height}` : "16 / 9";
   const mediaStyle = getFeedMediaStyle(file);
   const mediaIsPortrait = Boolean(mediaStyle);
-  const videoStartTimeSec = getSceneFeedVideoStartTime(scene, feedVideoSource, feedVideoStartPercent, feedVideoStartMinDuration);
+  const videoStartTimeSec = getVideoFeedVideoStartTime(video, feedVideoSource, feedVideoStartPercent, feedVideoStartMinDuration);
   const visitCount = engagement?.pageVisitCount ?? 0;
   const likeCount = engagement?.likeCount ?? 0;
   const queryClient = useQueryClient();
   const ratingMut = useMutation({
-    mutationFn: (value: number | undefined) => entityEngagement.setRating("scene", scene.id, { value: value ?? null, aspect: "overall" }),
+    mutationFn: (value: number | undefined) => entityEngagement.setRating("video", video.id, { value: value ?? null, aspect: "overall" }),
     onSuccess: (nextEngagement) => {
-      queryClient.setQueryData(["engagement", "scene", scene.id], nextEngagement);
-      queryClient.invalidateQueries({ queryKey: ["engagement", "scene", "batch"] });
+      queryClient.setQueryData(["engagement", "video", video.id], nextEngagement);
+      queryClient.invalidateQueries({ queryKey: ["engagement", "video", "batch"] });
     },
   });
   const ratingValue = ratingMut.data?.rating ?? engagement?.rating;
-  const visibleTags = scene.tags.slice(0, 4);
-  const hiddenTags = scene.tags.slice(4);
+  const visibleTags = video.tags.slice(0, 4);
+  const hiddenTags = video.tags.slice(4);
   const renderVideoControls = (controls: WallMediaVideoControlsState) => (
-    <SceneFeedVideoControls controls={controls} soundEnabled={soundEnabled} onToggleSound={onToggleSound} />
+    <VideoFeedVideoControls controls={controls} soundEnabled={soundEnabled} onToggleSound={onToggleSound} />
   );
 
   const mediaOverlay = (
     <>
       <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
-      <RouteCardLinkOverlay route={{ page: "scene", id: scene.id }} onClick={() => onNavigate({ page: "scene", id: scene.id })} label={`Open scene ${title}`} selectionSafeZone />
+      <RouteCardLinkOverlay route={{ page: "video", id: video.id }} onClick={() => onNavigate({ page: "video", id: video.id })} label={`Open video ${title}`} selectionSafeZone />
       {!selecting && (
         <BookmarkButton
-          hostType="scene"
-          hostId={scene.id}
+          hostType="video"
+          hostId={video.id}
           compact
           deferUntilHover
           className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100"
@@ -1473,12 +1473,12 @@ function SceneFeedCard({ scene, engagement, feedVideoSource, useVideo, soundEnab
 
   return (
     <FeedCardFrame
-      dataAttribute={{ "data-feed-scene-id": scene.id }}
+      dataAttribute={{ "data-feed-video-id": video.id }}
       selected={selected}
-      identity={scene.studioName ? <FeedIdentityBadge>{scene.studioName}</FeedIdentityBadge> : undefined}
+      identity={video.studioName ? <FeedIdentityBadge>{video.studioName}</FeedIdentityBadge> : undefined}
       header={(
         <>
-          {scene.date ? <span>{scene.date}</span> : null}
+          {video.date ? <span>{video.date}</span> : null}
           {duration > 0 ? <span>{formatDuration(duration)}</span> : null}
         </>
       )}
@@ -1518,7 +1518,7 @@ function SceneFeedCard({ scene, engagement, feedVideoSource, useVideo, soundEnab
                 videoStartTimeSec={videoStartTimeSec}
                 videoPlayThreshold={0.5}
                 onVideoPlayEligibilityChange={onPlaybackEligibilityChange}
-                playbackTracking={{ hostType: "scene", hostId: scene.id, surface: "feed", scopeKey: `scene-feed:${scene.id}` }}
+                playbackTracking={{ hostType: "video", hostId: video.id, surface: "feed", scopeKey: `video-feed:${video.id}` }}
                 fillMedia
                 chromeless
                 imageClassName="object-contain"
@@ -1541,7 +1541,7 @@ function SceneFeedCard({ scene, engagement, feedVideoSource, useVideo, soundEnab
             videoStartTimeSec={videoStartTimeSec}
             videoPlayThreshold={0.5}
             onVideoPlayEligibilityChange={onPlaybackEligibilityChange}
-            playbackTracking={{ hostType: "scene", hostId: scene.id, surface: "feed", scopeKey: `scene-feed:${scene.id}` }}
+            playbackTracking={{ hostType: "video", hostId: video.id, surface: "feed", scopeKey: `video-feed:${video.id}` }}
             aspectRatio={aspectRatio}
             imageClassName="object-cover"
             style={mediaStyle}
@@ -1555,22 +1555,22 @@ function SceneFeedCard({ scene, engagement, feedVideoSource, useVideo, soundEnab
       title={(
         <button
           type="button"
-          onClick={() => onNavigate({ page: "scene", id: scene.id })}
+          onClick={() => onNavigate({ page: "video", id: video.id })}
           className="text-left text-base font-semibold text-foreground transition-colors hover:text-accent"
         >
           {title}
         </button>
       )}
-      details={scene.details ? <p className="line-clamp-4">{scene.details}</p> : undefined}
-      metadata={(scene.organized || scene.galleries.length > 0) ? (
+      details={video.details ? <p className="line-clamp-4">{video.details}</p> : undefined}
+      metadata={(video.organized || video.galleries.length > 0) ? (
         <>
-          {scene.organized ? <FeedMetadataPill>Organized</FeedMetadataPill> : null}
-          {scene.galleries.length > 0 ? <FeedMetadataPill>{scene.galleries.length} galleries</FeedMetadataPill> : null}
+          {video.organized ? <FeedMetadataPill>Organized</FeedMetadataPill> : null}
+          {video.galleries.length > 0 ? <FeedMetadataPill>{video.galleries.length} galleries</FeedMetadataPill> : null}
         </>
       ) : undefined}
       chips={(
         <>
-          {scene.performers.slice(0, 4).map((performer) => (
+          {video.performers.slice(0, 4).map((performer) => (
             <FeedChipButton
               key={performer.id}
               onClick={() => onNavigate({ page: "performer", id: performer.id })}
@@ -1604,7 +1604,7 @@ function SceneFeedCard({ scene, engagement, feedVideoSource, useVideo, soundEnab
   );
 }
 
-function SceneFeedVideoControls({ controls, soundEnabled, onToggleSound }: { controls: WallMediaVideoControlsState; soundEnabled: boolean; onToggleSound: () => void }) {
+function VideoFeedVideoControls({ controls, soundEnabled, onToggleSound }: { controls: WallMediaVideoControlsState; soundEnabled: boolean; onToggleSound: () => void }) {
   const seekValue = Math.round(controls.progressPercent * 10);
 
   return (
@@ -1670,16 +1670,16 @@ function SceneFeedVideoControls({ controls, soundEnabled, onToggleSound }: { con
   );
 }
 
-function SceneVerticalViewerCard({ scene, feedVideoSource, useVideo, soundEnabled, onToggleSound, feedVideoStartPercent, feedVideoStartMinDuration, fullscreen, viewerHeight, onNavigate, selected, selecting, onSelect }: { scene: Scene; feedVideoSource: string; useVideo: boolean; soundEnabled: boolean; onToggleSound: () => void; feedVideoStartPercent: number; feedVideoStartMinDuration: number; fullscreen: boolean; viewerHeight: number | null; onNavigate: (sceneId: number) => void; selected?: boolean; selecting?: boolean; onSelect?: () => void }) {
-  const file = scene.files[0];
-  const { coverUrl, videoSrc, videoStatusSrc } = getSceneFeedMedia(scene, feedVideoSource);
-  const title = scene.title || file?.basename || `Scene ${scene.id}`;
-  const duration = getSceneDisplayDuration(scene);
-  const videoStartTimeSec = getSceneFeedVideoStartTime(scene, feedVideoSource, feedVideoStartPercent, feedVideoStartMinDuration);
+function VideoVerticalViewerCard({ video, feedVideoSource, useVideo, soundEnabled, onToggleSound, feedVideoStartPercent, feedVideoStartMinDuration, fullscreen, viewerHeight, onNavigate, selected, selecting, onSelect }: { video: Video; feedVideoSource: string; useVideo: boolean; soundEnabled: boolean; onToggleSound: () => void; feedVideoStartPercent: number; feedVideoStartMinDuration: number; fullscreen: boolean; viewerHeight: number | null; onNavigate: (videoId: number) => void; selected?: boolean; selecting?: boolean; onSelect?: () => void }) {
+  const file = video.files[0];
+  const { coverUrl, videoSrc, videoStatusSrc } = getVideoFeedMedia(video, feedVideoSource);
+  const title = video.title || file?.basename || `Video ${video.id}`;
+  const duration = getVideoDisplayDuration(video);
+  const videoStartTimeSec = getVideoFeedVideoStartTime(video, feedVideoSource, feedVideoStartPercent, feedVideoStartMinDuration);
   const availableViewerHeight = viewerHeight != null ? Math.max(120, viewerHeight) : null;
 
   return (
-    <article data-vertical-scene-id={scene.id} className={`flex h-full min-h-0 snap-start snap-always items-center justify-center ${fullscreen ? "px-0 py-0" : "px-2 py-0 sm:px-4"}`}>
+    <article data-vertical-video-id={video.id} className={`flex h-full min-h-0 snap-start snap-always items-center justify-center ${fullscreen ? "px-0 py-0" : "px-2 py-0 sm:px-4"}`}>
       <WallMediaCard
         title={title}
         imageSrc={coverUrl}
@@ -1689,7 +1689,7 @@ function SceneVerticalViewerCard({ scene, feedVideoSource, useVideo, soundEnable
         muted={!soundEnabled}
         videoStartTimeSec={videoStartTimeSec}
         videoPlayThreshold={0.72}
-        playbackTracking={{ hostType: "scene", hostId: scene.id, surface: "vertical", scopeKey: `scene-vertical:${scene.id}` }}
+        playbackTracking={{ hostType: "video", hostId: video.id, surface: "vertical", scopeKey: `video-vertical:${video.id}` }}
         aspectRatio="9 / 16"
         imageClassName="object-cover"
         fillMedia={fullscreen}
@@ -1712,11 +1712,11 @@ function SceneVerticalViewerCard({ scene, feedVideoSource, useVideo, soundEnable
           {soundEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
         </button>
         <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
-        <RouteCardLinkOverlay route={{ page: "scene", id: scene.id }} onClick={() => onNavigate(scene.id)} label={`Open scene ${title}`} selectionSafeZone />
+        <RouteCardLinkOverlay route={{ page: "video", id: video.id }} onClick={() => onNavigate(video.id)} label={`Open video ${title}`} selectionSafeZone />
         {!selecting && (
           <BookmarkButton
-            hostType="scene"
-            hostId={scene.id}
+            hostType="video"
+            hostId={video.id}
             compact
             deferUntilHover
             className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100"
@@ -1725,17 +1725,18 @@ function SceneVerticalViewerCard({ scene, feedVideoSource, useVideo, soundEnable
         {duration > 0 ? <span className="absolute right-2 top-12 rounded bg-black/65 px-2 py-0.5 text-xs text-white">{formatDuration(duration)}</span> : null}
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/45 to-transparent p-4 pt-14 text-white">
           <div className="flex flex-wrap items-center gap-2 text-[11px] text-white/75">
-            {scene.studioName ? <span>{scene.studioName}</span> : null}
-            {scene.date ? <span>{scene.date}</span> : null}
+            {video.studioName ? <span>{video.studioName}</span> : null}
+            {video.date ? <span>{video.date}</span> : null}
             <span>{feedVideoSource === "video" ? "Full video" : "Preview clip"}</span>
           </div>
           <p className="mt-1 line-clamp-2 text-base font-semibold leading-tight sm:text-lg">{title}</p>
           <div className="mt-2 flex flex-wrap gap-1.5 text-xs text-white/85">
-            {scene.performers.slice(0, 3).map((performer) => <span key={performer.id}>@{performer.name}</span>)}
-            {scene.tags.slice(0, 3).map((tag) => <span key={tag.id}>#{tag.name}</span>)}
+            {video.performers.slice(0, 3).map((performer) => <span key={performer.id}>@{performer.name}</span>)}
+            {video.tags.slice(0, 3).map((tag) => <span key={tag.id}>#{tag.name}</span>)}
           </div>
         </div>
       </WallMediaCard>
     </article>
   );
 }
+

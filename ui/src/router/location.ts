@@ -30,10 +30,10 @@ function parsePath(pathname: string, search?: string): Route {
     return applyRouteSearch({ page: "home" }, search);
   }
 
-  if (parts[0] === "scene" && parts.length > 3 && parts[2] === "span") {
+  if (parts[0] === "video" && parts.length > 3 && parts[2] === "span") {
     const id = Number(parts[1]);
     if (Number.isInteger(id) && id > 0) {
-      return applyRouteSearch({ page: "scene-span", id, spanKey: decodeURIComponent(parts[3]) }, search);
+      return applyRouteSearch({ page: "video-span", id, spanKey: decodeURIComponent(parts[3]) }, search);
     }
   }
 
@@ -83,8 +83,8 @@ export function buildRoutePath(route: Route): string {
     return "/";
   }
 
-  if (route.page === "scene-span" && route.id != null && route.spanKey) {
-    return `/scene/${route.id}/span/${encodeURIComponent(route.spanKey)}`;
+  if (route.page === "video-span" && route.id != null && route.spanKey) {
+    return `/video/${route.id}/span/${encodeURIComponent(route.spanKey)}`;
   }
 
   if (route.page === "compilation" && route.id != null) {
@@ -255,13 +255,13 @@ export function syncRouteHistory(mode: RouteHistoryMode = "push") {
 function getRouteLabel(route: Route): string {
   switch (route.page) {
     case "home": return "Home";
-    case "scene": return "Scene";
+    case "video": return "Video";
     case "audio": return "Audio";
     case "audios": return "Audios";
     case "text": return "Text";
     case "texts": return "Texts";
-    case "scene-span": return "Span";
-    case "scenes": return "Scenes";
+    case "video-span": return "Span";
+    case "videos": return "Videos";
     case "segment": return "Segment";
     case "segments": return "Segments";
     case "faces": return "Faces";

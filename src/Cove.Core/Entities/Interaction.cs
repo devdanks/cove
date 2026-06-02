@@ -4,7 +4,7 @@ namespace Cove.Core.Entities;
 
 public enum InteractionHostType
 {
-    Scene = 1,
+    Video = 1,
     Image = 2,
     Performer = 3,
     Tag = 4,

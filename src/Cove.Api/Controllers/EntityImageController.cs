@@ -46,10 +46,10 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
 
         if (entity.ImageBlobId == null)
         {
-            if (entity.HostType != SegmentHostType.Scene)
+            if (entity.HostType != SegmentHostType.Video)
                 return NotFound();
 
-            var screenshot = await streamService.GetSceneScreenshot(entity.HostId, entity.StartSec, ct);
+            var screenshot = await streamService.GetVideoScreenshot(entity.HostId, entity.StartSec, ct);
             if (screenshot == null) return NotFound();
 
             Response.Headers.CacheControl = !string.IsNullOrWhiteSpace(v)
@@ -84,7 +84,7 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
     {
         var entity = await db.VisibleSegments().FirstOrDefaultAsync(segment => segment.Id == id, ct);
         if (entity == null) return NotFound();
-        if (entity.HostType != SegmentHostType.Scene) return BadRequest("Frame covers are only available for scene-backed segments.");
+        if (entity.HostType != SegmentHostType.Video) return BadRequest("Frame covers are only available for video-backed segments.");
 
         var atSeconds = dto?.AtSeconds ?? entity.StartSec;
         if (entity.EndSec.HasValue)
@@ -92,8 +92,8 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
         else
             atSeconds = Math.Max(entity.StartSec, atSeconds);
 
-        await thumbnailService.GenerateSceneThumbnailAsync(entity.HostId, atSeconds, ct);
-        var screenshot = await streamService.GetSceneScreenshot(entity.HostId, atSeconds, ct);
+        await thumbnailService.GenerateVideoThumbnailAsync(entity.HostId, atSeconds, ct);
+        var screenshot = await streamService.GetVideoScreenshot(entity.HostId, atSeconds, ct);
         if (screenshot == null) return NotFound();
 
         if (!string.IsNullOrWhiteSpace(entity.ImageBlobId))
@@ -107,16 +107,16 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
         return Ok(new { success = true });
     }
 
-    // ── Scenes ──────────────────────────────────────────────────
+    // ── Videos ──────────────────────────────────────────────────
 
-    [HttpPost("scenes/{id:int}/image")]
-    [RequiresPermission(Permissions.ScenesWrite)]
-    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
-    public async Task<IActionResult> UploadSceneImage(int id, IFormFile file, CancellationToken ct)
+    [HttpPost("videos/{id:int}/image")]
+    [RequiresPermission(Permissions.VideosWrite)]
+    [RequiresEntityAccess(EntityKinds.Video, Permissions.VideosWrite)]
+    public async Task<IActionResult> UploadVideoImage(int id, IFormFile file, CancellationToken ct)
     {
         if (!IsImage(file)) return BadRequest("File must be an image.");
 
-        var entity = await db.Scenes.FirstOrDefaultAsync(scene => scene.Id == id, ct);
+        var entity = await db.Videos.FirstOrDefaultAsync(video => video.Id == id, ct);
         if (entity == null) return NotFound();
 
         if (entity.ImageBlobId != null)
@@ -129,16 +129,16 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
         return Ok(new { blobId = entity.ImageBlobId });
     }
 
-    [HttpGet("scenes/{id:int}/image")]
-    [RequiresPermission(Permissions.ScenesRead)]
-    public async Task<IActionResult> GetSceneImage(int id, [FromQuery] int? max, [FromQuery] string? v, CancellationToken ct)
+    [HttpGet("videos/{id:int}/image")]
+    [RequiresPermission(Permissions.VideosRead)]
+    public async Task<IActionResult> GetVideoImage(int id, [FromQuery] int? max, [FromQuery] string? v, CancellationToken ct)
     {
-        var entity = await db.Scenes.FirstOrDefaultAsync(scene => scene.Id == id, ct);
+        var entity = await db.Videos.FirstOrDefaultAsync(video => video.Id == id, ct);
         if (entity == null) return NotFound();
 
         if (entity.ImageBlobId == null)
         {
-            var screenshot = await streamService.GetSceneScreenshot(id, null, ct);
+            var screenshot = await streamService.GetVideoScreenshot(id, null, ct);
             if (screenshot == null) return NotFound();
 
             Response.Headers.CacheControl = !string.IsNullOrWhiteSpace(v)
@@ -152,12 +152,12 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
         return await ServeBlobAsync(entity.ImageBlobId, max, !string.IsNullOrWhiteSpace(v), ct);
     }
 
-    [HttpDelete("scenes/{id:int}/image")]
-    [RequiresPermission(Permissions.ScenesWrite)]
-    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite)]
-    public async Task<IActionResult> DeleteSceneImage(int id, CancellationToken ct)
+    [HttpDelete("videos/{id:int}/image")]
+    [RequiresPermission(Permissions.VideosWrite)]
+    [RequiresEntityAccess(EntityKinds.Video, Permissions.VideosWrite)]
+    public async Task<IActionResult> DeleteVideoImage(int id, CancellationToken ct)
     {
-        var entity = await db.Scenes.FirstOrDefaultAsync(scene => scene.Id == id, ct);
+        var entity = await db.Videos.FirstOrDefaultAsync(video => video.Id == id, ct);
         if (entity?.ImageBlobId == null) return NotFound();
 
         await blobService.DeleteBlobAsync(entity.ImageBlobId, ct);
@@ -539,17 +539,17 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
             return await ServeBlobAsync(entity.FrontImageBlobId, max, !string.IsNullOrWhiteSpace(v), ct);
 
         var fallback = await db.GroupItems.AsNoTracking()
-            .Where(item => item.GroupId == id && (item.ImageId.HasValue || item.SceneId.HasValue))
+            .Where(item => item.GroupId == id && (item.ImageId.HasValue || item.VideoId.HasValue))
             .OrderBy(item => item.OrderIndex)
             .ThenBy(item => item.Id)
-            .Select(item => new { item.ImageId, item.SceneId, item.StartSec })
+            .Select(item => new { item.ImageId, item.VideoId, item.StartSec })
             .FirstOrDefaultAsync(ct);
 
         if (fallback?.ImageId is int imageId)
             return Redirect(WithQuery($"/api/stream/image/{imageId}/thumbnail", max, v));
 
-        if (fallback?.SceneId is int sceneId)
-            return Redirect(WithQuery($"/api/stream/scene/{sceneId}/screenshot", null, v, fallback.StartSec));
+        if (fallback?.VideoId is int videoId)
+            return Redirect(WithQuery($"/api/stream/video/{videoId}/screenshot", null, v, fallback.StartSec));
 
         return NotFound();
     }
@@ -691,7 +691,7 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
         var entity = await db.Galleries.FirstOrDefaultAsync(gallery => gallery.Id == id, ct);
         if (entity == null) return NotFound();
 
-        if (dto.ImageId.HasValue && !dto.SceneId.HasValue)
+        if (dto.ImageId.HasValue && !dto.VideoId.HasValue)
         {
             var belongs = await db.Set<ImageGallery>()
                 .AnyAsync(ig => ig.GalleryId == id && ig.ImageId == dto.ImageId.Value, ct);
@@ -827,8 +827,8 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
 
     private async Task<(string? BlobId, string? Error)> StoreCoverSourceBlobAsync(EntityImageCoverSourceDto dto, CancellationToken ct)
     {
-        if (dto.ImageId.HasValue == dto.SceneId.HasValue)
-            return (null, "Choose exactly one source image or source scene.");
+        if (dto.ImageId.HasValue == dto.VideoId.HasValue)
+            return (null, "Choose exactly one source image or source video.");
 
         if (dto.ImageId.HasValue)
         {
@@ -839,8 +839,8 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
             return (await blobService.StoreBlobAsync(stream, image.Value.contentType, ct), null);
         }
 
-        var screenshot = await streamService.GetSceneScreenshot(dto.SceneId!.Value, null, ct);
-        if (screenshot == null) return (null, "Source scene screenshot is unavailable.");
+        var screenshot = await streamService.GetVideoScreenshot(dto.VideoId!.Value, null, ct);
+        if (screenshot == null) return (null, "Source video screenshot is unavailable.");
 
         await using var screenshotStream = screenshot.Value.stream;
         return (await blobService.StoreBlobAsync(screenshotStream, screenshot.Value.contentType, ct), null);
@@ -887,3 +887,4 @@ public class EntityImageController(CoveContext db, IBlobService blobService, ITh
         return query.Count == 0 ? path : $"{path}?{string.Join("&", query)}";
     }
 }
+

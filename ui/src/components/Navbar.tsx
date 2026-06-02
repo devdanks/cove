@@ -17,7 +17,7 @@ interface NavbarProps {
 }
 
 const navItems: { page: NavPage; label: string; icon: typeof Film }[] = [
-  { page: "scenes", label: "Scenes", icon: Film },
+  { page: "videos", label: "Videos", icon: Film },
   { page: "audios", label: "Audios", icon: Headphones },
   { page: "texts", label: "Texts", icon: FileText },
   { page: "segments", label: "Segments", icon: Bookmark },
@@ -31,7 +31,7 @@ const navItems: { page: NavPage; label: string; icon: typeof Film }[] = [
 ];
 
 const DETAIL_PARENT_PAGE: Record<string, string> = {
-  scene: "scenes",
+  video: "videos",
   audio: "audios",
   text: "texts",
   segment: "segments",
@@ -220,3 +220,4 @@ export function Navbar({ currentPage, navigate }: NavbarProps) {
     </nav>
   );
 }
+

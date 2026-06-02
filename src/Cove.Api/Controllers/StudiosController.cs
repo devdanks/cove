@@ -17,7 +17,7 @@ namespace Cove.Api.Controllers;
 [RequiresPermission(Permissions.StudiosRead)]
 public class StudiosController(IStudioRepository studioRepo, MetadataServerService metadataServerService, Data.CoveContext db, IEntityIdentifierService entityIdentifiers, IUserEngagementService engagementService, CustomFieldService? customFields = null, IFieldProvenanceService? fieldProvenanceService = null) : ControllerBase
 {
-    private sealed record StudioUsageCounts(int SceneCount, int ImageCount, int GalleryCount, int GroupCount, int PerformerCount, int ChildStudioCount, int AudioCount, int TextCount);
+    private sealed record StudioUsageCounts(int VideoCount, int ImageCount, int GalleryCount, int GroupCount, int PerformerCount, int ChildStudioCount, int AudioCount, int TextCount);
     private readonly CustomFieldService _customFields = customFields ?? new CustomFieldService(db);
 
     [HttpGet]
@@ -200,6 +200,22 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         return Ok(new { updated = studios.Count });
     }
 
+    [HttpDelete("bulk")]
+    [RequiresPermission(Permissions.StudiosDelete)]
+    [RequiresEntityAccess(EntityKinds.Studio, Permissions.StudiosDelete, ActionArgumentName = "dto", PropertyName = "Ids")]
+    public async Task<IActionResult> BulkDelete([FromBody] BatchDeleteDto dto, CancellationToken ct)
+    {
+        var ids = dto.Ids.Where(id => id > 0).Distinct().ToArray();
+        if (ids.Length == 0) return Ok(new { deleted = 0 });
+
+        var studios = await db.Studios.Where(s => ids.Contains(s.Id)).ToListAsync(ct);
+        foreach (var studio in studios)
+            await _customFields.DeleteValuesForEntityAsync(CustomFieldEntityTypes.Studio, studio.Id, ct);
+        db.Studios.RemoveRange(studios);
+        await db.SaveChangesAsync(ct);
+        return Ok(new { deleted = studios.Count });
+    }
+
     // ===== Merge =====
 
     private async Task<StudioDto> MapToDetailDtoAsync(Studio studio, CancellationToken ct)
@@ -218,7 +234,7 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         s.Aliases.Select(a => a.Alias).ToList(),
         s.StudioTags.Where(st => st.Tag != null).Select(st => TagDtoMapping.MapTagDto(st.Tag!)).ToList(),
         s.RemoteIds.Select(sid => new StudioRemoteIdDto(sid.Endpoint, sid.RemoteId)).ToList(),
-        usageCounts?.SceneCount ?? s.SceneCount,
+        usageCounts?.VideoCount ?? s.VideoCount,
         usageCounts?.ImageCount ?? s.ImageCount,
         usageCounts?.GalleryCount ?? s.GalleryCount,
         usageCounts?.GroupCount ?? s.GroupCount,
@@ -262,10 +278,10 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         if (ids.Length == 0)
             return [];
 
-        var sceneCounts = await db.Scenes
+        var videoCounts = await db.Videos
             .AsNoTracking()
-            .Where(scene => scene.StudioId.HasValue && ids.Contains(scene.StudioId.Value))
-            .GroupBy(scene => scene.StudioId!.Value)
+            .Where(video => video.StudioId.HasValue && ids.Contains(video.StudioId.Value))
+            .GroupBy(video => video.StudioId!.Value)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToDictionaryAsync(item => item.Key, item => item.Count, ct);
         var imageCounts = await db.Images
@@ -286,14 +302,14 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
             .GroupBy(group => group.StudioId!.Value)
             .Select(group => new { group.Key, Count = group.Count() })
             .ToDictionaryAsync(item => item.Key, item => item.Count, ct);
-        var performerCounts = await db.Scenes
+        var performerCounts = await db.Videos
             .AsNoTracking()
-            .Where(scene => scene.StudioId.HasValue && ids.Contains(scene.StudioId.Value))
+            .Where(video => video.StudioId.HasValue && ids.Contains(video.StudioId.Value))
             .Join(
-                db.Set<ScenePerformer>().AsNoTracking(),
-                scene => scene.Id,
-                scenePerformer => scenePerformer.SceneId,
-                (scene, scenePerformer) => new { StudioId = scene.StudioId!.Value, scenePerformer.PerformerId })
+                db.Set<VideoPerformer>().AsNoTracking(),
+                video => video.Id,
+                videoPerformer => videoPerformer.VideoId,
+                (video, videoPerformer) => new { StudioId = video.StudioId!.Value, videoPerformer.PerformerId })
             .GroupBy(item => item.StudioId)
             .Select(group => new { group.Key, Count = group.Select(item => item.PerformerId).Distinct().Count() })
             .ToDictionaryAsync(item => item.Key, item => item.Count, ct);
@@ -319,7 +335,7 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         return ids.ToDictionary(
             id => id,
             id => new StudioUsageCounts(
-                sceneCounts.GetValueOrDefault(id),
+                videoCounts.GetValueOrDefault(id),
                 imageCounts.GetValueOrDefault(id),
                 galleryCounts.GetValueOrDefault(id),
                 groupCounts.GetValueOrDefault(id),
@@ -344,7 +360,7 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
             .Include(s => s.Aliases)
             .Include(s => s.Urls)
             .Include(s => s.Children)
-            .Include(s => s.Scenes)
+            .Include(s => s.Videos)
             .Include(s => s.Galleries)
             .Include(s => s.Images)
             .Include(s => s.Groups)
@@ -353,9 +369,9 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
 
         foreach (var source in sources)
         {
-            // Move scenes
-            foreach (var scene in source.Scenes)
-                scene.StudioId = target.Id;
+            // Move videos
+            foreach (var video in source.Videos)
+                video.StudioId = target.Id;
             // Move galleries
             foreach (var gallery in source.Galleries)
                 gallery.StudioId = target.Id;
@@ -547,3 +563,4 @@ public class StudiosController(IStudioRepository studioRepo, MetadataServerServi
         return ids.Distinct().ToList();
     }
 }
+

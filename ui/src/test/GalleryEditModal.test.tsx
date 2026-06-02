@@ -55,7 +55,7 @@ function renderModal() {
           urls: ["https://example.com/gallery/21"],
           tags: [{ id: 8, name: "Beach" }],
           performers: [{ id: 5, name: "Alex" }],
-          sceneIds: [14],
+          videoIds: [14],
           customFields: {},
         } as any}
       />
@@ -68,15 +68,15 @@ describe("GalleryEditModal", () => {
     vi.clearAllMocks();
   });
 
-  it("omits rating, organized, and scenes while using a date input", async () => {
+  it("omits rating, organized, and videos while using a date input", async () => {
     mockGalleries.update.mockResolvedValue({});
 
     renderModal();
 
     expect(screen.queryByText("Rating")).not.toBeInTheDocument();
-    expect(screen.queryByText("Scenes")).not.toBeInTheDocument();
+    expect(screen.queryByText("Videos")).not.toBeInTheDocument();
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
-    expect(screen.queryByText("scene selector")).not.toBeInTheDocument();
+    expect(screen.queryByText("video selector")).not.toBeInTheDocument();
 
     const dateInput = screen.getByDisplayValue("2026-05-01");
     expect(dateInput).toHaveAttribute("type", "date");
@@ -89,7 +89,7 @@ describe("GalleryEditModal", () => {
     expect(galleryId).toBe(21);
     expect(payload).not.toHaveProperty("rating");
     expect(payload).not.toHaveProperty("organized");
-    expect(payload).not.toHaveProperty("sceneIds");
+    expect(payload).not.toHaveProperty("videoIds");
     expect(payload).toHaveProperty("date", "2026-05-01");
   });
 });

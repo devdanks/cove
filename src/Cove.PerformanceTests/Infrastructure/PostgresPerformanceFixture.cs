@@ -16,7 +16,7 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
     private int? _benchmarkUserId;
     private PostgresSettings? _settings;
 
-    public int SampleSceneId { get; private set; }
+    public int SampleVideoId { get; private set; }
     public int SampleImageId { get; private set; }
     public int SampleTagId { get; private set; }
     public int SampleStudioId { get; private set; }
@@ -309,15 +309,15 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
 
         await db.SaveChangesAsync();
 
-        var scenes = new List<Scene>();
+        var videos = new List<Video>();
         for (var index = 1; index <= 220; index++)
         {
             var studio = studios[(index - 1) % 18];
-            var scene = new Scene
+            var video = new Video
             {
-                Title = $"Scene {index:000}",
+                Title = $"Video {index:000}",
                 Code = $"SCN-{index:000}",
-                Details = $"Scene details {index:000}",
+                Details = $"Video details {index:000}",
                 Director = $"Director {index % 12}",
                 Date = DateOnly.FromDateTime(baseDate.AddDays(-200 + index)),
                 Organized = index % 4 != 0,
@@ -328,40 +328,40 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
                 UpdatedAt = baseDate.AddDays(-4 + index),
                 Urls =
                 [
-                    new SceneUrl { Url = $"https://example.test/scenes/{index:000}" },
+                    new VideoUrl { Url = $"https://example.test/videos/{index:000}" },
                 ],
             };
 
             if (index % 4 == 0)
             {
-                scene.LikeHistory.Add(new SceneLikeHistory { OccurredAt = baseDate.AddDays(-index) });
+                video.LikeHistory.Add(new VideoLikeHistory { OccurredAt = baseDate.AddDays(-index) });
             }
 
-            scenes.Add(scene);
+            videos.Add(video);
         }
-        db.Scenes.AddRange(scenes);
+        db.Videos.AddRange(videos);
 
         await db.SaveChangesAsync();
 
-        for (var index = 0; index < scenes.Count; index++)
+        for (var index = 0; index < videos.Count; index++)
         {
-            var scene = scenes[index];
-            var sceneOrdinal = index + 1;
+            var video = videos[index];
+            var videoOrdinal = index + 1;
             var gallery = galleries[index % galleries.Count];
             var group = groups[index % groups.Count];
 
-            scene.SceneTags.Add(new SceneTag { SceneId = scene.Id, TagId = tags[sceneOrdinal % tags.Count].Id });
-            scene.SceneTags.Add(new SceneTag { SceneId = scene.Id, TagId = tags[(sceneOrdinal + 9) % tags.Count].Id });
-            scene.ScenePerformers.Add(new ScenePerformer { SceneId = scene.Id, PerformerId = performers[sceneOrdinal % performers.Count].Id });
-            scene.ScenePerformers.Add(new ScenePerformer { SceneId = scene.Id, PerformerId = performers[(sceneOrdinal + 11) % performers.Count].Id });
-            scene.SceneGalleries.Add(new SceneGallery { SceneId = scene.Id, GalleryId = gallery.Id });
-            scene.GroupItems.Add(new GroupItem { SceneId = scene.Id, GroupId = group.Id, OrderIndex = (sceneOrdinal % 8) + 1, Kind = GroupItemKind.Scene });
+            video.VideoTags.Add(new VideoTag { VideoId = video.Id, TagId = tags[videoOrdinal % tags.Count].Id });
+            video.VideoTags.Add(new VideoTag { VideoId = video.Id, TagId = tags[(videoOrdinal + 9) % tags.Count].Id });
+            video.VideoPerformers.Add(new VideoPerformer { VideoId = video.Id, PerformerId = performers[videoOrdinal % performers.Count].Id });
+            video.VideoPerformers.Add(new VideoPerformer { VideoId = video.Id, PerformerId = performers[(videoOrdinal + 11) % performers.Count].Id });
+            video.VideoGalleries.Add(new VideoGallery { VideoId = video.Id, GalleryId = gallery.Id });
+            video.GroupItems.Add(new GroupItem { VideoId = video.Id, GroupId = group.Id, OrderIndex = (videoOrdinal % 8) + 1, Kind = GroupItemKind.Video });
 
-            var fileCount = sceneOrdinal % 3 == 0 ? 2 : 1;
+            var fileCount = videoOrdinal % 3 == 0 ? 2 : 1;
             for (var fileIndex = 0; fileIndex < fileCount; fileIndex++)
             {
-                var folder = folders[(sceneOrdinal + fileIndex) % folders.Count];
-                var orientation = (sceneOrdinal + fileIndex) % 3;
+                var folder = folders[(videoOrdinal + fileIndex) % folders.Count];
+                var orientation = (videoOrdinal + fileIndex) % 3;
                 var (width, height) = orientation switch
                 {
                     0 => (1920, 1080),
@@ -369,51 +369,51 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
                     _ => (1400, 1400),
                 };
 
-                var basename = $"scene-{sceneOrdinal:000}-{fileIndex:00}.mp4";
+                var basename = $"video-{videoOrdinal:000}-{fileIndex:00}.mp4";
                 var videoFile = new VideoFile
                 {
-                    SceneId = scene.Id,
+                    VideoId = video.Id,
                     Basename = basename,
                     ParentFolderId = folder.Id,
                     Path = BaseFileEntity.ComputePath(folder.Path, basename),
-                    Size = 180_000_000L + (sceneOrdinal * 450_000L) + (fileIndex * 80_000L),
-                    ModTime = baseDate.AddDays(-30 + sceneOrdinal + fileIndex),
+                    Size = 180_000_000L + (videoOrdinal * 450_000L) + (fileIndex * 80_000L),
+                    ModTime = baseDate.AddDays(-30 + videoOrdinal + fileIndex),
                     Format = "mp4",
                     Width = width,
                     Height = height,
-                    Duration = 180 + ((sceneOrdinal * 11 + fileIndex * 17) % 1_200),
-                    VideoCodec = sceneOrdinal % 2 == 0 ? "h264" : "hevc",
-                    AudioCodec = sceneOrdinal % 3 == 0 ? "aac" : "opus",
-                    FrameRate = new[] { 23.976, 24.0, 30.0, 60.0 }[(sceneOrdinal + fileIndex) % 4],
-                    BitRate = 1_500_000L + (((sceneOrdinal + fileIndex) % 6) * 850_000L),
-                    Interactive = (sceneOrdinal + fileIndex) % 6 == 0,
-                    InteractiveSpeed = (sceneOrdinal + fileIndex) % 6 == 0 ? 2 + ((sceneOrdinal + fileIndex) % 3) : null,
+                    Duration = 180 + ((videoOrdinal * 11 + fileIndex * 17) % 1_200),
+                    VideoCodec = videoOrdinal % 2 == 0 ? "h264" : "hevc",
+                    AudioCodec = videoOrdinal % 3 == 0 ? "aac" : "opus",
+                    FrameRate = new[] { 23.976, 24.0, 30.0, 60.0 }[(videoOrdinal + fileIndex) % 4],
+                    BitRate = 1_500_000L + (((videoOrdinal + fileIndex) % 6) * 850_000L),
+                    Interactive = (videoOrdinal + fileIndex) % 6 == 0,
+                    InteractiveSpeed = (videoOrdinal + fileIndex) % 6 == 0 ? 2 + ((videoOrdinal + fileIndex) % 3) : null,
                 };
 
-                videoFile.Fingerprints.Add(new FileFingerprint { Type = "md5", Value = $"scene-md5-{sceneOrdinal:000}-{fileIndex:00}" });
-                videoFile.Fingerprints.Add(new FileFingerprint { Type = "oshash", Value = $"scene-osh-{sceneOrdinal:000}-{fileIndex:00}" });
-                if ((sceneOrdinal + fileIndex) % 4 == 0)
+                videoFile.Fingerprints.Add(new FileFingerprint { Type = "md5", Value = $"video-md5-{videoOrdinal:000}-{fileIndex:00}" });
+                videoFile.Fingerprints.Add(new FileFingerprint { Type = "oshash", Value = $"video-osh-{videoOrdinal:000}-{fileIndex:00}" });
+                if ((videoOrdinal + fileIndex) % 4 == 0)
                 {
                     videoFile.Captions.Add(new VideoCaption
                     {
                         LanguageCode = "en",
                         CaptionType = "vtt",
-                        Filename = $"scene-{sceneOrdinal:000}-{fileIndex:00}.vtt",
+                        Filename = $"video-{videoOrdinal:000}-{fileIndex:00}.vtt",
                     });
                 }
 
-                scene.Files.Add(videoFile);
+                video.Files.Add(videoFile);
             }
 
-            if (sceneOrdinal % 5 == 0)
+            if (videoOrdinal % 5 == 0)
             {
-                scene.SceneMarkers.Add(new SceneMarker
+                video.VideoMarkers.Add(new VideoMarker
                 {
-                    SceneId = scene.Id,
-                    Title = $"Marker {sceneOrdinal:000}",
+                    VideoId = video.Id,
+                    Title = $"Marker {videoOrdinal:000}",
                     Seconds = 30,
                     EndSeconds = 45,
-                    PrimaryTagId = tags[sceneOrdinal % tags.Count].Id,
+                    PrimaryTagId = tags[videoOrdinal % tags.Count].Id,
                 });
             }
         }
@@ -524,21 +524,21 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
             AddRating(db, benchmarkUserId, RatingHostType.Group, group.Id, 35 + ((index + 1) % 60));
         }
 
-        for (var index = 0; index < scenes.Count; index++)
+        for (var index = 0; index < videos.Count; index++)
         {
-            var scene = scenes[index];
-            var sceneOrdinal = index + 1;
-            AddRating(db, benchmarkUserId, RatingHostType.Scene, scene.Id, 30 + (sceneOrdinal % 70));
+            var video = videos[index];
+            var videoOrdinal = index + 1;
+            AddRating(db, benchmarkUserId, RatingHostType.Video, video.Id, 30 + (videoOrdinal % 70));
             AddAffinity(
                 db,
                 benchmarkUserId,
-                AffinityHostType.Scene,
-                scene.Id,
-                viewCount: sceneOrdinal % 12,
-                totalConsumedSec: 200 + (sceneOrdinal % 900),
-                lastPositionSec: sceneOrdinal % 240,
-                lastConsumedAt: baseDate.AddHours(sceneOrdinal),
-                likeCount: sceneOrdinal % 20);
+                AffinityHostType.Video,
+                video.Id,
+                viewCount: videoOrdinal % 12,
+                totalConsumedSec: 200 + (videoOrdinal % 900),
+                lastPositionSec: videoOrdinal % 240,
+                lastConsumedAt: baseDate.AddHours(videoOrdinal),
+                likeCount: videoOrdinal % 20);
         }
 
         for (var index = 0; index < images.Count; index++)
@@ -551,7 +551,7 @@ public sealed class PostgresPerformanceFixture : IAsyncLifetime
 
         await db.SaveChangesAsync();
 
-        SampleSceneId = scenes[random.Next(scenes.Count)].Id;
+        SampleVideoId = videos[random.Next(videos.Count)].Id;
         SampleImageId = images[random.Next(images.Count)].Id;
         SampleTagId = tags[random.Next(tags.Count)].Id;
         SampleStudioId = studios[random.Next(18)].Id;

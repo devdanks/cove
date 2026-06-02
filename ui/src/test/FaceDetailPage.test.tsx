@@ -84,7 +84,7 @@ describe("FaceDetailPage", () => {
       ignored: false,
       mergedIntoFaceId: undefined,
       detectionCount: 18,
-      sceneCount: 4,
+      videoCount: 4,
       appearanceCount: 6,
       frameSampleCount: 11,
       imageCount: 2,
@@ -104,7 +104,7 @@ describe("FaceDetailPage", () => {
           ignored: false,
           mergedIntoFaceId: undefined,
           detectionCount: 9,
-          sceneCount: 3,
+          videoCount: 3,
           imageCount: 1,
           primarySourceKey: "detector.facebox",
           createdAt: "2026-03-30T12:00:00Z",
@@ -146,7 +146,7 @@ describe("FaceDetailPage", () => {
       ignored: false,
       mergedIntoFaceId: undefined,
       detectionCount: 3,
-      sceneCount: 1,
+      videoCount: 1,
       appearanceCount: 1,
       frameSampleCount: 1,
       imageCount: 0,
@@ -167,5 +167,6 @@ describe("FaceDetailPage", () => {
     expect(mockGoBack).toHaveBeenCalled();
   });
 });
+
 
 

@@ -6,7 +6,7 @@ import { GalleryDetailPage } from "../pages/GalleryDetailPage";
 const {
   mockGalleries,
   mockImages,
-  mockScenes,
+  mockVideos,
   mockEntityImages,
   mockSetRating,
   mockGoBack,
@@ -28,7 +28,7 @@ const {
     imageUrl: vi.fn((id: number) => `/image-${id}.jpg`),
     thumbnailUrl: vi.fn((id: number) => `/thumb-${id}.jpg`),
   },
-  mockScenes: {
+  mockVideos: {
     find: vi.fn(),
   },
   mockEntityImages: {
@@ -41,7 +41,7 @@ const {
 vi.mock("../api/client", () => ({
   galleries: mockGalleries,
   images: mockImages,
-  scenes: mockScenes,
+  videos: mockVideos,
   entityImages: mockEntityImages,
 }));
 
@@ -98,8 +98,8 @@ vi.mock("../components/DetailListToolbar", () => ({
 }));
 
 vi.mock("../components/EntityCards", () => ({
-  SceneCard: ({ scene, onClick }: { scene: { title: string }; onClick: () => void }) => (
-    <button onClick={onClick}>{scene.title}</button>
+  VideoCard: ({ video, onClick }: { video: { title: string }; onClick: () => void }) => (
+    <button onClick={onClick}>{video.title}</button>
   ),
   ImageTile: ({ image, onClick }: { image: { title: string }; onClick: () => void }) => (
     <button onClick={onClick}>{image.title}</button>
@@ -191,13 +191,13 @@ describe("GalleryDetailPage", () => {
     vi.clearAllMocks();
   });
 
-  it("renders the shared layout with images, scenes, and file info tabs", async () => {
+  it("renders the shared layout with images, videos, and file info tabs", async () => {
     mockGalleries.get.mockResolvedValue(buildGallery());
     mockImages.find.mockResolvedValue({
       items: [{ id: 91, title: "Cover Frame" }],
       totalCount: 1,
     });
-    mockScenes.find.mockResolvedValue({ items: [{ id: 4, title: "Scene One" }], totalCount: 1 });
+    mockVideos.find.mockResolvedValue({ items: [{ id: 4, title: "Video One" }], totalCount: 1 });
 
     renderPage();
 
@@ -208,27 +208,27 @@ describe("GalleryDetailPage", () => {
     const tabs = screen.getByRole("tablist", { name: /detail tabs/i });
     expect(tabs).not.toHaveClass("mx-auto");
 
-    fireEvent.click(within(tabs).getByRole("tab", { name: /scenes/i }));
-    expect(await screen.findByText("Scene One")).toBeInTheDocument();
+    fireEvent.click(within(tabs).getByRole("tab", { name: /videos/i }));
+    expect(await screen.findByText("Video One")).toBeInTheDocument();
 
     fireEvent.click(within(tabs).getByRole("tab", { name: /file info/i }));
     expect(await screen.findByText("C:/galleries/summer-set")).toBeInTheDocument();
   });
 
-  it("supports keyboard shortcuts for images, scenes, file info, and edit", async () => {
+  it("supports keyboard shortcuts for images, videos, file info, and edit", async () => {
     mockGalleries.get.mockResolvedValue(buildGallery());
     mockImages.find.mockResolvedValue({
       items: [{ id: 91, title: "Cover Frame" }],
       totalCount: 1,
     });
-    mockScenes.find.mockResolvedValue({ items: [{ id: 4, title: "Scene One" }], totalCount: 1 });
+    mockVideos.find.mockResolvedValue({ items: [{ id: 4, title: "Video One" }], totalCount: 1 });
 
     renderPage();
 
     expect((await screen.findAllByRole("heading", { name: "Summer Set" })).length).toBeGreaterThan(0);
 
     fireEvent.keyDown(window, { key: "s" });
-    expect(await screen.findByText("Scene One")).toBeInTheDocument();
+    expect(await screen.findByText("Video One")).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: "f" });
     expect(await screen.findByText("C:/galleries/summer-set")).toBeInTheDocument();
@@ -240,3 +240,4 @@ describe("GalleryDetailPage", () => {
     expect(await screen.findByText("Edit Gallery Modal")).toBeInTheDocument();
   });
 });
+

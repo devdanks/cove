@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { FilterDialog, PERFORMER_CRITERIA, SCENE_CRITERIA, TAG_CRITERIA } from "../components/FilterDialog";
+import { FilterDialog, PERFORMER_CRITERIA, VIDEO_CRITERIA, TAG_CRITERIA } from "../components/FilterDialog";
 
 function renderWithQueryClient(ui: ReactElement, setup?: (client: QueryClient) => void) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -19,7 +19,7 @@ describe("FilterDialog", () => {
       <FilterDialog
         open
         onClose={onClose}
-        criteria={SCENE_CRITERIA}
+        criteria={VIDEO_CRITERIA}
         activeFilter={{ titleCriterion: { value: "Cloud Nine", modifier: "EQUALS" } }}
         onApply={onApply}
       />
@@ -31,7 +31,7 @@ describe("FilterDialog", () => {
       <FilterDialog
         open
         onClose={onClose}
-        criteria={SCENE_CRITERIA}
+        criteria={VIDEO_CRITERIA}
         activeFilter={{}}
         onApply={onApply}
       />
@@ -75,7 +75,7 @@ describe("FilterDialog", () => {
       <FilterDialog
         open
         onClose={onClose}
-        criteria={SCENE_CRITERIA}
+        criteria={VIDEO_CRITERIA}
         activeFilter={{ createdAtCriterion: { value: "2026-04-22T12:00", modifier: "EQUALS" } }}
         onApply={onApply}
       />
@@ -89,7 +89,7 @@ describe("FilterDialog", () => {
       <FilterDialog
         open
         onClose={onClose}
-        criteria={SCENE_CRITERIA}
+        criteria={VIDEO_CRITERIA}
         activeFilter={{ createdAtCriterion: { value: "2026-04-22T12:00", modifier: "EQUALS" } }}
         onApply={onApply}
       />
@@ -105,7 +105,7 @@ describe("FilterDialog", () => {
       <FilterDialog
         open
         onClose={vi.fn()}
-        criteria={SCENE_CRITERIA}
+        criteria={VIDEO_CRITERIA}
         activeFilter={{ createdAtCriterion: { value: "2026-04-22T12:00", modifier: "EQUALS" } }}
         onApply={vi.fn()}
       />
@@ -132,17 +132,17 @@ describe("FilterDialog", () => {
       />
     );
 
-    fireEvent.click(screen.getByText("Scene Count"));
+    fireEvent.click(screen.getByText("Video Count"));
     fireEvent.change(screen.getByRole("spinbutton"), { target: { value: "2" } });
-    fireEvent.click(screen.getByLabelText("Count scenes from child tags"));
+    fireEvent.click(screen.getByLabelText("Count videos from child tags"));
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
 
     expect(onApply).toHaveBeenCalledWith(expect.objectContaining({
-      sceneCountCriterion: expect.objectContaining({
+      videoCountCriterion: expect.objectContaining({
         modifier: "EQUALS",
         value: 2,
       }),
-      sceneCountIncludesChildren: true,
+      videoCountIncludesChildren: true,
     }));
   });
 
@@ -208,7 +208,7 @@ describe("FilterDialog", () => {
       <FilterDialog
         open
         onClose={vi.fn()}
-        criteria={SCENE_CRITERIA}
+        criteria={VIDEO_CRITERIA}
         activeFilter={{}}
         onApply={onApply}
       />,
@@ -235,7 +235,7 @@ describe("FilterDialog", () => {
       <FilterDialog
         open
         onClose={vi.fn()}
-        criteria={SCENE_CRITERIA}
+        criteria={VIDEO_CRITERIA}
         activeFilter={{}}
         onApply={onApply}
       />,
@@ -285,7 +285,7 @@ describe("FilterDialog", () => {
       <FilterDialog
         open
         onClose={vi.fn()}
-        criteria={SCENE_CRITERIA}
+        criteria={VIDEO_CRITERIA}
         activeFilter={{}}
         onApply={onApply}
       />,

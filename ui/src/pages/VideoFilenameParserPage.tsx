@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { scenes } from "../api/client";
-import type { Scene, FindFilter } from "../api/types";
+import { videos } from "../api/client";
+import type { Video, FindFilter } from "../api/types";
 import { Search, ChevronDown, Loader2, Check } from "lucide-react";
 
 interface Props {
@@ -191,7 +191,7 @@ function applyPattern(
 // ===== Per-row edit state =====
 
 interface RowState {
-  sceneId: number;
+  videoId: number;
   basename: string;
   parsed: ParseResult | null;
   editedTitle?: string;
@@ -201,7 +201,7 @@ interface RowState {
 
 // ===== Component =====
 
-export function SceneFilenameParserPage({ onNavigate }: Props) {
+export function VideoFilenameParserPage({ onNavigate }: Props) {
   // Pattern config
   const [pattern, setPattern] = useState("{title}.{ext}");
   const [ignoredWordsStr, setIgnoredWordsStr] = useState("");
@@ -233,8 +233,8 @@ export function SceneFilenameParserPage({ onNavigate }: Props) {
   );
 
   const { data, isLoading, isFetching } = useQuery({
-    queryKey: ["scenes-parser", filter, appliedConfig],
-    queryFn: () => scenes.find(filter),
+    queryKey: ["videos-parser", filter, appliedConfig],
+    queryFn: () => videos.find(filter),
     enabled: queryEnabled && appliedConfig !== null,
   });
 
@@ -252,12 +252,12 @@ export function SceneFilenameParserPage({ onNavigate }: Props) {
       ? data.items.filter((s) => !s.organized)
       : data.items;
 
-    const newRows: RowState[] = items.map((scene) => {
-      const file = scene.files[0];
+    const newRows: RowState[] = items.map((video) => {
+      const file = video.files[0];
       const basename = file?.basename ?? "";
       const parsed = compiled ? applyPattern(basename, compiled, appliedConfig.ignoredWords, appliedConfig.capitalizeTitle, appliedConfig.whitespaceReplacement) : null;
       return {
-        sceneId: scene.id,
+        videoId: video.id,
         basename,
         parsed,
         selected: false,
@@ -317,7 +317,7 @@ export function SceneFilenameParserPage({ onNavigate }: Props) {
       const updates = selectedRows.map((r) => {
         const title = r.editedTitle ?? r.parsed?.title;
         const date = r.editedDate ?? r.parsed?.date;
-        return scenes.update(r.sceneId, {
+        return videos.update(r.videoId, {
           ...(title !== undefined ? { title } : {}),
           ...(date !== undefined ? { date } : {}),
         });
@@ -325,8 +325,8 @@ export function SceneFilenameParserPage({ onNavigate }: Props) {
       await Promise.all(updates);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["scenes"] });
-      queryClient.invalidateQueries({ queryKey: ["scenes-parser"] });
+      queryClient.invalidateQueries({ queryKey: ["videos"] });
+      queryClient.invalidateQueries({ queryKey: ["videos-parser"] });
     },
   });
 
@@ -339,7 +339,7 @@ export function SceneFilenameParserPage({ onNavigate }: Props) {
 
   return (
     <div className="min-h-screen bg-surface text-foreground p-6">
-      <h1 className="text-2xl font-bold mb-6">Scene Filename Parser</h1>
+      <h1 className="text-2xl font-bold mb-6">Video Filename Parser</h1>
 
       {/* ===== Pattern Input Section ===== */}
       <div className="bg-card rounded-lg p-5 mb-6 space-y-4">
@@ -479,7 +479,7 @@ export function SceneFilenameParserPage({ onNavigate }: Props) {
       {(isLoading || isFetching) && queryEnabled && (
         <div className="flex items-center gap-2 text-secondary mb-4">
           <Loader2 className="w-5 h-5 animate-spin" />
-          Loading scenes…
+          Loading videos…
         </div>
       )}
 
@@ -510,7 +510,7 @@ export function SceneFilenameParserPage({ onNavigate }: Props) {
                 <tbody>
                   {rows.map((row, idx) => (
                     <tr
-                      key={row.sceneId}
+                      key={row.videoId}
                       className={`border-b border-border/50 hover:bg-card-hover ${
                         !row.parsed ? "opacity-50" : ""
                       }`}
@@ -597,7 +597,7 @@ export function SceneFilenameParserPage({ onNavigate }: Props) {
 
           {applyMut.isSuccess && (
             <div className="mt-3 text-sm text-green-400">
-              Successfully updated {selectedRows.length} scene(s).
+              Successfully updated {selectedRows.length} video(s).
             </div>
           )}
           {applyMut.isError && (
@@ -611,9 +611,10 @@ export function SceneFilenameParserPage({ onNavigate }: Props) {
       {/* Empty state after search */}
       {queryEnabled && !isLoading && !isFetching && rows.length === 0 && appliedConfig && (
         <div className="text-center text-secondary py-12">
-          No scenes matched the pattern. Try a different pattern or check that scenes have files.
+          No videos matched the pattern. Try a different pattern or check that videos have files.
         </div>
       )}
     </div>
   );
 }
+

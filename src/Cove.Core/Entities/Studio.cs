@@ -15,7 +15,7 @@ public class Studio : BaseEntity
     public string? ImageOverrideBlobId { get; set; }
 
     // Denormalized relationship counters for hot list/detail reads.
-    public int SceneCount { get; set; }
+    public int VideoCount { get; set; }
     public int ImageCount { get; set; }
     public int GalleryCount { get; set; }
     public int GroupCount { get; set; }
@@ -30,7 +30,7 @@ public class Studio : BaseEntity
     public ICollection<StudioAlias> Aliases { get; set; } = [];
     public ICollection<StudioTag> StudioTags { get; set; } = [];
     public ICollection<StudioRemoteId> RemoteIds { get; set; } = [];
-    public ICollection<Scene> Scenes { get; set; } = [];
+    public ICollection<Video> Videos { get; set; } = [];
     public ICollection<Gallery> Galleries { get; set; } = [];
     public ICollection<Image> Images { get; set; } = [];
     public ICollection<Group> Groups { get; set; } = [];
@@ -68,3 +68,4 @@ public class StudioRemoteId
     public string RemoteId { get; set; } = string.Empty;
     public Studio? Studio { get; set; }
 }
+

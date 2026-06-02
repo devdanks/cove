@@ -15,40 +15,194 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
 {
     private const double BuiltInDefaultMergeGapSec = 8d;
     private const double BuiltInDefaultMinDurationSec = 10d;
-    private static readonly ConcurrentDictionary<int, ConcurrentDictionary<string, byte>> SceneCacheKeys = new();
+    private const int DefaultSpanCacheMinutes = 5;
+    private static readonly ConcurrentDictionary<int, ConcurrentDictionary<string, byte>> VideoCacheKeys = new();
     private static readonly ConcurrentDictionary<int, ConcurrentDictionary<string, byte>> ProfileCacheKeys = new();
     private static readonly SemaphoreSlim ProfileInitializationLock = new(1, 1);
 
-    public async Task<SceneResolvedSpansDto> ResolveSceneAsync(int sceneId, int? profileId, CancellationToken ct)
+    public async Task<VideoResolvedSpansDto> ResolveVideoAsync(int videoId, int? profileId, CancellationToken ct)
     {
         var profile = await ResolveProfileAsync(profileId, ct);
-        var cacheKey = $"segment-spans:{sceneId}:{profile.Id}:{profile.Version}";
-        if (memoryCache.TryGetValue<SceneResolvedSpansDto>(cacheKey, out var cached) && cached is not null)
+        var cacheKey = $"segment-spans:{videoId}:{profile.Id}:{profile.Version}";
+        if (memoryCache.TryGetValue<VideoResolvedSpansDto>(cacheKey, out var cached) && cached is not null)
             return cached;
 
-        var segments = await LoadSceneSegmentsAsync(sceneId, ct);
+        var segments = await LoadVideoSegmentsAsync(videoId, ct);
         var rules = await LoadRulesAsync(profile.Id, ct);
-        var spans = BuildSceneSpans(sceneId, profile.Id, segments, rules);
-        var response = new SceneResolvedSpansDto(spans, profile.Id, profile.Version);
+        var spans = BuildVideoSpans(videoId, profile.Id, segments, rules);
+        var response = new VideoResolvedSpansDto(spans, profile.Id, profile.Version);
 
-        memoryCache.Set(cacheKey, response, TimeSpan.FromMinutes(5));
-        RegisterCacheKey(sceneId, profile.Id, cacheKey);
+        memoryCache.Set(cacheKey, response, TimeSpan.FromMinutes(DefaultSpanCacheMinutes));
+        RegisterCacheKey(videoId, profile.Id, cacheKey);
 
         return response;
     }
 
-    public async Task<IReadOnlyList<ResolvedSpan>> PreviewSceneAsync(int sceneId, IReadOnlyList<SegmentDisplayRule> rules, CancellationToken ct)
+    public async Task<IReadOnlyList<(int VideoId, IReadOnlyList<ResolvedSpan> Spans)>> ResolveVideosBatchAsync(
+        IReadOnlyList<int> videoIds, int profileId, CancellationToken ct)
     {
-        var segments = await LoadSceneSegmentsAsync(sceneId, ct);
-        return BuildSceneSpans(sceneId, 0, segments, rules);
+        if (videoIds.Count == 0) return [];
+
+        var profile = await ResolveProfileAsync(profileId, ct);
+        var rules = await LoadRulesAsync(profile.Id, ct);
+
+        var results = new List<(int VideoId, IReadOnlyList<ResolvedSpan> Spans)>(videoIds.Count);
+        var uncachedIds = new List<int>(videoIds.Count);
+
+        foreach (var videoId in videoIds)
+        {
+            var cacheKey = $"segment-spans:{videoId}:{profile.Id}:{profile.Version}";
+            if (memoryCache.TryGetValue<VideoResolvedSpansDto>(cacheKey, out var cached) && cached is not null)
+            {
+                results.Add((videoId, cached.Spans));
+            }
+            else
+            {
+                uncachedIds.Add(videoId);
+            }
+        }
+
+        if (uncachedIds.Count == 0)
+            return results;
+
+        var allSegments = await db.Segments.AsNoTracking()
+            .Include(segment => segment.Tag).ThenInclude(tag => tag!.TagGroup)
+            .Where(s => s.HostType == SegmentHostType.Video && uncachedIds.Contains(s.HostId))
+            .OrderBy(s => s.StartSec)
+            .ThenBy(s => s.Id)
+            .ToListAsync(ct);
+
+        var segmentsByHost = allSegments.GroupBy(s => s.HostId).ToDictionary(g => g.Key, g => g.ToList());
+
+        foreach (var videoId in uncachedIds)
+        {
+            var segs = segmentsByHost.TryGetValue(videoId, out var hostSegments) ? hostSegments : [];
+            var spans = BuildVideoSpans(videoId, profile.Id, segs.AsReadOnly(), rules);
+            var response = new VideoResolvedSpansDto(spans, profile.Id, profile.Version);
+
+            var cacheKey = $"segment-spans:{videoId}:{profile.Id}:{profile.Version}";
+            memoryCache.Set(cacheKey, response, TimeSpan.FromMinutes(DefaultSpanCacheMinutes));
+            RegisterCacheKey(videoId, profile.Id, cacheKey);
+
+            results.Add((videoId, spans));
+        }
+
+        return results;
     }
 
-    public async Task<ResolvedSpanDetailDto?> GetSpanDetailAsync(int sceneId, string spanKey, int? profileId, CancellationToken ct)
+    public async Task<IReadOnlyList<(int VideoId, IReadOnlyList<ResolvedSpan> Spans)>> QueryVideosBatchAsync(
+        IReadOnlyList<int> videoIds, SegmentSpanQueryRequestDto queryRequest, CancellationToken ct)
     {
-        var resolved = await ResolveSceneAsync(sceneId, profileId, ct);
+        if (videoIds.Count == 0 || queryRequest.Operands is null || queryRequest.Operands.Count == 0)
+            return [];
+
+        var profile = await ResolveProfileAsync(queryRequest.Profile, ct);
+        var requestJson = JsonSerializer.Serialize(new { queryRequest.Operator, Operands = queryRequest.Operands, queryRequest.MergeGapSec, queryRequest.MinDurationSec });
+        var requestHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(requestJson))[..10]).ToLowerInvariant();
+
+        var results = new List<(int VideoId, IReadOnlyList<ResolvedSpan> Spans)>(videoIds.Count);
+        var uncachedIds = new List<int>(videoIds.Count);
+
+        foreach (var videoId in videoIds)
+        {
+            var cacheKey = $"video-segment-query:{videoId}:{profile.Id}:{profile.Version}:{requestHash}";
+            if (memoryCache.TryGetValue<IReadOnlyList<ResolvedSpan>>(cacheKey, out var cachedSpans) && cachedSpans is not null)
+            {
+                results.Add((videoId, cachedSpans));
+            }
+            else
+            {
+                uncachedIds.Add(videoId);
+            }
+        }
+
+        if (uncachedIds.Count == 0)
+            return results;
+
+        var allSegments = await db.Segments.AsNoTracking()
+            .Include(segment => segment.Tag).ThenInclude(tag => tag!.TagGroup)
+            .Where(s => s.HostType == SegmentHostType.Video && uncachedIds.Contains(s.HostId))
+            .OrderBy(s => s.StartSec)
+            .ThenBy(s => s.Id)
+            .ToListAsync(ct);
+
+        var segmentsByHost = allSegments.GroupBy(s => s.HostId).ToDictionary(g => g.Key, g => g.ToList());
+        var operators = queryRequest.Operator.Trim().ToLowerInvariant();
+
+        foreach (var videoId in uncachedIds)
+        {
+            var segs = segmentsByHost.TryGetValue(videoId, out var hostSegments) ? hostSegments : [];
+
+            var operandMatches = queryRequest.Operands.Select(operand => MatchOperand(segs, operand)).ToList();
+            var intervalSets = operandMatches.Select(match => match.Intervals).ToList();
+            List<IntervalAlgebra.Interval> result = operators switch
+            {
+                "union" => IntervalAlgebra.Union(intervalSets.SelectMany(set => set)),
+                "intersection" => IntervalAlgebra.Intersection(intervalSets),
+                "difference" when intervalSets.Count > 0 => intervalSets.Skip(1).Aggregate(intervalSets[0], (current, next) => IntervalAlgebra.Difference(current, next)),
+                _ => throw new InvalidOperationException($"Unsupported span query operator '{queryRequest.Operator}'."),
+            };
+
+            var mergeGapSec = queryRequest.MergeGapSec ?? GetDefaultMergeGap(operators, profile.Id, videoId, segs);
+            var minDurationSec = queryRequest.MinDurationSec ?? GetDefaultMinDuration(operators, profile.Id, videoId, segs);
+            result = IntervalAlgebra.Filter(IntervalAlgebra.Merge(result, mergeGapSec), minDurationSec);
+
+            List<ResolvedSpan> resolvedSpans;
+            if (result.Count == 0)
+            {
+                resolvedSpans = [];
+            }
+            else
+            {
+                var contributingIds = new HashSet<int>(operandMatches.SelectMany(match => match.SegmentIds));
+                resolvedSpans = new List<ResolvedSpan>(result.Count);
+                foreach (var interval in result)
+                {
+                    var overlappingIds = segs
+                        .Where(segment => contributingIds.Contains(segment.Id) && (segment.EndSec ?? segment.StartSec) > interval.Start && segment.StartSec < interval.End)
+                        .Select(segment => segment.Id)
+                        .OrderBy(id => id)
+                        .ToList();
+
+                    resolvedSpans.Add(new ResolvedSpan(
+                        ResolvedSpanKeys.CreateDerivedQuery(operators, interval.Start, interval.End),
+                        SegmentHostType.Video,
+                        videoId,
+                        interval.Start,
+                        interval.End,
+                        "derived",
+                        operators,
+                        null,
+                        null,
+                        null,
+                        null,
+                        false,
+                        overlappingIds));
+                }
+            }
+
+            var cacheKey = $"video-segment-query:{videoId}:{profile.Id}:{profile.Version}:{requestHash}";
+            memoryCache.Set(cacheKey, (IReadOnlyList<ResolvedSpan>)resolvedSpans, TimeSpan.FromMinutes(DefaultSpanCacheMinutes));
+            RegisterCacheKey(videoId, profile.Id, cacheKey);
+
+            results.Add((videoId, resolvedSpans));
+        }
+
+        return results;
+    }
+
+    public async Task<IReadOnlyList<ResolvedSpan>> PreviewVideoAsync(int videoId, IReadOnlyList<SegmentDisplayRule> rules, CancellationToken ct)
+    {
+        var segments = await LoadVideoSegmentsAsync(videoId, ct);
+        return BuildVideoSpans(videoId, 0, segments, rules);
+    }
+
+    public async Task<ResolvedSpanDetailDto?> GetSpanDetailAsync(int videoId, string spanKey, int? profileId, CancellationToken ct)
+    {
+        var resolved = await ResolveVideoAsync(videoId, profileId, ct);
         var span = resolved.Spans.FirstOrDefault(item => string.Equals(item.SpanKey, spanKey, StringComparison.Ordinal));
         var isDerivedQuerySpan = false;
-        var segments = await LoadSceneSegmentsAsync(sceneId, ct);
+        var segments = await LoadVideoSegmentsAsync(videoId, ct);
         if (span is null)
         {
             if (!ResolvedSpanKeys.TryParseDerivedQuery(spanKey, out var derivedKind, out var startSec, out var endSec))
@@ -62,8 +216,8 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
 
             span = new ResolvedSpan(
                 spanKey,
-                SegmentHostType.Scene,
-                sceneId,
+                SegmentHostType.Video,
+                videoId,
                 startSec,
                 endSec,
                 "derived",
@@ -77,8 +231,8 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
             isDerivedQuerySpan = true;
         }
 
-        var scene = await db.Scenes.AsNoTracking()
-            .Where(item => item.Id == sceneId)
+        var video = await db.Videos.AsNoTracking()
+            .Where(item => item.Id == videoId)
             .Select(item => new { item.Id, item.Title })
             .FirstOrDefaultAsync(ct);
 
@@ -86,8 +240,8 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
         {
             return new ResolvedSpanDetailDto(
                 span,
-                sceneId,
-                scene?.Title,
+                videoId,
+                video?.Title,
                 [new ResolvedSpanIntervalDto(span.StartSec, span.EndSec)],
                 resolved.ProfileId,
                 resolved.ProfileVersion);
@@ -110,14 +264,14 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
 
         return new ResolvedSpanDetailDto(
             span,
-            sceneId,
-            scene?.Title,
+            videoId,
+            video?.Title,
             IntervalAlgebra.Union(intervals).Select(interval => new ResolvedSpanIntervalDto(interval.Start, interval.End)).ToList(),
             resolved.ProfileId,
             resolved.ProfileVersion);
     }
 
-    public async Task<IReadOnlyList<ResolvedSpan>> QuerySceneAsync(int sceneId, SegmentSpanQueryRequestDto request, CancellationToken ct)
+    public async Task<IReadOnlyList<ResolvedSpan>> QueryVideoAsync(int videoId, SegmentSpanQueryRequestDto request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -125,15 +279,15 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
         if (request.Operands is null || request.Operands.Count == 0)
             return [];
 
-        // Cache derived query results per (scene, profile version, request shape) to avoid
+        // Cache derived query results per (video, profile version, request shape) to avoid
         // redundant interval algebra on repeated page navigations.
         var requestJson = JsonSerializer.Serialize(new { request.Operator, Operands = request.Operands, request.MergeGapSec, request.MinDurationSec });
         var requestHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(requestJson))[..10]).ToLowerInvariant();
-        var queryCacheKey = $"scene-segment-query:{sceneId}:{profile.Id}:{profile.Version}:{requestHash}";
+        var queryCacheKey = $"video-segment-query:{videoId}:{profile.Id}:{profile.Version}:{requestHash}";
         if (memoryCache.TryGetValue<IReadOnlyList<ResolvedSpan>>(queryCacheKey, out var cachedSpans) && cachedSpans is not null)
             return cachedSpans;
 
-        var segments = await LoadSceneSegmentsAsync(sceneId, ct);
+        var segments = await LoadVideoSegmentsAsync(videoId, ct);
         var operators = request.Operator.Trim().ToLowerInvariant();
 
         var operandMatches = request.Operands.Select(operand => MatchOperand(segments, operand)).ToList();
@@ -146,13 +300,13 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
             _ => throw new InvalidOperationException($"Unsupported span query operator '{request.Operator}'."),
         };
 
-        var mergeGapSec = request.MergeGapSec ?? GetDefaultMergeGap(operators, profile.Id, sceneId, segments);
-        var minDurationSec = request.MinDurationSec ?? GetDefaultMinDuration(operators, profile.Id, sceneId, segments);
+        var mergeGapSec = request.MergeGapSec ?? GetDefaultMergeGap(operators, profile.Id, videoId, segments);
+        var minDurationSec = request.MinDurationSec ?? GetDefaultMinDuration(operators, profile.Id, videoId, segments);
         result = IntervalAlgebra.Filter(IntervalAlgebra.Merge(result, mergeGapSec), minDurationSec);
         if (result.Count == 0)
         {
-            memoryCache.Set(queryCacheKey, (IReadOnlyList<ResolvedSpan>)[], TimeSpan.FromMinutes(5));
-            RegisterCacheKey(sceneId, profile.Id, queryCacheKey);
+            memoryCache.Set(queryCacheKey, (IReadOnlyList<ResolvedSpan>)[], TimeSpan.FromMinutes(DefaultSpanCacheMinutes));
+            RegisterCacheKey(videoId, profile.Id, queryCacheKey);
             return [];
         }
 
@@ -168,8 +322,8 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
 
             spans.Add(new ResolvedSpan(
                 ResolvedSpanKeys.CreateDerivedQuery(operators, interval.Start, interval.End),
-                SegmentHostType.Scene,
-                sceneId,
+                SegmentHostType.Video,
+                videoId,
                 interval.Start,
                 interval.End,
                 "derived",
@@ -182,14 +336,14 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
                 overlappingIds));
         }
 
-        memoryCache.Set(queryCacheKey, (IReadOnlyList<ResolvedSpan>)spans, TimeSpan.FromMinutes(5));
-        RegisterCacheKey(sceneId, profile.Id, queryCacheKey);
+        memoryCache.Set(queryCacheKey, (IReadOnlyList<ResolvedSpan>)spans, TimeSpan.FromMinutes(DefaultSpanCacheMinutes));
+        RegisterCacheKey(videoId, profile.Id, queryCacheKey);
         return spans;
     }
 
-    public void EvictScene(int sceneId)
+    public void EvictVideo(int videoId)
     {
-        if (!SceneCacheKeys.TryRemove(sceneId, out var keys))
+        if (!VideoCacheKeys.TryRemove(videoId, out var keys))
             return;
 
         foreach (var key in keys.Keys)
@@ -203,6 +357,8 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
 
         foreach (var key in keys.Keys)
             memoryCache.Remove(key);
+
+        memoryCache.Remove($"segment-display-rules:{profileId}");
     }
 
     public async Task<int> ResolveProfileIdAsync(int? profileId, CancellationToken ct)
@@ -271,26 +427,31 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
         return await EnsureDefaultProfileAsync(principalAccessor.Current?.UserId, ct);
     }
 
-    private async Task<List<Segment>> LoadSceneSegmentsAsync(int sceneId, CancellationToken ct)
+    private async Task<List<Segment>> LoadVideoSegmentsAsync(int videoId, CancellationToken ct)
     {
-        var cacheKey = $"scene-raw-segments:{sceneId}";
+        var cacheKey = $"video-raw-segments:{videoId}";
         if (memoryCache.TryGetValue<List<Segment>>(cacheKey, out var cached) && cached is not null)
             return cached;
 
         var segments = await db.Segments.AsNoTracking()
             .Include(segment => segment.Tag).ThenInclude(tag => tag!.TagGroup)
-            .Where(segment => segment.HostType == SegmentHostType.Scene && segment.HostId == sceneId)
+            .Where(segment => segment.HostType == SegmentHostType.Video && segment.HostId == videoId)
             .OrderBy(segment => segment.StartSec)
             .ThenBy(segment => segment.Id)
             .ToListAsync(ct);
 
         memoryCache.Set(cacheKey, segments, TimeSpan.FromMinutes(5));
-        RegisterSceneCacheKey(sceneId, cacheKey);
+        RegisterVideoCacheKey(videoId, cacheKey);
         return segments;
     }
 
-    private Task<List<SegmentDisplayRule>> LoadRulesAsync(int profileId, CancellationToken ct) =>
-        db.SegmentDisplayRules.AsNoTracking()
+    private async Task<List<SegmentDisplayRule>> LoadRulesAsync(int profileId, CancellationToken ct)
+    {
+        var cacheKey = $"segment-display-rules:{profileId}";
+        if (memoryCache.TryGetValue<List<SegmentDisplayRule>>(cacheKey, out var cached) && cached is not null)
+            return cached;
+
+        var rules = await db.SegmentDisplayRules.AsNoTracking()
             .Where(rule => rule.ProfileId == profileId)
             .OrderByDescending(rule => rule.TagId.HasValue)
             .ThenByDescending(rule => rule.Kind != null)
@@ -301,7 +462,11 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
             .ThenBy(rule => rule.Id)
             .ToListAsync(ct);
 
-    private static List<ResolvedSpan> BuildSceneSpans(int sceneId, int profileId, IReadOnlyList<Segment> segments, IReadOnlyList<SegmentDisplayRule> rules)
+        memoryCache.Set(cacheKey, rules, TimeSpan.FromMinutes(5));
+        return rules;
+    }
+
+    private static List<ResolvedSpan> BuildVideoSpans(int videoId, int profileId, IReadOnlyList<Segment> segments, IReadOnlyList<SegmentDisplayRule> rules)
     {
         var buckets = new Dictionary<SpanBucketKey, List<Segment>>();
 
@@ -355,9 +520,9 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
                 foreach (var segment in bucket)
                 {
                     spans.Add(new ResolvedSpan(
-                        ResolvedSpanKeys.Create(sceneId, profileId, pair.Key.SourceKey, pair.Key.Kind, pair.Key.TagId, segment.StartSec, segment.StartSec),
-                        SegmentHostType.Scene,
-                        sceneId,
+                        ResolvedSpanKeys.Create(videoId, profileId, pair.Key.SourceKey, pair.Key.Kind, pair.Key.TagId, segment.StartSec, segment.StartSec),
+                        SegmentHostType.Video,
+                        videoId,
                         segment.StartSec,
                         segment.StartSec,
                         pair.Key.SourceKey,
@@ -391,13 +556,13 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
                     continue;
                 }
 
-                spans.Add(CreateResolvedSpan(sceneId, profileId, pair.Key, sceneId, currentStart, currentEnd, bucket[0].Tag?.Name, currentIds));
+                spans.Add(CreateResolvedSpan(videoId, profileId, pair.Key, videoId, currentStart, currentEnd, bucket[0].Tag?.Name, currentIds));
                 currentStart = segment.StartSec;
                 currentEnd = segmentEnd;
                 currentIds = [segment.Id];
             }
 
-            spans.Add(CreateResolvedSpan(sceneId, profileId, pair.Key, sceneId, currentStart, currentEnd, bucket[0].Tag?.Name, currentIds));
+            spans.Add(CreateResolvedSpan(videoId, profileId, pair.Key, videoId, currentStart, currentEnd, bucket[0].Tag?.Name, currentIds));
         }
 
         spans.Sort(static (left, right) =>
@@ -413,10 +578,10 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
         return spans;
     }
 
-    private static ResolvedSpan CreateResolvedSpan(int sceneId, int profileId, SpanBucketKey key, int hostId, double startSec, double endSec, string? tagName, List<int> segmentIds)
+    private static ResolvedSpan CreateResolvedSpan(int videoId, int profileId, SpanBucketKey key, int hostId, double startSec, double endSec, string? tagName, List<int> segmentIds)
         => new(
-            ResolvedSpanKeys.Create(sceneId, profileId, key.SourceKey, key.Kind, key.TagId, startSec, endSec),
-            SegmentHostType.Scene,
+            ResolvedSpanKeys.Create(videoId, profileId, key.SourceKey, key.Kind, key.TagId, startSec, endSec),
+            SegmentHostType.Video,
             hostId,
             startSec,
             endSec,
@@ -595,32 +760,32 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
         return false;
     }
 
-    private static double GetDefaultMergeGap(string @operator, int profileId, int sceneId, IReadOnlyList<Segment> segments)
+    private static double GetDefaultMergeGap(string @operator, int profileId, int videoId, IReadOnlyList<Segment> segments)
     {
         _ = profileId;
-        _ = sceneId;
+        _ = videoId;
         _ = segments;
         return @operator == "intersection" ? 0 : 0;
     }
 
-    private static double GetDefaultMinDuration(string @operator, int profileId, int sceneId, IReadOnlyList<Segment> segments)
+    private static double GetDefaultMinDuration(string @operator, int profileId, int videoId, IReadOnlyList<Segment> segments)
     {
         _ = @operator;
         _ = profileId;
-        _ = sceneId;
+        _ = videoId;
         _ = segments;
         return 0;
     }
 
-    private static void RegisterCacheKey(int sceneId, int profileId, string cacheKey)
+    private static void RegisterCacheKey(int videoId, int profileId, string cacheKey)
     {
-        SceneCacheKeys.GetOrAdd(sceneId, static _ => new ConcurrentDictionary<string, byte>())[cacheKey] = 0;
+        VideoCacheKeys.GetOrAdd(videoId, static _ => new ConcurrentDictionary<string, byte>())[cacheKey] = 0;
         ProfileCacheKeys.GetOrAdd(profileId, static _ => new ConcurrentDictionary<string, byte>())[cacheKey] = 0;
     }
 
-    private static void RegisterSceneCacheKey(int sceneId, string cacheKey)
+    private static void RegisterVideoCacheKey(int videoId, string cacheKey)
     {
-        SceneCacheKeys.GetOrAdd(sceneId, static _ => new ConcurrentDictionary<string, byte>())[cacheKey] = 0;
+        VideoCacheKeys.GetOrAdd(videoId, static _ => new ConcurrentDictionary<string, byte>())[cacheKey] = 0;
     }
 
     private async Task EnsureBuiltInProfilesAsync(CancellationToken ct)
@@ -684,7 +849,7 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
         => new()
         {
             Profile = profile,
-            HostType = SegmentHostType.Scene,
+            HostType = SegmentHostType.Video,
             Visible = true,
             MinDurationSec = BuiltInDefaultMinDurationSec,
             MergeGapSec = BuiltInDefaultMergeGapSec,
@@ -703,3 +868,4 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
 
     private sealed record OperandMatch(List<IntervalAlgebra.Interval> Intervals, HashSet<int> SegmentIds);
 }
+

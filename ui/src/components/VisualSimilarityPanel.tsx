@@ -2,10 +2,10 @@ import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { Film, Image as ImageIcon, Sparkles } from "lucide-react";
 import { useVisualSimilarityApi } from "../hooks/useVisualSimilarityApi";
-import type { VisualSimilarImage, VisualSimilarScene } from "../api/types";
+import type { VisualSimilarImage, VisualSimilarVideo } from "../api/types";
 import { formatDuration } from "./shared";
 import { EntityCardGrid } from "./EntityCardGrid";
-import { ImageTile, SceneCard } from "./EntityCards";
+import { ImageTile, VideoCard } from "./EntityCards";
 import { useManualContext } from "./ManualContext";
 
 const SIMILAR_PER_PAGE = 8;
@@ -15,12 +15,12 @@ interface PanelProps {
   onNavigate: (route: any) => void;
 }
 
-export function useSceneVisualSimilarityAvailable(sceneId?: number) {
+export function useVideoVisualSimilarityAvailable(videoId?: number) {
   const visualSimilarity = useVisualSimilarityApi();
   const preview = useQuery({
-    queryKey: ["visual-similarity", "scene", sceneId, "similar-scenes", "preview"],
-    queryFn: () => visualSimilarity!.similarScenesForScene(sceneId!, { perPage: AVAILABILITY_PER_PAGE }),
-    enabled: visualSimilarity != null && typeof sceneId === "number" && sceneId > 0,
+    queryKey: ["visual-similarity", "video", videoId, "similar-videos", "preview"],
+    queryFn: () => visualSimilarity!.similarVideosForVideo(videoId!, { perPage: AVAILABILITY_PER_PAGE }),
+    enabled: visualSimilarity != null && typeof videoId === "number" && videoId > 0,
     retry: false,
   });
 
@@ -29,9 +29,9 @@ export function useSceneVisualSimilarityAvailable(sceneId?: number) {
 
 export function useImageVisualSimilarityAvailable(imageId?: number) {
   const visualSimilarity = useVisualSimilarityApi();
-  const similarScenesPreview = useQuery({
-    queryKey: ["visual-similarity", "image", imageId, "similar-scenes", "preview"],
-    queryFn: () => visualSimilarity!.similarScenesForImage(imageId!, { perPage: AVAILABILITY_PER_PAGE }),
+  const similarVideosPreview = useQuery({
+    queryKey: ["visual-similarity", "image", imageId, "similar-videos", "preview"],
+    queryFn: () => visualSimilarity!.similarVideosForImage(imageId!, { perPage: AVAILABILITY_PER_PAGE }),
     enabled: visualSimilarity != null && typeof imageId === "number" && imageId > 0,
     retry: false,
   });
@@ -43,15 +43,15 @@ export function useImageVisualSimilarityAvailable(imageId?: number) {
   });
 
   return visualSimilarity != null
-    && ((similarScenesPreview.data?.items.length ?? 0) > 0 || (similarImagesPreview.data?.items.length ?? 0) > 0);
+    && ((similarVideosPreview.data?.items.length ?? 0) > 0 || (similarImagesPreview.data?.items.length ?? 0) > 0);
 }
 
-export function SceneVisualSimilarityPanel({ sceneId, onNavigate }: PanelProps & { sceneId: number }) {
+export function VideoVisualSimilarityPanel({ videoId, onNavigate }: PanelProps & { videoId: number }) {
   useManualContext(["panel:visual-similarity", "feature:visual-similarity"]);
   const visualSimilarity = useVisualSimilarityApi();
-  const similarScenes = useQuery({
-    queryKey: ["visual-similarity", "scene", sceneId, "similar-scenes"],
-    queryFn: () => visualSimilarity!.similarScenesForScene(sceneId, { perPage: SIMILAR_PER_PAGE }),
+  const similarVideos = useQuery({
+    queryKey: ["visual-similarity", "video", videoId, "similar-videos"],
+    queryFn: () => visualSimilarity!.similarVideosForVideo(videoId, { perPage: SIMILAR_PER_PAGE }),
     enabled: visualSimilarity != null,
     retry: false,
   });
@@ -60,14 +60,14 @@ export function SceneVisualSimilarityPanel({ sceneId, onNavigate }: PanelProps &
     return <UnavailablePanel message="No visual embedding provider is available." />;
   }
 
-  if (similarScenes.isError) {
+  if (similarVideos.isError) {
     return <UnavailablePanel message="Visual similarity could not be loaded." />;
   }
 
   return (
     <div className="space-y-6">
       <SimilarityHeader />
-      <SimilarSceneSection title="Similar Scenes" items={similarScenes.data?.items ?? []} loading={similarScenes.isLoading} error={similarScenes.isError} onNavigate={onNavigate} />
+      <SimilarVideoSection title="Similar Videos" items={similarVideos.data?.items ?? []} loading={similarVideos.isLoading} error={similarVideos.isError} onNavigate={onNavigate} />
     </div>
   );
 }
@@ -75,9 +75,9 @@ export function SceneVisualSimilarityPanel({ sceneId, onNavigate }: PanelProps &
 export function ImageVisualSimilarityPanel({ imageId, onNavigate }: PanelProps & { imageId: number }) {
   useManualContext(["panel:visual-similarity", "feature:visual-similarity"]);
   const visualSimilarity = useVisualSimilarityApi();
-  const similarScenes = useQuery({
-    queryKey: ["visual-similarity", "image", imageId, "similar-scenes"],
-    queryFn: () => visualSimilarity!.similarScenesForImage(imageId, { perPage: SIMILAR_PER_PAGE }),
+  const similarVideos = useQuery({
+    queryKey: ["visual-similarity", "image", imageId, "similar-videos"],
+    queryFn: () => visualSimilarity!.similarVideosForImage(imageId, { perPage: SIMILAR_PER_PAGE }),
     enabled: visualSimilarity != null,
     retry: false,
   });
@@ -92,14 +92,14 @@ export function ImageVisualSimilarityPanel({ imageId, onNavigate }: PanelProps &
     return <UnavailablePanel message="No visual embedding provider is available." />;
   }
 
-  if (similarScenes.isError && similarImages.isError) {
+  if (similarVideos.isError && similarImages.isError) {
     return <UnavailablePanel message="Visual similarity could not be loaded." />;
   }
 
   return (
     <div className="space-y-6">
       <SimilarityHeader />
-      <SimilarSceneSection title="Similar Scenes" items={similarScenes.data?.items ?? []} loading={similarScenes.isLoading} error={similarScenes.isError} onNavigate={onNavigate} />
+      <SimilarVideoSection title="Similar Videos" items={similarVideos.data?.items ?? []} loading={similarVideos.isLoading} error={similarVideos.isError} onNavigate={onNavigate} />
       <SimilarImageSection title="Similar Images" items={similarImages.data?.items ?? []} loading={similarImages.isLoading} error={similarImages.isError} onNavigate={onNavigate} />
     </div>
   );
@@ -107,28 +107,28 @@ export function ImageVisualSimilarityPanel({ imageId, onNavigate }: PanelProps &
 
 type SegmentSimilarityInterval = { startSec: number; endSec?: number };
 
-export function useSegmentVisualSimilarityAvailable({ sceneId, startSec, endSec, intervals }: { sceneId?: number; startSec?: number; endSec?: number; intervals?: SegmentSimilarityInterval[] }) {
+export function useSegmentVisualSimilarityAvailable({ videoId, startSec, endSec, intervals }: { videoId?: number; startSec?: number; endSec?: number; intervals?: SegmentSimilarityInterval[] }) {
   const visualSimilarity = useVisualSimilarityApi();
   const queryIntervals = normalizeIntervals(intervals, startSec, endSec);
   const intervalKey = queryIntervals.map((interval) => `${interval.startSec}:${interval.endSec ?? ""}`).join("|");
   const preview = useQuery({
-    queryKey: ["visual-similarity", "scene", sceneId, "segment-similar-scenes", "preview", intervalKey],
-    queryFn: () => visualSimilarity!.similarScenesForSceneSegment(sceneId!, { intervals: queryIntervals, perPage: AVAILABILITY_PER_PAGE }),
-    enabled: visualSimilarity != null && typeof sceneId === "number" && sceneId > 0 && queryIntervals.length > 0,
+    queryKey: ["visual-similarity", "video", videoId, "segment-similar-videos", "preview", intervalKey],
+    queryFn: () => visualSimilarity!.similarVideosForVideoSegment(videoId!, { intervals: queryIntervals, perPage: AVAILABILITY_PER_PAGE }),
+    enabled: visualSimilarity != null && typeof videoId === "number" && videoId > 0 && queryIntervals.length > 0,
     retry: false,
   });
 
   return visualSimilarity != null && (preview.data?.items.length ?? 0) > 0;
 }
 
-export function SegmentVisualSimilarityPanel({ sceneId, startSec, endSec, intervals, onNavigate }: PanelProps & { sceneId: number; startSec?: number; endSec?: number; intervals?: SegmentSimilarityInterval[] }) {
+export function SegmentVisualSimilarityPanel({ videoId, startSec, endSec, intervals, onNavigate }: PanelProps & { videoId: number; startSec?: number; endSec?: number; intervals?: SegmentSimilarityInterval[] }) {
   useManualContext(["panel:visual-similarity", "feature:visual-similarity"]);
   const visualSimilarity = useVisualSimilarityApi();
   const queryIntervals = normalizeIntervals(intervals, startSec, endSec);
   const intervalKey = queryIntervals.map((interval) => `${interval.startSec}:${interval.endSec ?? ""}`).join("|");
-  const similarScenes = useQuery({
-    queryKey: ["visual-similarity", "scene", sceneId, "segment-similar-scenes", intervalKey],
-    queryFn: () => visualSimilarity!.similarScenesForSceneSegment(sceneId, { intervals: queryIntervals, perPage: SIMILAR_PER_PAGE }),
+  const similarVideos = useQuery({
+    queryKey: ["visual-similarity", "video", videoId, "segment-similar-videos", intervalKey],
+    queryFn: () => visualSimilarity!.similarVideosForVideoSegment(videoId, { intervals: queryIntervals, perPage: SIMILAR_PER_PAGE }),
     retry: false,
     enabled: visualSimilarity != null && queryIntervals.length > 0,
   });
@@ -137,14 +137,14 @@ export function SegmentVisualSimilarityPanel({ sceneId, startSec, endSec, interv
     return <UnavailablePanel message="No visual embedding provider is available." />;
   }
 
-  if (similarScenes.isError) {
+  if (similarVideos.isError) {
     return <UnavailablePanel message="Visual similarity could not be loaded." />;
   }
 
   return (
     <div className="space-y-6">
       <SimilarityHeader />
-      <SimilarSceneSection title="Similar Scenes" items={similarScenes.data?.items ?? []} loading={similarScenes.isLoading} error={similarScenes.isError} onNavigate={onNavigate} />
+      <SimilarVideoSection title="Similar Videos" items={similarVideos.data?.items ?? []} loading={similarVideos.isLoading} error={similarVideos.isError} onNavigate={onNavigate} />
     </div>
   );
 }
@@ -158,7 +158,7 @@ function SimilarityHeader() {
   );
 }
 
-function SimilarSceneSection({ title, items, loading, error, onNavigate }: { title: string; items: VisualSimilarScene[]; loading: boolean; error: boolean; onNavigate: (route: any) => void }) {
+function SimilarVideoSection({ title, items, loading, error, onNavigate }: { title: string; items: VisualSimilarVideo[]; loading: boolean; error: boolean; onNavigate: (route: any) => void }) {
   if (error) {
     return null;
   }
@@ -173,7 +173,7 @@ function SimilarSceneSection({ title, items, loading, error, onNavigate }: { tit
       ) : (
         <EntityCardGrid minCardWidth="240px" gapClassName="gap-4" className="mt-3">
           {items.map((item) => (
-            <SimilarSceneCard key={item.scene.id} item={item} onNavigate={onNavigate} />
+            <SimilarVideoCard key={item.video.id} item={item} onNavigate={onNavigate} />
           ))}
         </EntityCardGrid>
       )}
@@ -213,14 +213,14 @@ function SectionTitle({ title, count }: { title: string; count: number }) {
   );
 }
 
-function SimilarSceneCard({ item, onNavigate }: { item: VisualSimilarScene; onNavigate: (route: any) => void }) {
-  const scene = item.scene;
+function SimilarVideoCard({ item, onNavigate }: { item: VisualSimilarVideo; onNavigate: (route: any) => void }) {
+  const video = item.video;
   const matchStart = item.sectionIndex > 0 ? item.startSec : undefined;
 
   return (
     <div className="relative h-full">
-      <SceneCard scene={scene} onClick={() => onNavigate(matchStart != null ? { page: "scene", id: scene.id, seekTo: matchStart } : { page: "scene", id: scene.id })} onNavigate={onNavigate} />
-      <SimilarityOverlay distance={item.distance} label={getSceneMeta(item)} />
+      <VideoCard video={video} onClick={() => onNavigate(matchStart != null ? { page: "video", id: video.id, seekTo: matchStart } : { page: "video", id: video.id })} onNavigate={onNavigate} />
+      <SimilarityOverlay distance={item.distance} label={getVideoMeta(item)} />
     </div>
   );
 }
@@ -263,7 +263,7 @@ function UnavailablePanel({ message }: { message: string }) {
   return <EmptyPanel icon={<Sparkles className="h-10 w-10" />} message={message} />;
 }
 
-function getSceneMeta(item: VisualSimilarScene) {
+function getVideoMeta(item: VisualSimilarVideo) {
   if (item.sectionIndex > 0 && item.startSec != null) {
     return item.endSec != null ? `${formatDuration(item.startSec)} - ${formatDuration(item.endSec)}` : formatDuration(item.startSec);
   }

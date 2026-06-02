@@ -11,7 +11,7 @@ public record FaceOverviewDto(
     int DetectionCount,
     int AppearanceCount,
     int FrameSampleCount,
-    int SceneCount,
+    int VideoCount,
     int ImageCount,
     FaceTopSuggestionDto? TopSuggestion,
     string? PrimarySourceKey,
@@ -43,5 +43,5 @@ public record FaceAppearanceDto(
 
 public record FaceAppearancesResponseDto(
     IReadOnlyList<FaceAppearanceDto> Items,
-    int TotalScenes,
+    int TotalVideos,
     int TotalImages);

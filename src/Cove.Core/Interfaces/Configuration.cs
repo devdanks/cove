@@ -103,7 +103,7 @@ public class InterfaceConfig
 {
     public static readonly string[] LegacyDefaultMenuItems =
     [
-        "scenes",
+        "videos",
         "images",
         "performers",
         "galleries",
@@ -116,7 +116,7 @@ public class InterfaceConfig
 
     public static readonly string[] SegmentsDefaultMenuItems =
     [
-        "scenes",
+        "videos",
         "segments",
         "images",
         "performers",
@@ -128,7 +128,7 @@ public class InterfaceConfig
 
     public static readonly string[] FacesDefaultMenuItems =
     [
-        "scenes",
+        "videos",
         "segments",
         "images",
         "faces",
@@ -141,7 +141,7 @@ public class InterfaceConfig
 
     public static readonly string[] DefaultMenuItems =
     [
-        "scenes",
+        "videos",
         "images",
         "audios",
         "texts",
@@ -176,7 +176,7 @@ public class UiConfig
     public bool EnableCSSCustomization { get; set; }
     public bool EnableJSCustomization { get; set; }
     public string? CustomLocalesPath { get; set; }
-    // Scene Player
+    // Video Player
     public bool AutostartVideo { get; set; } = true;
     public bool AutostartVideoOnPlaySelected { get; set; } = true;
     public bool AutoplayOnListClick { get; set; }
@@ -205,7 +205,7 @@ public class UiConfig
     // Lightbox
     public bool DeleteFileDefault { get; set; }
     public int SlideshowDelay { get; set; } = 5000;
-    // Scene list
+    // Video list
     public bool NoBrowser { get; set; }
     public bool NotificationsEnabled { get; set; } = true;
     public Dictionary<string, string> KeybindingOverrides { get; set; } = [];
@@ -313,3 +313,4 @@ public static class CoveDefaultPaths
             : Path.GetFullPath(Path.Combine(GetDataRoot(), expanded));
     }
 }
+

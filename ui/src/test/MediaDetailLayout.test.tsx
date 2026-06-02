@@ -16,7 +16,7 @@ describe("MediaDetailLayout", () => {
   it("renders media, tabs, and content", () => {
     render(
       <MediaDetailLayout
-        title="Scene Title"
+        title="Video Title"
         media={<div>Player Surface</div>}
         tabs={[
           { key: "details", label: "Details" },
@@ -30,7 +30,7 @@ describe("MediaDetailLayout", () => {
       </MediaDetailLayout>,
     );
 
-    expect(screen.getByRole("heading", { name: "Scene Title" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Video Title" })).toBeInTheDocument();
     expect(screen.getByText("Player Surface")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /details/i })).toBeInTheDocument();
     expect(screen.getByText("Body content")).toBeInTheDocument();
@@ -41,7 +41,7 @@ describe("MediaDetailLayout", () => {
 
     render(
       <MediaDetailLayout
-        title="Scene Title"
+        title="Video Title"
         tabs={[
           { key: "details", label: "Details" },
           { key: "segments", label: "Segments" },
@@ -64,7 +64,7 @@ describe("MediaDetailLayout", () => {
 
     render(
       <MediaDetailLayout
-        title="Scene Title"
+        title="Video Title"
         media={<div>Player Surface</div>}
         tabs={[
           { key: "details", label: "Details" },
@@ -98,7 +98,7 @@ describe("MediaDetailLayout", () => {
 
     render(
       <MediaDetailLayout
-        title="Scene Title"
+        title="Video Title"
         media={<div>Player Surface</div>}
         tabs={[
           { key: "details", label: "Details" },
@@ -122,7 +122,7 @@ describe("MediaDetailLayout", () => {
   it("publishes the active detail tab as manual context", async () => {
     render(
       <MediaDetailLayout
-        title="Scene Title"
+        title="Video Title"
         tabs={[
           { key: "details", label: "Details" },
           { key: "related", label: "Related", manualContexts: ["panel:related-media", "feature:example.detail"] },
@@ -150,7 +150,7 @@ describe("MediaDetailLayout", () => {
 
     render(
       <MediaDetailLayout
-        title="Scene Title"
+        title="Video Title"
         tabs={[
           { key: "details", label: "Details" },
           { key: "segments", label: "Segments" },
@@ -185,7 +185,7 @@ describe("MediaDetailLayout", () => {
 
     render(
       <MediaDetailLayout
-        title="Scene Title"
+        title="Video Title"
         keyboardShortcuts={[{ key: "s", description: "Open segments", handler: onShortcut }]}
       >
         <MediaDetailLayout.Content>
@@ -200,7 +200,7 @@ describe("MediaDetailLayout", () => {
 
   it("adds the sticky class when mediaSticky is enabled", () => {
     render(
-      <MediaDetailLayout title="Scene Title" media={<div>Player Surface</div>} mediaSticky>
+      <MediaDetailLayout title="Video Title" media={<div>Player Surface</div>} mediaSticky>
         <MediaDetailLayout.Content>
           <div>Body content</div>
         </MediaDetailLayout.Content>

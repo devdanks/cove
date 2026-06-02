@@ -41,7 +41,7 @@ export function StatsPage(_props?: { onNavigate?: (route: Route) => void }) {
     return <div className="p-6 text-secondary">No stats available.</div>;
   }
 
-  const totalEntities = stats.sceneCount + stats.imageCount + stats.galleryCount + stats.performerCount + stats.studioCount + stats.tagCount + stats.groupCount + stats.audioCount + stats.textCount + stats.segmentCount;
+  const totalEntities = stats.videoCount + stats.imageCount + stats.galleryCount + stats.performerCount + stats.studioCount + stats.tagCount + stats.groupCount + stats.audioCount + stats.textCount + stats.segmentCount;
 
   return (
     <div className="space-y-8 p-6">
@@ -96,7 +96,7 @@ function MetricCard({ label, value, detail, icon: Icon, tone = "slate" }: Metric
 
 function entityMetrics(stats: Stats): MetricCardProps[] {
   return [
-    { label: "Scenes", value: formatCount(stats.sceneCount), icon: Film, tone: "cyan" },
+    { label: "Videos", value: formatCount(stats.videoCount), icon: Film, tone: "cyan" },
     { label: "Images", value: formatCount(stats.imageCount), icon: ImageIcon, tone: "emerald" },
     { label: "Audios", value: formatCount(stats.audioCount), icon: Headphones, tone: "amber" },
     { label: "Texts", value: formatCount(stats.textCount), icon: FileText, tone: "rose" },
@@ -111,7 +111,7 @@ function entityMetrics(stats: Stats): MetricCardProps[] {
 function fileMetrics(stats: Stats): MetricCardProps[] {
   return [
     { label: "Total File Size", value: formatFileSize(stats.totalFileSize), icon: HardDrive, tone: "slate" },
-    { label: "Scene Files", value: formatFileSize(stats.sceneFileSize), detail: formatDuration(stats.sceneDuration), icon: Film, tone: "cyan" },
+    { label: "Video Files", value: formatFileSize(stats.videoFileSize), detail: formatDuration(stats.videoDuration), icon: Film, tone: "cyan" },
     { label: "Image Files", value: formatFileSize(stats.imageFileSize), icon: ImageIcon, tone: "emerald" },
     { label: "Audio Files", value: formatFileSize(stats.audioFileSize), detail: formatDuration(stats.audioDuration), icon: Headphones, tone: "amber" },
     { label: "Text Files", value: formatFileSize(stats.textFileSize), icon: FileText, tone: "rose" },
@@ -120,12 +120,12 @@ function fileMetrics(stats: Stats): MetricCardProps[] {
 
 function engagementMetrics(stats: Stats): MetricCardProps[] {
   return [
-    { label: "Scene Plays", value: formatCount(stats.scenePlayCount), detail: `${formatCount(stats.sceneCompleteCount)} completed`, icon: Film, tone: "cyan" },
+    { label: "Video Plays", value: formatCount(stats.videoPlayCount), detail: `${formatCount(stats.videoCompleteCount)} completed`, icon: Film, tone: "cyan" },
     { label: "Audio Plays", value: formatCount(stats.audioPlayCount), detail: `${formatCount(stats.audioCompleteCount)} completed`, icon: Headphones, tone: "amber" },
     { label: "Text Reads", value: formatCount(stats.textReadCount), detail: `${formatCount(stats.textCompleteCount)} completed`, icon: FileText, tone: "rose" },
     { label: "Image Views", value: formatCount(stats.imageViewCount), detail: `${formatCount(stats.imageCompleteCount)} completed`, icon: Eye, tone: "emerald" },
     { label: "Segment Plays", value: formatCount(stats.segmentViewCount), detail: `${formatCount(stats.segmentCompleteCount)} completed`, icon: Layers, tone: "cyan" },
-    { label: "Scene Watch Time", value: formatDuration(stats.sceneConsumedSeconds), icon: CheckCircle2, tone: "sky" },
+    { label: "Video Watch Time", value: formatDuration(stats.videoConsumedSeconds), icon: CheckCircle2, tone: "sky" },
     { label: "Audio Listen Time", value: formatDuration(stats.audioConsumedSeconds), icon: Activity, tone: "violet" },
     { label: "Text Read Time", value: formatDuration(stats.textConsumedSeconds), icon: FileText, tone: "slate" },
     { label: "Image View Time", value: formatDuration(stats.imageConsumedSeconds), icon: ImageIcon, tone: "emerald" },

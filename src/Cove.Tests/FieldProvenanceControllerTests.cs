@@ -49,14 +49,14 @@ public class FieldProvenanceControllerTests
         var dbName = $"field-provenance-segment-{Guid.NewGuid():N}";
         await using var db = CreateDbContext(dbName);
 
-        var scene = new Scene { Title = "Scene" };
-        db.Scenes.Add(scene);
+        var video = new Video { Title = "Video" };
+        db.Videos.Add(video);
         await db.SaveChangesAsync();
 
         var segment = new Segment
         {
-            HostType = SegmentHostType.Scene,
-            HostId = scene.Id,
+            HostType = SegmentHostType.Video,
+            HostId = video.Id,
             StartSec = 12.5,
             EndSec = 24,
             SourceKey = "ext:test",
@@ -69,7 +69,7 @@ public class FieldProvenanceControllerTests
         await fieldProvenance.RecordAsync(AffinityHostType.Segment, segment.Id, "title", "Detected beat", "ext:test", cancellationToken: CancellationToken.None);
         await db.SaveChangesAsync();
 
-        var controller = new SegmentsController(db, null!, null!, fieldProvenance);
+        var controller = new SegmentsController(db, null!, fieldProvenance);
 
         var result = await controller.GetById(segment.Id, CancellationToken.None);
         var ok = Assert.IsType<OkObjectResult>(result.Result);

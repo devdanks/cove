@@ -1,9 +1,9 @@
 import { system } from "../api/client";
 import type { DownloaderMatch } from "../api/types";
-import { loadScrapeApplyPreferences } from "../components/sceneScrapeUtils";
+import { loadScrapeApplyPreferences } from "../components/videoScrapeUtils";
 
 export type UrlDownloadMode = "now" | "later";
-export type DownloadEntityName = "Audio" | "Image" | "Scene" | "Text";
+export type DownloadEntityName = "Audio" | "Image" | "Video" | "Text";
 
 export class NoDownloaderFoundError extends Error {
   readonly url: string;

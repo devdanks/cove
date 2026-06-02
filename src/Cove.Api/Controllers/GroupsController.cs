@@ -17,7 +17,7 @@ namespace Cove.Api.Controllers;
 [RequiresPermission(Permissions.GroupsRead)]
 public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, IUserEngagementService engagementService, CustomFieldService? customFields = null, DynamicGroupResolver? dynamicGroups = null, ICurrentPrincipalAccessor? principalAccessor = null, IFieldProvenanceService? fieldProvenanceService = null) : ControllerBase
 {
-    private static readonly string[] DefaultAllowedHostTypes = ["scene", "image", "audio", "text", "group", "performer", "studio", "tag", "gallery", "face", "segment"];
+    private static readonly string[] DefaultAllowedHostTypes = ["video", "image", "audio", "text", "group", "performer", "studio", "tag", "gallery", "face", "segment"];
     private readonly CustomFieldService _customFields = customFields ?? new CustomFieldService(db);
 
     [HttpGet]
@@ -86,7 +86,7 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
             Kind = dto.Kind ?? GroupKind.Static,
             QuerySourceKey = dto.Kind == GroupKind.Dynamic ? NormalizeOptionalText(dto.QuerySourceKey) : null,
             QueryJson = dto.Kind == GroupKind.Dynamic ? NormalizeOptionalText(dto.QueryJson) : null,
-            ShowInSceneLists = dto.ShowInSceneLists ?? false,
+            ShowInVideoLists = dto.ShowInVideoLists ?? false,
             AllowedHostTypes = NormalizeAllowedHostTypes(dto.AllowedHostTypes ?? DeriveAllowedHostTypes(dto.Kind ?? GroupKind.Static, dto.QuerySourceKey, dto.QueryJson)),
             SortOrder = dto.SortOrder ?? 0,
         };
@@ -129,7 +129,7 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
         }
         if (dto.QuerySourceKey != null) group.QuerySourceKey = group.Kind == GroupKind.Dynamic ? NormalizeOptionalText(dto.QuerySourceKey) : null;
         if (dto.QueryJson != null) group.QueryJson = group.Kind == GroupKind.Dynamic ? NormalizeOptionalText(dto.QueryJson) : null;
-        if (dto.ShowInSceneLists.HasValue) group.ShowInSceneLists = dto.ShowInSceneLists.Value;
+        if (dto.ShowInVideoLists.HasValue) group.ShowInVideoLists = dto.ShowInVideoLists.Value;
         if (dto.AllowedHostTypes != null)
             group.AllowedHostTypes = NormalizeAllowedHostTypes(dto.AllowedHostTypes);
         else if (group.Kind == GroupKind.Dynamic && string.Equals(group.QuerySourceKey, DynamicGroupResolver.FilterSourceKey, StringComparison.OrdinalIgnoreCase) && dto.QueryJson != null)
@@ -415,9 +415,9 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
             g.StudioId, g.Studio?.Name, g.Director, g.Synopsis,
             g.Urls.Select(u => u.Url).ToList(),
             g.GroupTags.Where(gt => gt.Tag != null).Select(gt => TagDtoMapping.MapTagDto(gt.Tag!)).ToList(),
-            counts.SceneCount,
+            counts.VideoCount,
             itemCount,
-            g.GroupItems.Any(item => item.Kind == GroupItemKind.SceneRange),
+            g.GroupItems.Any(item => item.Kind == GroupItemKind.VideoRange),
             g.SubGroupRelations?.Count ?? 0,
             g.ContainingGroupRelations?.Count ?? 0,
             customFieldValues,
@@ -429,7 +429,7 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
             g.QueryJson,
             g.LastResolvedAt?.ToString("o"),
             g.CachedItemCount,
-            g.ShowInSceneLists,
+            g.ShowInVideoLists,
             g.AllowedHostTypes,
             g.SortOrder,
             counts.ImageCount,
@@ -445,7 +445,7 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
     }
 
     private string? ResolveFrontImagePath(Group group)
-        => group.FrontImageBlobId != null || group.GroupItems.Any(item => item.ImageId.HasValue || item.SceneId.HasValue)
+        => group.FrontImageBlobId != null || group.GroupItems.Any(item => item.ImageId.HasValue || item.VideoId.HasValue)
             ? EntityImageUrls.GroupFront(ControllerContext.HttpContext, group.Id, group.UpdatedAt)
             : null;
 
@@ -469,7 +469,7 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
         }
 
         foreach (var group in dynamicGroupsToCount.Where(group => string.Equals(group.QuerySourceKey, DynamicGroupResolver.ContinueWatchingSourceKey, StringComparison.OrdinalIgnoreCase)))
-            result[group.Id] = new GroupItemTypeCounts(SceneCount: group.CachedItemCount ?? 0, ItemCount: group.CachedItemCount ?? 0);
+            result[group.Id] = new GroupItemTypeCounts(VideoCount: group.CachedItemCount ?? 0, ItemCount: group.CachedItemCount ?? 0);
 
         if (principalAccessor?.Current?.UserId is not int userId)
             return result;
@@ -506,20 +506,20 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
         static int CountHosts(IEnumerable<GroupItem> items, string hostType)
             => items
                 .Where(item => string.Equals(item.HostType, hostType, StringComparison.OrdinalIgnoreCase))
-                .Select(item => item.HostId > 0 ? item.HostId : item.SceneId ?? item.ImageId ?? item.ChildGroupId ?? 0)
+                .Select(item => item.HostId > 0 ? item.HostId : item.VideoId ?? item.ImageId ?? item.ChildGroupId ?? 0)
                 .Where(id => id > 0)
                 .Distinct()
                 .Count();
 
-        var sceneCount = group.GroupItems
-            .Where(item => item.Kind is GroupItemKind.Scene or GroupItemKind.SceneRange || string.Equals(item.HostType, "scene", StringComparison.OrdinalIgnoreCase))
-            .Select(item => item.SceneId ?? item.HostId)
+        var videoCount = group.GroupItems
+            .Where(item => item.Kind is GroupItemKind.Video or GroupItemKind.VideoRange || string.Equals(item.HostType, "video", StringComparison.OrdinalIgnoreCase))
+            .Select(item => item.VideoId ?? item.HostId)
             .Where(id => id > 0)
             .Distinct()
             .Count();
 
         return new GroupItemTypeCounts(
-            SceneCount: sceneCount,
+            VideoCount: videoCount,
             ImageCount: CountHosts(group.GroupItems, "image"),
             AudioCount: CountHosts(group.GroupItems, "audio"),
             TextCount: CountHosts(group.GroupItems, "text"),
@@ -536,7 +536,7 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
     {
         var counts = rows.ToDictionary(row => row.HostType, row => row.Count);
         return new GroupItemTypeCounts(
-            SceneCount: counts.GetValueOrDefault(AffinityHostType.Scene),
+            VideoCount: counts.GetValueOrDefault(AffinityHostType.Video),
             ImageCount: counts.GetValueOrDefault(AffinityHostType.Image),
             AudioCount: counts.GetValueOrDefault(AffinityHostType.Audio),
             TextCount: counts.GetValueOrDefault(AffinityHostType.Text),
@@ -559,7 +559,7 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
         "tag" or "tags" => new GroupItemTypeCounts(TagItemCount: count, ItemCount: count),
         "face" or "faces" => new GroupItemTypeCounts(FaceCount: count, ItemCount: count),
         "segment" or "segments" => new GroupItemTypeCounts(SegmentCount: count, ItemCount: count),
-        _ => new GroupItemTypeCounts(SceneCount: count, ItemCount: count),
+        _ => new GroupItemTypeCounts(VideoCount: count, ItemCount: count),
     };
 
     private static GroupItemTypeCounts CountDynamicItems(IReadOnlyCollection<GroupItemDto> items)
@@ -568,7 +568,7 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
             => items.Count(item => kinds.Contains(item.Kind));
 
         return new GroupItemTypeCounts(
-            SceneCount: CountKind(GroupItemKind.Scene, GroupItemKind.SceneRange),
+            VideoCount: CountKind(GroupItemKind.Video, GroupItemKind.VideoRange),
             ImageCount: CountKind(GroupItemKind.Image),
             AudioCount: CountKind(GroupItemKind.Audio),
             TextCount: CountKind(GroupItemKind.Text),
@@ -586,7 +586,7 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
         int CountKind(params GroupItemKind[] kinds) => kinds.Sum(kind => counts.GetValueOrDefault(kind));
 
         return new GroupItemTypeCounts(
-            SceneCount: CountKind(GroupItemKind.Scene, GroupItemKind.SceneRange),
+            VideoCount: CountKind(GroupItemKind.Video, GroupItemKind.VideoRange),
             ImageCount: CountKind(GroupItemKind.Image),
             AudioCount: CountKind(GroupItemKind.Audio),
             TextCount: CountKind(GroupItemKind.Text),
@@ -601,7 +601,7 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
 
     private static IReadOnlyList<string> ParseFilterDynamicGroupEntityTypes(string? queryJson)
     {
-        if (string.IsNullOrWhiteSpace(queryJson)) return ["scene"];
+        if (string.IsNullOrWhiteSpace(queryJson)) return ["video"];
         try
         {
             using var document = JsonDocument.Parse(queryJson);
@@ -619,17 +619,17 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
 
             return document.RootElement.TryGetProperty("entityType", out var entityType) && entityType.ValueKind == JsonValueKind.String
                 ? [NormalizeEntityTypeName(entityType.GetString())]
-                : ["scene"];
+                : ["video"];
         }
         catch (JsonException)
         {
-            return ["scene"];
+            return ["video"];
         }
     }
 
     private static string NormalizeEntityTypeName(string? value)
     {
-        var normalized = string.IsNullOrWhiteSpace(value) ? "scene" : value.Trim().ToLowerInvariant();
+        var normalized = string.IsNullOrWhiteSpace(value) ? "video" : value.Trim().ToLowerInvariant();
         return normalized.EndsWith('s') ? normalized[..^1] : normalized;
     }
 
@@ -657,7 +657,7 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
     }
 
     private sealed record GroupItemTypeCounts(
-        int SceneCount = 0,
+        int VideoCount = 0,
         int ImageCount = 0,
         int AudioCount = 0,
         int TextCount = 0,
@@ -669,3 +669,4 @@ public class GroupsController(IGroupRepository groupRepo, Data.CoveContext db, I
         int SegmentCount = 0,
         int ItemCount = 0);
 }
+

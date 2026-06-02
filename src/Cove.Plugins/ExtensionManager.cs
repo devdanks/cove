@@ -24,6 +24,7 @@ public class ExtensionManager
     private readonly Dictionary<string, ExtensionManifestFile> _manifestFiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ExtensionInstallation> _installations = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _initializedExtensions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _startupDisabledExtensions = new(StringComparer.OrdinalIgnoreCase);
     private IServiceScopeFactory? _scopeFactory;
     private IServiceProvider? _rootServices;
     private ILogger<ExtensionManager>? _logger;
@@ -177,6 +178,8 @@ public class ExtensionManager
                             foreach (var le in rtle.LoaderExceptions ?? [])
                                 Console.Error.WriteLine($"  Loader exception: {le?.Message}");
                         }
+                        if (manifestFile != null)
+                            DisableExtensionForStartupFailure(manifestFile.Id, ex, "discover");
                     }
                 }
             }
@@ -393,7 +396,19 @@ public class ExtensionManager
     public void ConfigureServices(IServiceCollection services)
     {
         foreach (var ext in GetInitializationOrder())
-            ext.ConfigureServices(services, _context);
+        {
+            if (!IsEnabled(ext.Id))
+                continue;
+
+            try
+            {
+                ext.ConfigureServices(services, _context);
+            }
+            catch (Exception ex)
+            {
+                DisableExtensionForStartupFailure(ext.Id, ex, "ConfigureServices");
+            }
+        }
     }
 
     /// <summary>Map API endpoints from all enabled IApiExtension instances.</summary>
@@ -429,6 +444,9 @@ public class ExtensionManager
 
         // Load installation state from DB
         await LoadInstallationStateAsync(services, ct);
+        ApplyStartupDisables();
+        foreach (var extensionId in _startupDisabledExtensions)
+            await PersistInstallationStateAsync(extensionId, ct);
 
         // Validate dependencies
         var problems = ValidateDependencies();
@@ -462,7 +480,8 @@ public class ExtensionManager
             }
             catch (Exception ex)
             {
-                _logger?.LogError(ex, "Failed to initialize extension {Id}", ext.Id);
+                DisableExtensionForStartupFailure(ext.Id, ex, "InitializeAsync");
+                await PersistInstallationStateAsync(ext.Id, ct);
             }
         }
     }
@@ -544,7 +563,8 @@ public class ExtensionManager
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Failed to hot-initialize extension {Id}", ext.Id);
+            DisableExtensionForStartupFailure(ext.Id, ex, "hot-initialize");
+            await PersistInstallationStateAsync(ext.Id, ct);
             return false;
         }
     }
@@ -585,7 +605,8 @@ public class ExtensionManager
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Failed to initialize extension {Id} on demand", ext.Id);
+            DisableExtensionForStartupFailure(ext.Id, ex, "on-demand initialize");
+            await PersistInstallationStateAsync(ext.Id, ct);
             return false;
         }
     }
@@ -1236,6 +1257,42 @@ public class ExtensionManager
         if (_scopeFactory == null) return;
         using var scope = _scopeFactory.CreateScope();
         await SaveInstallationAsync(scope.ServiceProvider, extensionId, ct);
+    }
+
+    private void ApplyStartupDisables()
+    {
+        foreach (var extensionId in _startupDisabledExtensions)
+        {
+            if (_installations.TryGetValue(extensionId, out var install))
+            {
+                install.Enabled = false;
+            }
+        }
+    }
+
+    private void DisableExtensionForStartupFailure(string extensionId, Exception ex, string phase)
+    {
+        if (string.IsNullOrWhiteSpace(extensionId))
+            return;
+
+        if (_installations.TryGetValue(extensionId, out var install))
+        {
+            install.Enabled = false;
+        }
+        else
+        {
+            _installations[extensionId] = new ExtensionInstallation
+            {
+                ExtensionId = extensionId,
+                Version = "0.0.0",
+                Enabled = false,
+                Source = "local",
+            };
+        }
+
+        _startupDisabledExtensions.Add(extensionId);
+        _initializedExtensions.Remove(extensionId);
+        _logger?.LogError(ex, "Extension {Id} failed during {Phase} and was disabled", extensionId, phase);
     }
 
     private async Task RemoveInstallationStateAsync(string extensionId, CancellationToken ct)

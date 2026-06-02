@@ -1,12 +1,12 @@
 import { useMemo, useState } from "react";
-import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, X } from "lucide-react";
-import { faces, galleries, groups, images, performers, scenes, studios, tags } from "../api/client";
-import type { CustomFieldType, Face, Gallery, Group, Image, Performer, Scene, Studio, Tag, TagProvenance } from "../api/types";
+import { faces, galleries, groups, images, performers, videos, studios, tags } from "../api/client";
+import type { CustomFieldType, Face, Gallery, Group, Image, Performer, Video, Studio, Tag, TagProvenance } from "../api/types";
 import { TagProvenanceHover } from "./TagProvenanceHover";
 import { rankSearchOptions } from "../utils/searchRanking";
 
-export type EntityReferenceType = Extract<CustomFieldType, "tag" | "performer" | "studio" | "scene" | "gallery" | "image" | "group"> | "face";
+export type EntityReferenceType = Extract<CustomFieldType, "tag" | "performer" | "studio" | "video" | "gallery" | "image" | "group"> | "face";
 
 export interface EntityReferenceOption {
   id: number;
@@ -14,14 +14,14 @@ export interface EntityReferenceOption {
   secondaryLabel?: string;
 }
 
-const REFERENCE_TYPES = new Set<string>(["tag", "performer", "studio", "scene", "gallery", "image", "group", "face"]);
+const REFERENCE_TYPES = new Set<string>(["tag", "performer", "studio", "video", "gallery", "image", "group", "face"]);
 
 const ENTITY_LABELS: Record<EntityReferenceType, { singular: string; plural: string; sort: string }> = {
   tag: { singular: "tag", plural: "tags", sort: "name" },
   performer: { singular: "performer", plural: "performers", sort: "name" },
   face: { singular: "face", plural: "faces", sort: "label" },
   studio: { singular: "studio", plural: "studios", sort: "name" },
-  scene: { singular: "scene", plural: "scenes", sort: "title" },
+  video: { singular: "video", plural: "videos", sort: "title" },
   gallery: { singular: "gallery", plural: "galleries", sort: "title" },
   image: { singular: "image", plural: "images", sort: "title" },
   group: { singular: "group", plural: "groups", sort: "name" },
@@ -132,6 +132,32 @@ export function EntityReferenceSelector({
     [excluded, searchOptions, value],
   );
 
+  const creatableTypes: Partial<Record<EntityReferenceType, true>> = { tag: true, performer: true, group: true, studio: true, gallery: true };
+  const exactMatchExists = useMemo(
+    () => searchOptions.some((o) => o.label.toLowerCase() === trimmedSearch.toLowerCase()),
+    [searchOptions, trimmedSearch],
+  );
+
+  const createMutation = useMutation({
+    mutationFn: async (entityName: string) => {
+      switch (entityType) {
+        case "tag": return tags.create({ name: entityName });
+        case "performer": return performers.create({ name: entityName });
+        case "group": return groups.create({ name: entityName });
+        case "studio": return studios.create({ name: entityName });
+        case "gallery": return galleries.create({ title: entityName });
+        default: throw new Error(`Cannot create entity of type ${entityType}`);
+      }
+    },
+    onSuccess: (result, entityName) => {
+      onChange(result.id, { id: result.id, label: entityName });
+      setSearchText("");
+      queryClient.invalidateQueries({ queryKey: [labels.plural] });
+    },
+  });
+
+  const showCreateOption = trimmedSearch && !isLoading && creatableTypes[entityType] && !exactMatchExists;
+
   return (
     <div className="min-w-0 space-y-2">
       {typeof value === "number" && selectedDisplay === "chip" ? (
@@ -185,7 +211,7 @@ export function EntityReferenceSelector({
       {trimmedSearch ? (
         <div className="max-h-40 overflow-y-auto overflow-x-hidden rounded border border-border bg-surface">
           {isLoading ? <div className="px-3 py-2 text-sm text-muted">Loading...</div> : null}
-          {!isLoading && visibleResults.length === 0 ? (
+          {!isLoading && visibleResults.length === 0 && !showCreateOption ? (
             <div className="px-3 py-2 text-sm text-muted">No {labels.plural} found</div>
           ) : null}
           {visibleResults.map((option) => (
@@ -205,6 +231,23 @@ export function EntityReferenceSelector({
               {option.secondaryLabel ? <span className="shrink-0 text-xs text-muted">{option.secondaryLabel}</span> : null}
             </button>
           ))}
+          {showCreateOption ? (
+            <button
+              type="button"
+              onClick={() => createMutation.mutate(trimmedSearch)}
+              disabled={createMutation.isPending}
+              className="flex w-full items-center gap-2 border-t border-border px-3 py-2 text-left text-sm text-accent hover:bg-card disabled:opacity-50"
+            >
+              {createMutation.isPending ? (
+                <span className="text-muted">Creating...</span>
+              ) : (
+                <>
+                  <Plus className="h-3 w-3" />
+                  <span>Create &ldquo;{trimmedSearch}&rdquo;</span>
+                </>
+              )}
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -273,6 +316,32 @@ export function EntityReferenceMultiSelector({
     [excluded, searchOptions, values],
   );
 
+  const creatableTypes: Partial<Record<EntityReferenceType, true>> = { tag: true, performer: true, group: true, studio: true, gallery: true };
+  const exactMatchExists = useMemo(
+    () => searchOptions.some((o) => o.label.toLowerCase() === trimmedSearch.toLowerCase()),
+    [searchOptions, trimmedSearch],
+  );
+
+  const createMutation = useMutation({
+    mutationFn: async (name: string) => {
+      switch (entityType) {
+        case "tag": return tags.create({ name });
+        case "performer": return performers.create({ name });
+        case "group": return groups.create({ name });
+        case "studio": return studios.create({ name });
+        case "gallery": return galleries.create({ title: name });
+        default: throw new Error(`Cannot create entity of type ${entityType}`);
+      }
+    },
+    onSuccess: (result) => {
+      onChange([...values, result.id]);
+      setSearchText("");
+      queryClient.invalidateQueries({ queryKey: [labels.plural] });
+    },
+  });
+
+  const showCreateOption = trimmedSearch && !isLoading && creatableTypes[entityType] && !exactMatchExists;
+
   return (
     <div className={containerClassName ?? "space-y-2"}>
       {values.length > 0 ? (
@@ -315,7 +384,7 @@ export function EntityReferenceMultiSelector({
       {trimmedSearch ? (
         <div className={resultsClassName ?? "max-h-40 overflow-y-auto rounded border border-border bg-surface"}>
           {isLoading ? <div className="px-3 py-2 text-sm text-muted">Loading...</div> : null}
-          {!isLoading && visibleResults.length === 0 ? (
+          {!isLoading && visibleResults.length === 0 && !showCreateOption ? (
             <div className="px-3 py-2 text-sm text-muted">{emptyMessage ?? `No ${labels.plural} found`}</div>
           ) : null}
           {visibleResults.map((option) => (
@@ -335,6 +404,23 @@ export function EntityReferenceMultiSelector({
               {option.secondaryLabel ? <span className="text-xs text-muted">{option.secondaryLabel}</span> : null}
             </button>
           ))}
+          {showCreateOption ? (
+            <button
+              type="button"
+              onClick={() => createMutation.mutate(trimmedSearch)}
+              disabled={createMutation.isPending}
+              className="flex w-full items-center gap-2 border-t border-border px-3 py-2 text-left text-sm text-accent hover:bg-card disabled:opacity-50"
+            >
+              {createMutation.isPending ? (
+                <span className="text-muted">Creating...</span>
+              ) : (
+                <>
+                  <Plus className="h-3 w-3" />
+                  <span>Create &ldquo;{trimmedSearch}&rdquo;</span>
+                </>
+              )}
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -403,8 +489,8 @@ function getCachedEntityReferenceOptions(queryClient: ReturnType<typeof useQuery
       return cached.map((item) => toFaceOption(item as Face));
     case "studio":
       return cached.map((item) => toStudioOption(item as Studio));
-    case "scene":
-      return cached.map((item) => toSceneOption(item as Scene));
+    case "video":
+      return cached.map((item) => toVideoOption(item as Video));
     case "gallery":
       return cached.map((item) => toGalleryOption(item as Gallery));
     case "image":
@@ -424,7 +510,7 @@ async function searchEntityReferences(entityType: EntityReferenceType, searchTex
     case "performer": return (await performers.find(filter)).items.map(toPerformerOption);
     case "face": return (await faces.list(filter)).items.map(toFaceOption);
     case "studio": return (await studios.find(filter)).items.map(toStudioOption);
-    case "scene": return (await scenes.find(filter)).items.map(toSceneOption);
+    case "video": return (await videos.find(filter)).items.map(toVideoOption);
     case "gallery": return (await galleries.find(filter)).items.map(toGalleryOption);
     case "image": return (await images.find(filter)).items.map(toImageOption);
     case "group": return (await groups.find(filter)).items.map(toGroupOption);
@@ -437,7 +523,7 @@ async function getEntityReference(entityType: EntityReferenceType, id: number): 
     case "performer": return toPerformerOption(await performers.get(id));
     case "face": return toFaceOption(await faces.get(id));
     case "studio": return toStudioOption(await studios.get(id));
-    case "scene": return toSceneOption(await scenes.get(id));
+    case "video": return toVideoOption(await videos.get(id));
     case "gallery": return toGalleryOption(await galleries.get(id));
     case "image": return toImageOption(await images.get(id));
     case "group": return toGroupOption(await groups.get(id));
@@ -468,9 +554,9 @@ function toStudioOption(studio: Studio): EntityReferenceOption {
   return { id: studio.id, label: studio.name };
 }
 
-function toSceneOption(scene: Scene): EntityReferenceOption {
-  const fileName = scene.files?.[0]?.basename;
-  return { id: scene.id, label: scene.title?.trim() || scene.code?.trim() || fileName || "Untitled scene" };
+function toVideoOption(video: Video): EntityReferenceOption {
+  const fileName = video.files?.[0]?.basename;
+  return { id: video.id, label: video.title?.trim() || video.code?.trim() || fileName || "Untitled video" };
 }
 
 function toGalleryOption(gallery: Gallery): EntityReferenceOption {

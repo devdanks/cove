@@ -95,7 +95,7 @@ public class BookmarksController(CoveContext db, ICurrentPrincipalAccessor princ
     private async Task<bool> HostExistsAsync(AffinityHostType hostType, int hostId, CancellationToken ct)
         => hostType switch
         {
-            AffinityHostType.Scene => await db.Scenes.AsNoTracking().AnyAsync(item => item.Id == hostId, ct),
+            AffinityHostType.Video => await db.Videos.AsNoTracking().AnyAsync(item => item.Id == hostId, ct),
             AffinityHostType.Audio => await db.Audios.AsNoTracking().AnyAsync(item => item.Id == hostId, ct),
             AffinityHostType.Text => await db.TextDocuments.AsNoTracking().AnyAsync(item => item.Id == hostId, ct),
             AffinityHostType.Image => await db.Images.AsNoTracking().AnyAsync(item => item.Id == hostId, ct),
@@ -117,7 +117,7 @@ public class BookmarksController(CoveContext db, ICurrentPrincipalAccessor princ
 
         var readableIds = hostType switch
         {
-            AffinityHostType.Scene => await db.Scenes.AsNoTracking().Where(item => ids.Contains(item.Id)).Select(item => item.Id).ToListAsync(ct),
+            AffinityHostType.Video => await db.Videos.AsNoTracking().Where(item => ids.Contains(item.Id)).Select(item => item.Id).ToListAsync(ct),
             AffinityHostType.Audio => await db.Audios.AsNoTracking().Where(item => ids.Contains(item.Id)).Select(item => item.Id).ToListAsync(ct),
             AffinityHostType.Text => await db.TextDocuments.AsNoTracking().Where(item => ids.Contains(item.Id)).Select(item => item.Id).ToListAsync(ct),
             AffinityHostType.Image => await db.Images.AsNoTracking().Where(item => ids.Contains(item.Id)).Select(item => item.Id).ToListAsync(ct),
@@ -138,7 +138,7 @@ public class BookmarksController(CoveContext db, ICurrentPrincipalAccessor princ
     {
         var permission = hostType switch
         {
-            AffinityHostType.Scene => Permissions.ScenesRead,
+            AffinityHostType.Video => Permissions.VideosRead,
             AffinityHostType.Audio => Permissions.AudiosRead,
             AffinityHostType.Text => Permissions.TextsRead,
             AffinityHostType.Image => Permissions.ImagesRead,
@@ -154,3 +154,4 @@ public class BookmarksController(CoveContext db, ICurrentPrincipalAccessor princ
         return permission is not null && principalAccessor.Current?.Has(permission) == true;
     }
 }
+

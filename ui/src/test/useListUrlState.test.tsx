@@ -5,7 +5,7 @@ import { useListUrlState } from "../hooks/useListUrlState";
 
 function ListStateProbe() {
   const { filter, setFilter, displayMode, setDisplayMode } = useListUrlState({
-    resetKey: "scenes",
+    resetKey: "videos",
     defaultFilter: { page: 1, perPage: 40 },
     defaultDisplayMode: "grid" as const,
     allowedDisplayModes: ["grid", "list", "wall", "feed", "vertical"] as const,
@@ -24,7 +24,7 @@ function ListStateProbe() {
 
 describe("useListUrlState", () => {
   beforeEach(() => {
-    window.history.replaceState(null, "", "/scenes?view=wall&perPage=infinite&page=2&viewMode=vertical");
+    window.history.replaceState(null, "", "/videos?view=wall&perPage=infinite&page=2&viewMode=vertical");
   });
 
   it("reads display mode and persists infinite page size through perPage", async () => {
@@ -53,3 +53,4 @@ describe("useListUrlState", () => {
     });
   });
 });
+

@@ -100,7 +100,7 @@ public class EntityEngagementController(IUserEngagementService engagementService
     }
 
     [HttpPut("{hostType}/{hostId:int}/rating")]
-    public async Task<ActionResult<EntityEngagementDto>> SetRating(AffinityHostType hostType, int hostId, [FromBody] SceneRatingDto dto, CancellationToken cancellationToken)
+    public async Task<ActionResult<EntityEngagementDto>> SetRating(AffinityHostType hostType, int hostId, [FromBody] VideoRatingDto dto, CancellationToken cancellationToken)
     {
         if (principalAccessor.Current?.UserId is null)
             return Forbid();
@@ -115,8 +115,8 @@ public class EntityEngagementController(IUserEngagementService engagementService
     {
         var permission = (hostType, write) switch
         {
-            (AffinityHostType.Scene, false) => Permissions.ScenesRead,
-            (AffinityHostType.Scene, true) => Permissions.ScenesWrite,
+            (AffinityHostType.Video, false) => Permissions.VideosRead,
+            (AffinityHostType.Video, true) => Permissions.VideosWrite,
             (AffinityHostType.Audio, false) => Permissions.AudiosRead,
             (AffinityHostType.Audio, true) => Permissions.AudiosWrite,
             (AffinityHostType.Text, false) => Permissions.TextsRead,
@@ -147,7 +147,7 @@ public class EntityEngagementController(IUserEngagementService engagementService
     {
         var permission = hostType switch
         {
-            InteractionHostType.Scene => Permissions.ScenesRead,
+            InteractionHostType.Video => Permissions.VideosRead,
             InteractionHostType.Image => Permissions.ImagesRead,
             InteractionHostType.Audio => Permissions.AudiosRead,
             InteractionHostType.Text => Permissions.TextsRead,

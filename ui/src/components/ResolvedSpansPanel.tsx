@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Layers, Plus, ExternalLink } from "lucide-react";
-import { scenes } from "../api/client";
+import { videos } from "../api/client";
 import type { ResolvedSpan, SegmentDisplayProfile, SegmentSpanOperand, SegmentSpanOperator } from "../api/types";
 import { AddToGroupDialog, type AddToGroupEntry } from "./AddToGroupDialog";
 
 interface Props {
-  sceneId: number;
+  videoId: number;
   spans: ResolvedSpan[];
   loading: boolean;
   profiles: SegmentDisplayProfile[];
@@ -17,7 +17,7 @@ interface Props {
 }
 
 export function ResolvedSpansPanel({
-  sceneId,
+  videoId,
   spans,
   loading,
   profiles,
@@ -38,7 +38,7 @@ export function ResolvedSpansPanel({
   useEffect(() => {
     setSelectedSpanKeys(new Set());
     setDerivedSpans([]);
-  }, [currentProfileId, sceneId]);
+  }, [currentProfileId, videoId]);
 
   const allSelectableSpans = useMemo(() => {
     const byKey = new Map<string, ResolvedSpan>();
@@ -52,12 +52,12 @@ export function ResolvedSpansPanel({
       .filter((span) => selectedSpanKeys.has(span.spanKey))
       .map((span) => ({
         key: span.spanKey,
-        sceneId,
+        videoId,
         spanKey: span.spanKey,
         title: span.tagName || span.kind || `Span ${span.spanKey}`,
         profileId: currentProfileId,
       }));
-  }, [allSelectableSpans, currentProfileId, sceneId, selectedSpanKeys]);
+  }, [allSelectableSpans, currentProfileId, videoId, selectedSpanKeys]);
 
   const orderedProfiles = useMemo(
     () => [...profiles].sort((left, right) => Number(right.isDefault) - Number(left.isDefault) || left.name.localeCompare(right.name)),
@@ -68,7 +68,7 @@ export function ResolvedSpansPanel({
 
   const queryMutation = useMutation({
     mutationFn: (request: { profile?: number; operator: SegmentSpanOperator; operands: SegmentSpanOperand[]; mergeGapSec?: number; minDurationSec?: number }) =>
-      scenes.segments.querySpans(sceneId, request),
+      videos.segments.querySpans(videoId, request),
     onSuccess: (result) => {
       setDerivedSpans(result.spans);
       setSelectedSpanKeys(new Set());
@@ -134,7 +134,7 @@ export function ResolvedSpansPanel({
             <Layers className="h-4 w-4" />
             Resolved Spans
           </div>
-          <p className="mt-2 text-sm text-secondary">The scene timeline now uses resolved spans from the selected display profile. Raw segment editing remains below.</p>
+          <p className="mt-2 text-sm text-secondary">The video timeline now uses resolved spans from the selected display profile. Raw segment editing remains below.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <label className="text-xs font-semibold uppercase tracking-wide text-muted">
@@ -333,14 +333,14 @@ export function ResolvedSpansPanel({
         <div className="mt-4 text-sm text-secondary">Loading resolved spans...</div>
       ) : spans.length === 0 ? (
         <div className="mt-4 rounded-xl border border-dashed border-border bg-surface/40 px-4 py-6 text-sm text-secondary">
-          This profile did not resolve any spans for the current scene.
+          This profile did not resolve any spans for the current video.
         </div>
       ) : (
         <div className="mt-4 space-y-2">
           <div className="text-xs font-semibold uppercase tracking-wide text-muted">Profile spans</div>
           {spans.map((span) => renderSpanCard({
             span,
-            sceneId,
+            videoId,
             profileId: activeProfileId,
             checked: selectedSpanKeys.has(span.spanKey),
             onToggle: toggleSelection,
@@ -358,7 +358,7 @@ export function ResolvedSpansPanel({
           </div>
           {derivedSpans.map((span) => renderSpanCard({
             span,
-            sceneId,
+            videoId,
             profileId: activeProfileId,
             checked: selectedSpanKeys.has(span.spanKey),
             onToggle: toggleSelection,
@@ -424,7 +424,7 @@ function parseOptionalNumber(value: string) {
 
 function renderSpanCard({
   span,
-  sceneId,
+  videoId,
   profileId,
   checked,
   onToggle,
@@ -432,7 +432,7 @@ function renderSpanCard({
   onNavigate,
 }: {
   span: ResolvedSpan;
-  sceneId: number;
+  videoId: number;
   profileId?: number;
   checked: boolean;
   onToggle: (spanKey: string) => void;
@@ -463,7 +463,7 @@ function renderSpanCard({
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => onNavigate({ page: "scene-span", id: sceneId, spanKey: span.spanKey, profileId })}
+            onClick={() => onNavigate({ page: "video-span", id: videoId, spanKey: span.spanKey, profileId })}
             className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-foreground transition-colors hover:border-accent"
           >
             <ExternalLink className="h-4 w-4" />

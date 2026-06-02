@@ -81,7 +81,7 @@ describe("PerformerEditModal", () => {
       aliases: [],
       tags: [],
       remoteIds: [],
-      sceneCount: 0,
+      videoCount: 0,
       imageCount: 0,
       galleryCount: 0,
       groupCount: 0,
@@ -114,7 +114,7 @@ describe("PerformerEditModal", () => {
       aliases: [],
       tags: [],
       remoteIds: [],
-      sceneCount: 0,
+      videoCount: 0,
       imageCount: 0,
       galleryCount: 0,
       groupCount: 0,
@@ -128,7 +128,7 @@ describe("PerformerEditModal", () => {
       items: q === "sha"
         ? [
           { id: 7, name: "Shaved Pussy" },
-          { id: 8, name: "Shared Scene" },
+          { id: 8, name: "Shared Video" },
         ]
         : [],
     }));
@@ -164,7 +164,7 @@ describe("PerformerEditModal", () => {
       aliases: ["Old Alias", "Second Alias"],
       tags: [],
       remoteIds: [],
-      sceneCount: 0,
+      videoCount: 0,
       imageCount: 0,
       galleryCount: 0,
       groupCount: 0,

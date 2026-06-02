@@ -57,11 +57,11 @@ describe("Compilation player autoplay token wiring", () => {
     const onPlay = vi.fn();
     const { container, rerender } = render(
       <VideoPlayer
-        streamUrl="/api/scenes/1/stream"
+        streamUrl="/api/videos/1/stream"
         format="mp4"
         duration={120}
         resumeTime={5}
-        sceneId={1}
+        videoId={1}
         detections={[]}
         onPlay={onPlay}
         autostart
@@ -81,11 +81,11 @@ describe("Compilation player autoplay token wiring", () => {
 
     rerender(
       <VideoPlayer
-        streamUrl="/api/scenes/2/stream"
+        streamUrl="/api/videos/2/stream"
         format="mp4"
         duration={180}
         resumeTime={20}
-        sceneId={2}
+        videoId={2}
         detections={[]}
         onPlay={onPlay}
         autostart
@@ -107,11 +107,11 @@ describe("Compilation player autoplay token wiring", () => {
   it("restarts a non-looping clip at the clip start when replayed after the clip end", () => {
     const { container } = render(
       <VideoPlayer
-        streamUrl="/api/scenes/1/stream"
+        streamUrl="/api/videos/1/stream"
         format="mp4"
         duration={120}
         resumeTime={5}
-        sceneId={1}
+        videoId={1}
         detections={[]}
         trackingEnabled={false}
         clip={{ start: 5, end: 15, loop: false }}
@@ -133,13 +133,13 @@ describe("Compilation player autoplay token wiring", () => {
     expect(playMock).toHaveBeenCalledTimes(1);
   });
 
-  it("does not declare a misleading MIME type for direct scene streams", () => {
+  it("does not declare a misleading MIME type for direct video streams", () => {
     const { container } = render(
       <VideoPlayer
-        streamUrl="/api/stream/scene/8912"
+        streamUrl="/api/stream/video/8912"
         format="mpegts"
         duration={120}
-        sceneId={8912}
+        videoId={8912}
         detections={[]}
         trackingEnabled={false}
       />,
@@ -150,3 +150,4 @@ describe("Compilation player autoplay token wiring", () => {
     expect(source?.getAttribute("type")).toBeNull();
   });
 });
+

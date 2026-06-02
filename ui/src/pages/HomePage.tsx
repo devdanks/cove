@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { scenes, performers, studios, tags, galleries, groups, savedFilters } from "../api/client";
-import type { AffinityHostType, EntityEngagement, Scene, Performer, Studio, Tag, Gallery, Group, SavedFilter } from "../api/types";
+import { videos, performers, studios, tags, galleries, groups, savedFilters } from "../api/client";
+import type { AffinityHostType, EntityEngagement, Video, Performer, Studio, Tag, Gallery, Group, SavedFilter } from "../api/types";
 import { formatDuration, formatFileSize, getResolutionLabel, RatingBadge } from "../components/shared";
 import { RatingBanner } from "../components/Rating";
 import { ChevronLeft, ChevronRight, Settings2, Plus, Trash2, Film, User, Building2, Tag as TagIcon, Images, Clapperboard, GripVertical, Headphones, Layers } from "lucide-react";
@@ -10,7 +10,7 @@ import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-type FilterMode = "scenes" | "performers" | "studios" | "tags" | "galleries" | "groups";
+type FilterMode = "videos" | "performers" | "studios" | "tags" | "galleries" | "groups";
 
 interface CustomFilter {
   type: "custom";
@@ -30,7 +30,7 @@ type FrontPageContent = CustomFilter | SavedFilterRow;
 // ─── Default content (matches standard defaults) ───────────────────────
 
 const DEFAULT_CONTENT: FrontPageContent[] = [
-  { type: "custom", mode: "scenes", sortBy: "date", direction: "desc", header: "Recently Released Scenes" },
+  { type: "custom", mode: "videos", sortBy: "date", direction: "desc", header: "Recently Released Videos" },
   { type: "custom", mode: "studios", sortBy: "created_at", direction: "desc", header: "Recently Added Studios" },
   { type: "custom", mode: "groups", sortBy: "date", direction: "desc", header: "Recently Released Groups" },
   { type: "custom", mode: "performers", sortBy: "created_at", direction: "desc", header: "Recently Added Performers" },
@@ -40,8 +40,8 @@ const DEFAULT_CONTENT: FrontPageContent[] = [
 // ─── Premade filter options (for adding new rows) ────────────────────────────
 
 const PREMADE_FILTERS: CustomFilter[] = [
-  { type: "custom", mode: "scenes", sortBy: "date", direction: "desc", header: "Recently Released Scenes" },
-  { type: "custom", mode: "scenes", sortBy: "created_at", direction: "desc", header: "Recently Added Scenes" },
+  { type: "custom", mode: "videos", sortBy: "date", direction: "desc", header: "Recently Released Videos" },
+  { type: "custom", mode: "videos", sortBy: "created_at", direction: "desc", header: "Recently Added Videos" },
   { type: "custom", mode: "galleries", sortBy: "date", direction: "desc", header: "Recently Released Galleries" },
   { type: "custom", mode: "galleries", sortBy: "created_at", direction: "desc", header: "Recently Added Galleries" },
   { type: "custom", mode: "groups", sortBy: "date", direction: "desc", header: "Recently Released Groups" },
@@ -118,7 +118,7 @@ function ContinueWatchingRow({ onNavigate }: { onNavigate: (r: any) => void }) {
     queryFn: () => groups.items.list(continueGroup!.id),
     enabled: !!continueGroup,
   });
-  const playableItems = items.filter((item) => item.hostType === "scene" || item.hostType === "audio" || item.hostType === "segment").slice(0, 12);
+  const playableItems = items.filter((item) => item.hostType === "video" || item.hostType === "audio" || item.hostType === "segment").slice(0, 12);
   if (!isLoading && playableItems.length === 0) return null;
 
   return (
@@ -130,16 +130,16 @@ function ContinueWatchingRow({ onNavigate }: { onNavigate: (r: any) => void }) {
   );
 }
 
-function ContinueWatchingCard({ item, onNavigate }: { item: { hostType?: string; hostId?: number; sceneId?: number | null; sceneTitle?: string; title?: string; startSec?: number }; onNavigate: (r: any) => void }) {
-  const hostType = item.hostType ?? "scene";
-  const hostId = item.hostId ?? item.sceneId ?? 0;
-  const sceneId = item.sceneId ?? (hostType === "scene" ? hostId : 0);
-  const title = item.title || item.sceneTitle || "Untitled";
+function ContinueWatchingCard({ item, onNavigate }: { item: { hostType?: string; hostId?: number; videoId?: number | null; videoTitle?: string; title?: string; startSec?: number }; onNavigate: (r: any) => void }) {
+  const hostType = item.hostType ?? "video";
+  const hostId = item.hostId ?? item.videoId ?? 0;
+  const videoId = item.videoId ?? (hostType === "video" ? hostId : 0);
+  const title = item.title || item.videoTitle || "Untitled";
   const route = hostType === "audio"
     ? { page: "audio", id: hostId }
     : hostType === "segment"
       ? { page: "segment", id: hostId }
-      : { page: "scene", id: sceneId, seekTo: item.startSec ?? 0 };
+      : { page: "video", id: videoId, seekTo: item.startSec ?? 0 };
   const linkProps = createRouteLinkProps<HTMLAnchorElement>(route, () => onNavigate(route));
   return (
     <a
@@ -148,8 +148,8 @@ function ContinueWatchingCard({ item, onNavigate }: { item: { hostType?: string;
       style={{ scrollSnapAlign: "start" }}
     >
       <div className="relative aspect-video bg-black">
-        {sceneId > 0 ? (
-          <img src={`/api/stream/scene/${sceneId}/screenshot`} alt={title} className="h-full w-full object-cover" loading="lazy" />
+        {videoId > 0 ? (
+          <img src={`/api/stream/video/${videoId}/screenshot`} alt={title} className="h-full w-full object-cover" loading="lazy" />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-accent">
             {hostType === "audio" ? <Headphones className="h-10 w-10" /> : <Layers className="h-10 w-10" />}
@@ -181,7 +181,7 @@ function CustomFilterRecommendationRow({ filter, onNavigate }: { filter: CustomF
   const fetchFn = useMemo((): (() => Promise<any>) => {
     const params = { perPage: 25, sort: filter.sortBy, direction: filter.direction };
     switch (filter.mode) {
-      case "scenes": return () => scenes.find(params);
+      case "videos": return () => videos.find(params);
       case "performers": return () => performers.find(params);
       case "studios": return () => studios.find(params);
       case "tags": return () => tags.find(params);
@@ -197,7 +197,7 @@ function CustomFilterRecommendationRow({ filter, onNavigate }: { filter: CustomF
 
   const items = data?.items ?? [];
   const engagementHostType = getRecommendationEngagementHostType(filter.mode);
-  const { engagementById } = useEntityEngagementBatch(engagementHostType ?? "scene", engagementHostType ? items.map((item: any) => item.id) : []);
+  const { engagementById } = useEntityEngagementBatch(engagementHostType ?? "video", engagementHostType ? items.map((item: any) => item.id) : []);
   if (!isLoading && items.length === 0) return null;
 
   return (
@@ -238,7 +238,7 @@ function SavedFilterRecommendationRow({ savedFilterId, onNavigate }: { savedFilt
     if (!mode) return () => Promise.resolve({ items: [], totalCount: 0 });
     const findFilter = { perPage: 25, sort: parsedFilter.sort, direction: parsedFilter.direction };
     const fetchMap: Record<string, () => Promise<any>> = {
-      scenes: parsedObjectFilter ? () => scenes.findFiltered({ findFilter, objectFilter: parsedObjectFilter }) : () => scenes.find(findFilter),
+      videos: parsedObjectFilter ? () => videos.findFiltered({ findFilter, objectFilter: parsedObjectFilter }) : () => videos.find(findFilter),
       performers: parsedObjectFilter ? () => performers.findFiltered({ findFilter, objectFilter: parsedObjectFilter }) : () => performers.find(findFilter),
       studios: parsedObjectFilter ? () => studios.findFiltered({ findFilter, objectFilter: parsedObjectFilter }) : () => studios.find(findFilter),
       tags: () => tags.find(findFilter),
@@ -256,13 +256,13 @@ function SavedFilterRecommendationRow({ savedFilterId, onNavigate }: { savedFilt
 
   const items = (data as any)?.items ?? [];
   const engagementHostType = getRecommendationEngagementHostType(mode);
-  const { engagementById } = useEntityEngagementBatch(engagementHostType ?? "scene", engagementHostType ? items.map((item: any) => item.id) : []);
+  const { engagementById } = useEntityEngagementBatch(engagementHostType ?? "video", engagementHostType ? items.map((item: any) => item.id) : []);
   if (!filter || (!isLoading && items.length === 0)) return null;
 
   return (
     <RecommendationRowShell
       header={filter.name}
-      viewAllPage={mode ?? "scenes"}
+      viewAllPage={mode ?? "videos"}
       onNavigate={onNavigate}
       loading={isLoading}
       count={items.length}
@@ -402,7 +402,7 @@ function RecommendationRowShell({
 
 function EntityCard({ item, engagement, mode, onNavigate }: { item: any; engagement?: EntityEngagement; mode: FilterMode; onNavigate: (r: any) => void }) {
   switch (mode) {
-    case "scenes": return <SceneRecommendationCard scene={item} engagement={engagement} onNavigate={onNavigate} />;
+    case "videos": return <VideoRecommendationCard video={item} engagement={engagement} onNavigate={onNavigate} />;
     case "performers": return <PerformerRecommendationCard performer={item} engagement={engagement} onNavigate={onNavigate} />;
     case "studios": return <StudioRecommendationCard studio={item} engagement={engagement} onNavigate={onNavigate} />;
     case "tags": return <TagRecommendationCard tag={item} onNavigate={onNavigate} />;
@@ -412,14 +412,14 @@ function EntityCard({ item, engagement, mode, onNavigate }: { item: any; engagem
   }
 }
 
-// ─── Scene Card ─────────────────────────────────────────────────────────────
+// ─── Video Card ─────────────────────────────────────────────────────────────
 
-function SceneRecommendationCard({ scene, engagement, onNavigate }: { scene: Scene; engagement?: EntityEngagement; onNavigate: (r: any) => void }) {
-  const file = scene.files[0];
+function VideoRecommendationCard({ video, engagement, onNavigate }: { video: Video; engagement?: EntityEngagement; onNavigate: (r: any) => void }) {
+  const file = video.files[0];
   const duration = file?.duration ?? 0;
   const resLabel = file ? getResolutionLabel(file.width, file.height) : null;
-  const screenshotUrl = scenes.screenshotUrl(scene.id);
-  const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "scene", id: scene.id }, () => onNavigate({ page: "scene", id: scene.id }));
+  const screenshotUrl = videos.screenshotUrl(video.id);
+  const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "video", id: video.id }, () => onNavigate({ page: "video", id: video.id }));
   const rating = engagement?.rating;
 
   return (
@@ -429,7 +429,7 @@ function SceneRecommendationCard({ scene, engagement, onNavigate }: { scene: Sce
       style={{ scrollSnapAlign: "start" }}
     >
       <div className="relative aspect-video bg-black">
-        <img src={screenshotUrl} alt={scene.title || ""} className="w-full h-full object-cover" loading="lazy" />
+        <img src={screenshotUrl} alt={video.title || ""} className="w-full h-full object-cover" loading="lazy" />
         {/* Resolution + duration overlay */}
         <div className="absolute bottom-0 right-0 flex items-center gap-0.5 p-1 text-xs text-white">
           {resLabel && <span className="bg-black/70 px-1 py-0.5 rounded font-bold">{resLabel}</span>}
@@ -439,17 +439,17 @@ function SceneRecommendationCard({ scene, engagement, onNavigate }: { scene: Sce
       </div>
       <div className="px-2 py-1.5">
         <p className="text-sm font-medium text-foreground truncate group-hover:text-accent">
-          {scene.title || file?.basename || "Untitled"}
+          {video.title || file?.basename || "Untitled"}
         </p>
-        {scene.date && <p className="text-xs text-muted">{scene.date}</p>}
+        {video.date && <p className="text-xs text-muted">{video.date}</p>}
       </div>
       {/* Bottom stats */}
       <div className="flex items-center gap-2 px-2 pb-1.5 text-xs text-muted">
-        {scene.tags.length > 0 && (
-          <span className="flex items-center gap-0.5"><TagIcon className="w-2.5 h-2.5" />{scene.tags.length}</span>
+        {video.tags.length > 0 && (
+          <span className="flex items-center gap-0.5"><TagIcon className="w-2.5 h-2.5" />{video.tags.length}</span>
         )}
-        {scene.performers.length > 0 && (
-          <span className="flex items-center gap-0.5"><User className="w-2.5 h-2.5" />{scene.performers.length}</span>
+        {video.performers.length > 0 && (
+          <span className="flex items-center gap-0.5"><User className="w-2.5 h-2.5" />{video.performers.length}</span>
         )}
       </div>
     </a>
@@ -596,8 +596,8 @@ function GroupRecommendationCard({ group, engagement, onNavigate }: { group: Gro
 
 function getRecommendationEngagementHostType(mode: FilterMode | undefined): AffinityHostType | null {
   switch (mode) {
-    case "scenes":
-      return "scene";
+    case "videos":
+      return "video";
     case "performers":
       return "performer";
     case "studios":
@@ -755,3 +755,4 @@ function FrontPageEditor({
     </div>
   );
 }
+

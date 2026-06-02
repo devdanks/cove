@@ -10,7 +10,7 @@ namespace Cove.Tests;
 public class PerformerFilterBehaviorTests
 {
     [Fact]
-    public async Task StudiosCriterion_IncludesAll_RequiresScenesFromAllSelectedStudios()
+    public async Task StudiosCriterion_IncludesAll_RequiresVideosFromAllSelectedStudios()
     {
         await using var scope = await CreateContextAsync();
         var context = scope.Context;
@@ -170,7 +170,7 @@ public class PerformerFilterBehaviorTests
     }
 
     [Fact]
-    public async Task SceneCountCriterion_IsNullAndNotNull_UsePresenceSemantics()
+    public async Task VideoCountCriterion_IsNullAndNotNull_UsePresenceSemantics()
     {
         await using var scope = await CreateContextAsync();
         var context = scope.Context;
@@ -179,23 +179,23 @@ public class PerformerFilterBehaviorTests
         context.Studios.Add(alphaStudio);
         await context.SaveChangesAsync();
 
-        context.Performers.Add(new Performer { Name = "No Scenes" });
+        context.Performers.Add(new Performer { Name = "No Videos" });
         await context.SaveChangesAsync();
-        await SeedPerformerAsync(context, "Has Scene", alphaStudio);
+        await SeedPerformerAsync(context, "Has Video", alphaStudio);
 
         var repository = new PerformerRepository(context);
 
         var (nullItems, nullCount) = await repository.FindAsync(
-            new PerformerFilter { SceneCountCriterion = new IntCriterion { Modifier = CriterionModifier.IsNull } },
+            new PerformerFilter { VideoCountCriterion = new IntCriterion { Modifier = CriterionModifier.IsNull } },
             new FindFilter { Page = 1, PerPage = 20, Sort = "name" });
         var (notNullItems, notNullCount) = await repository.FindAsync(
-            new PerformerFilter { SceneCountCriterion = new IntCriterion { Modifier = CriterionModifier.NotNull } },
+            new PerformerFilter { VideoCountCriterion = new IntCriterion { Modifier = CriterionModifier.NotNull } },
             new FindFilter { Page = 1, PerPage = 20, Sort = "name" });
 
         Assert.Equal(1, nullCount);
-        Assert.Equal(["No Scenes"], nullItems.Select(performer => performer.Name ?? string.Empty).ToArray());
+        Assert.Equal(["No Videos"], nullItems.Select(performer => performer.Name ?? string.Empty).ToArray());
         Assert.Equal(1, notNullCount);
-        Assert.Equal(["Has Scene"], notNullItems.Select(performer => performer.Name ?? string.Empty).ToArray());
+        Assert.Equal(["Has Video"], notNullItems.Select(performer => performer.Name ?? string.Empty).ToArray());
     }
 
     [Fact]
@@ -211,7 +211,7 @@ public class PerformerFilterBehaviorTests
 
         await SeedPerformerAsync(context, "one-studio", alphaStudio);
         await SeedPerformerAsync(context, "two-studios", alphaStudio, betaStudio, alphaStudio);
-        await SeedPerformerWithSceneAsync(context, "no-studio", null);
+        await SeedPerformerWithVideoAsync(context, "no-studio", null);
 
         var repository = new PerformerRepository(context);
         var filter = new PerformerFilter
@@ -361,42 +361,42 @@ public class PerformerFilterBehaviorTests
 
         foreach (var studio in studios)
         {
-            var scene = new Scene
+            var video = new Video
             {
                 Title = $"{name}-{studio.Name}",
                 StudioId = studio.Id,
             };
 
-            context.Scenes.Add(scene);
+            context.Videos.Add(video);
             await context.SaveChangesAsync();
 
-            context.Set<ScenePerformer>().Add(new ScenePerformer
+            context.Set<VideoPerformer>().Add(new VideoPerformer
             {
-                SceneId = scene.Id,
+                VideoId = video.Id,
                 PerformerId = performer.Id,
             });
             await context.SaveChangesAsync();
         }
     }
 
-    private static async Task SeedPerformerWithSceneAsync(CoveContext context, string name, Studio? studio)
+    private static async Task SeedPerformerWithVideoAsync(CoveContext context, string name, Studio? studio)
     {
         var performer = new Performer { Name = name };
         context.Performers.Add(performer);
         await context.SaveChangesAsync();
 
-        var scene = new Scene
+        var video = new Video
         {
-            Title = $"{name}-scene",
+            Title = $"{name}-video",
             StudioId = studio?.Id,
         };
 
-        context.Scenes.Add(scene);
+        context.Videos.Add(video);
         await context.SaveChangesAsync();
 
-        context.Set<ScenePerformer>().Add(new ScenePerformer
+        context.Set<VideoPerformer>().Add(new VideoPerformer
         {
-            SceneId = scene.Id,
+            VideoId = video.Id,
             PerformerId = performer.Id,
         });
         await context.SaveChangesAsync();
@@ -436,3 +436,4 @@ public class PerformerFilterBehaviorTests
         }
     }
 }
+

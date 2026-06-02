@@ -38,26 +38,26 @@ public class ScanService(
         return configured;
     }
 
-    public async Task<int> ImportDownloadedSceneAsync(string path, int? sceneId, CancellationToken ct = default)
+    public async Task<int> ImportDownloadedVideoAsync(string path, int? videoId, CancellationToken ct = default)
     {
         if (!File.Exists(path))
-            throw new FileNotFoundException("Downloaded scene file not found", path);
+            throw new FileNotFoundException("Downloaded video file not found", path);
 
         await using var scope = scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
-        var videoFile = await ProcessVideoFileAsync(db, path, sceneId, ct);
+        var videoFile = await ProcessVideoFileAsync(db, path, videoId, ct);
         await db.SaveChangesAsync(ct);
 
-        var resolvedSceneId = videoFile.SceneId;
-        if (!resolvedSceneId.HasValue || resolvedSceneId.Value == 0)
-            throw new InvalidOperationException($"Imported video file {path} was not attached to a scene");
+        var resolvedVideoId = videoFile.VideoId;
+        if (!resolvedVideoId.HasValue || resolvedVideoId.Value == 0)
+            throw new InvalidOperationException($"Imported video file {path} was not attached to a video");
 
         eventBus.Publish(new EntityEvent(
-            sceneId.HasValue ? EventType.SceneUpdated : EventType.SceneCreated,
-            "Scene",
-            resolvedSceneId.Value));
+            videoId.HasValue ? EventType.VideoUpdated : EventType.VideoCreated,
+            "Video",
+            resolvedVideoId.Value));
 
-        return resolvedSceneId.Value;
+        return resolvedVideoId.Value;
     }
 
     public async Task<int> ImportDownloadedImageAsync(string path, int? imageId, CancellationToken ct = default)
@@ -257,7 +257,7 @@ public class ScanService(
                 {
                     var eventType = entityType switch
                     {
-                        "Scene" => isUpdate ? EventType.SceneUpdated : EventType.SceneCreated,
+                        "Video" => isUpdate ? EventType.VideoUpdated : EventType.VideoCreated,
                         "Image" => isUpdate ? EventType.ImageUpdated : EventType.ImageCreated,
                         "Gallery" => isUpdate ? EventType.GalleryUpdated : EventType.GalleryCreated,
                         "Audio" => isUpdate ? EventType.AudioUpdated : EventType.AudioCreated,
@@ -292,8 +292,8 @@ public class ScanService(
                             processedVideoPaths.Add(file.Path);
                             var videoFile = await ProcessVideoFileAsync(db, file.Path, null, ct, file.Stat, folderCache, syncCaptions: true);
                             await db.SaveChangesAsync(ct);
-                            if (videoFile.SceneId.HasValue)
-                                PublishScanEntityEvent("Scene", videoFile.SceneId.Value, isKnownFile);
+                            if (videoFile.VideoId.HasValue)
+                                PublishScanEntityEvent("Video", videoFile.VideoId.Value, isKnownFile);
                             db.ChangeTracker.Clear();
                         }
                         else if (imageExts.Contains(file.Extension))
@@ -528,20 +528,20 @@ public class ScanService(
         IThumbnailService thumbnailService,
         CancellationToken ct)
     {
-        var generateSceneAssets = options.GenerateCovers || options.GeneratePreviews || options.GenerateSprites || options.GeneratePhashes || options.GenerateMd5;
+        var generateVideoAssets = options.GenerateCovers || options.GeneratePreviews || options.GenerateSprites || options.GeneratePhashes || options.GenerateMd5;
         var generateImageAssets = options.GenerateImagePhashes || options.GenerateImageThumbnails || options.GenerateMd5;
         var generateAudioAssets = options.GenerateAudioPhashes || options.GenerateMd5;
         var generateTextAssets = options.GenerateTextPhashes || options.GenerateMd5;
 
-        if ((!generateSceneAssets && !generateImageAssets && !generateAudioAssets && !generateTextAssets)
+        if ((!generateVideoAssets && !generateImageAssets && !generateAudioAssets && !generateTextAssets)
             || (processedVideoPaths.Count == 0 && processedImagePaths.Count == 0 && processedAudioPaths.Count == 0 && processedTextPaths.Count == 0))
         {
             return;
         }
 
-        if (generateSceneAssets && processedVideoPaths.Count > 0)
+        if (generateVideoAssets && processedVideoPaths.Count > 0)
         {
-            progress.Report(0.92, "Generating scene assets...");
+            progress.Report(0.92, "Generating video assets...");
 
             var videoDirs = processedVideoPaths
                 .Select(path => Path.GetDirectoryName(path))
@@ -556,63 +556,63 @@ public class ScanService(
                 .Where(f => f.ParentFolder != null && videoDirs.Contains(f.ParentFolder.Path))
                 .ToListAsync(ct);
 
-            var sceneFiles = candidateFiles
+            var videoFiles = candidateFiles
                 .Where(file => file.ParentFolder != null && processedVideoPaths.Contains(NormalizePath(Path.Combine(file.ParentFolder.Path, file.Basename))))
-                .Where(file => file.SceneId.HasValue && file.SceneId.Value != 0)
-                .GroupBy(file => file.SceneId)
+                .Where(file => file.VideoId.HasValue && file.VideoId.Value != 0)
+                .GroupBy(file => file.VideoId)
                 .Select(group => group.First())
                 .Where(file =>
                 {
-                    var sceneId = file.SceneId!.Value;
-                    return (options.GenerateCovers && !File.Exists(thumbnailService.GetThumbnailPathForScene(sceneId)))
-                        || (options.GeneratePreviews && !File.Exists(thumbnailService.GetPreviewPath(sceneId)))
-                        || (options.GenerateSprites && (!File.Exists(thumbnailService.GetSpritePath(sceneId)) || !File.Exists(thumbnailService.GetSpriteVttPath(sceneId))))
+                    var videoId = file.VideoId!.Value;
+                    return (options.GenerateCovers && !File.Exists(thumbnailService.GetThumbnailPathForVideo(videoId)))
+                        || (options.GeneratePreviews && !File.Exists(thumbnailService.GetPreviewPath(videoId)))
+                        || (options.GenerateSprites && (!File.Exists(thumbnailService.GetSpritePath(videoId)) || !File.Exists(thumbnailService.GetSpriteVttPath(videoId))))
                         || (options.GeneratePhashes && !file.Fingerprints.Any(fp => fp.Type == "phash" && !string.IsNullOrWhiteSpace(fp.Value)))
                         || (options.GenerateMd5 && !file.Fingerprints.Any(fp => fp.Type == "md5" && !string.IsNullOrWhiteSpace(fp.Value)));
                 })
                 .ToList();
 
-            var total = Math.Max(sceneFiles.Count, 1);
+            var total = Math.Max(videoFiles.Count, 1);
             var completed = 0;
 
             var maxParallelism = ResolveMaxParallelism();
-            await Parallel.ForEachAsync(sceneFiles, new ParallelOptions { MaxDegreeOfParallelism = maxParallelism, CancellationToken = ct }, async (sceneFile, token) =>
+            await Parallel.ForEachAsync(videoFiles, new ParallelOptions { MaxDegreeOfParallelism = maxParallelism, CancellationToken = ct }, async (videoFile, token) =>
             {
                 var done = Interlocked.Increment(ref completed);
-                var sceneId = sceneFile.SceneId!.Value;
+                var videoId = videoFile.VideoId!.Value;
 
-                progress.Report(0.92 + (0.06 * done / total), $"Generating scene assets ({done}/{sceneFiles.Count})");
+                progress.Report(0.92 + (0.06 * done / total), $"Generating video assets ({done}/{videoFiles.Count})");
 
                 if (options.GenerateCovers)
                 {
-                    var thumbnailPath = thumbnailService.GetThumbnailPathForScene(sceneId);
+                    var thumbnailPath = thumbnailService.GetThumbnailPathForVideo(videoId);
                     if (!File.Exists(thumbnailPath))
-                        await thumbnailService.GenerateSceneThumbnailAsync(sceneId, null, token);
+                        await thumbnailService.GenerateVideoThumbnailAsync(videoId, null, token);
                 }
                 if (options.GeneratePreviews)
                 {
-                    var previewPath = thumbnailService.GetPreviewPath(sceneId);
+                    var previewPath = thumbnailService.GetPreviewPath(videoId);
                     if (!File.Exists(previewPath))
-                        await thumbnailService.GenerateScenePreviewAsync(sceneId, token);
+                        await thumbnailService.GenerateVideoPreviewAsync(videoId, token);
                 }
                 if (options.GenerateSprites)
                 {
-                    var spritePath = thumbnailService.GetSpritePath(sceneId);
-                    var spriteVttPath = thumbnailService.GetSpriteVttPath(sceneId);
+                    var spritePath = thumbnailService.GetSpritePath(videoId);
+                    var spriteVttPath = thumbnailService.GetSpriteVttPath(videoId);
                     if (!File.Exists(spritePath) || !File.Exists(spriteVttPath))
-                        await thumbnailService.GenerateSceneSpriteAsync(sceneId, token);
+                        await thumbnailService.GenerateVideoSpriteAsync(videoId, token);
                 }
                 if (options.GeneratePhashes
-                    && sceneFile.ParentFolder != null
-                    && !sceneFile.Fingerprints.Any(fp => fp.Type == "phash" && !string.IsNullOrWhiteSpace(fp.Value)))
+                    && videoFile.ParentFolder != null
+                    && !videoFile.Fingerprints.Any(fp => fp.Type == "phash" && !string.IsNullOrWhiteSpace(fp.Value)))
                 {
-                    var filePath = Path.Combine(sceneFile.ParentFolder.Path, sceneFile.Basename);
-                    var phash = await fingerprintService.ComputeVideoPhashAsync(filePath, sceneFile.Duration, token);
+                    var filePath = Path.Combine(videoFile.ParentFolder.Path, videoFile.Basename);
+                    var phash = await fingerprintService.ComputeVideoPhashAsync(filePath, videoFile.Duration, token);
                     if (!string.IsNullOrWhiteSpace(phash))
                     {
                         using var innerScope = scopeFactory.CreateScope();
                         var innerDb = innerScope.ServiceProvider.GetRequiredService<CoveContext>();
-                        var existing = await innerDb.FileFingerprints.FirstOrDefaultAsync(fp => fp.FileId == sceneFile.Id && fp.Type == "phash", token);
+                        var existing = await innerDb.FileFingerprints.FirstOrDefaultAsync(fp => fp.FileId == videoFile.Id && fp.Type == "phash", token);
                         if (existing != null)
                         {
                             existing.Value = phash;
@@ -621,7 +621,7 @@ public class ScanService(
                         {
                             innerDb.FileFingerprints.Add(new FileFingerprint
                             {
-                                FileId = sceneFile.Id,
+                                FileId = videoFile.Id,
                                 Type = "phash",
                                 Value = phash,
                             });
@@ -630,16 +630,16 @@ public class ScanService(
                     }
                 }
                 if (options.GenerateMd5
-                    && sceneFile.ParentFolder != null
-                    && !sceneFile.Fingerprints.Any(fp => fp.Type == "md5" && !string.IsNullOrWhiteSpace(fp.Value)))
+                    && videoFile.ParentFolder != null
+                    && !videoFile.Fingerprints.Any(fp => fp.Type == "md5" && !string.IsNullOrWhiteSpace(fp.Value)))
                 {
-                    var filePath = Path.Combine(sceneFile.ParentFolder.Path, sceneFile.Basename);
+                    var filePath = Path.Combine(videoFile.ParentFolder.Path, videoFile.Basename);
                     var md5 = await fingerprintService.ComputeMd5Async(filePath, token);
                     if (!string.IsNullOrWhiteSpace(md5))
                     {
                         using var innerScope = scopeFactory.CreateScope();
                         var innerDb = innerScope.ServiceProvider.GetRequiredService<CoveContext>();
-                        var existing = await innerDb.FileFingerprints.FirstOrDefaultAsync(fp => fp.FileId == sceneFile.Id && fp.Type == "md5", token);
+                        var existing = await innerDb.FileFingerprints.FirstOrDefaultAsync(fp => fp.FileId == videoFile.Id && fp.Type == "md5", token);
                         if (existing != null)
                         {
                             existing.Value = md5;
@@ -648,7 +648,7 @@ public class ScanService(
                         {
                             innerDb.FileFingerprints.Add(new FileFingerprint
                             {
-                                FileId = sceneFile.Id,
+                                FileId = videoFile.Id,
                                 Type = "md5",
                                 Value = md5,
                             });
@@ -1019,7 +1019,7 @@ public class ScanService(
     private async Task<VideoFile> ProcessVideoFileAsync(
         CoveContext db,
         string path,
-        int? sceneId,
+        int? videoId,
         CancellationToken ct,
         FileStat? fileStat = null,
         Dictionary<string, Folder>? folderCache = null,
@@ -1035,14 +1035,14 @@ public class ScanService(
             : db.VideoFiles.AsQueryable();
         var existing = await existingQuery.FirstOrDefaultAsync(f => f.ParentFolderId == folder.Id && f.Basename == basename, ct);
 
-        Scene? targetScene = null;
-        if (sceneId.HasValue)
+        Video? targetVideo = null;
+        if (videoId.HasValue)
         {
-            targetScene = await db.Scenes.FirstOrDefaultAsync(s => s.Id == sceneId.Value, ct)
-                ?? throw new InvalidOperationException($"Scene {sceneId.Value} was not found for downloaded media import");
+            targetVideo = await db.Videos.FirstOrDefaultAsync(s => s.Id == videoId.Value, ct)
+                ?? throw new InvalidOperationException($"Video {videoId.Value} was not found for downloaded media import");
 
-            if (string.IsNullOrWhiteSpace(targetScene.Title))
-                targetScene.Title = Path.GetFileNameWithoutExtension(path);
+            if (string.IsNullOrWhiteSpace(targetVideo.Title))
+                targetVideo.Title = Path.GetFileNameWithoutExtension(path);
         }
 
         if (existing != null)
@@ -1050,8 +1050,8 @@ public class ScanService(
             existing.Size = stat.Size;
             existing.ModTime = stat.ModTime;
 
-            if (targetScene != null)
-                existing.SceneId = targetScene.Id;
+            if (targetVideo != null)
+                existing.VideoId = targetVideo.Id;
 
             // Re-probe if metadata is missing (e.g., FFprobe wasn't available during initial scan)
             if (NeedsVideoMetadataProbe(existing))
@@ -1075,18 +1075,18 @@ public class ScanService(
             Size = stat.Size,
             ModTime = stat.ModTime,
             Format = Path.GetExtension(path).TrimStart('.').ToLowerInvariant(),
-            SceneId = targetScene?.Id
+            VideoId = targetVideo?.Id
         };
 
-        if (targetScene == null)
+        if (targetVideo == null)
         {
-            var scene = new Scene
+            var video = new Video
             {
                 Title = Path.GetFileNameWithoutExtension(path),
                 Files = [videoFile]
             };
 
-            db.Scenes.Add(scene);
+            db.Videos.Add(video);
         }
         else
         {
@@ -1095,7 +1095,7 @@ public class ScanService(
 
         await EnrichVideoFileAsync(videoFile, path, ct);
 
-        logger.LogDebug("Added scene file for: {Path}", path);
+        logger.LogDebug("Added video file for: {Path}", path);
         return videoFile;
     }
 
@@ -2257,3 +2257,4 @@ public class ScanService(
         }
     }
 }
+

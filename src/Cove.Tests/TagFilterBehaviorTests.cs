@@ -96,23 +96,23 @@ public class TagFilterBehaviorTests
     }
 
     [Fact]
-    public async Task SceneCountCriterion_CanIncludeDescendantTagCounts()
+    public async Task VideoCountCriterion_CanIncludeDescendantTagCounts()
     {
         await using var scope = await CreateContextAsync();
         var context = scope.Context;
 
         var (parent, child, grandchild) = await SeedTagHierarchyAsync(context);
-        context.Scenes.Add(new Scene
+        context.Videos.Add(new Video
         {
-            Title = "grandchild scene",
-            SceneTags = [new SceneTag { TagId = grandchild.Id }],
+            Title = "grandchild video",
+            VideoTags = [new VideoTag { TagId = grandchild.Id }],
         });
         await context.SaveChangesAsync();
 
         var repository = new TagRepository(context);
         var directFilter = new TagFilter
         {
-            SceneCountCriterion = new IntCriterion
+            VideoCountCriterion = new IntCriterion
             {
                 Modifier = CriterionModifier.GreaterThan,
                 Value = 0,
@@ -120,12 +120,12 @@ public class TagFilterBehaviorTests
         };
         var includeChildrenFilter = new TagFilter
         {
-            SceneCountCriterion = new IntCriterion
+            VideoCountCriterion = new IntCriterion
             {
                 Modifier = CriterionModifier.GreaterThan,
                 Value = 0,
             },
-            SceneCountIncludesChildren = true,
+            VideoCountIncludesChildren = true,
         };
 
         var (directItems, directCount) = await repository.FindAsync(directFilter, new FindFilter { Page = 1, PerPage = 20, Sort = "name" });
@@ -180,7 +180,7 @@ public class TagFilterBehaviorTests
     }
 
     [Fact]
-    public async Task SceneCountCriterion_IncludingChildren_DeduplicatesEntitiesAcrossMultipleDescendants()
+    public async Task VideoCountCriterion_IncludingChildren_DeduplicatesEntitiesAcrossMultipleDescendants()
     {
         await using var scope = await CreateContextAsync();
         var context = scope.Context;
@@ -195,22 +195,22 @@ public class TagFilterBehaviorTests
         context.Set<TagParent>().AddRange(
             new TagParent { ParentId = parent.Id, ChildId = childA.Id },
             new TagParent { ParentId = parent.Id, ChildId = childB.Id });
-        context.Scenes.Add(new Scene
+        context.Videos.Add(new Video
         {
-            Title = "shared scene",
-            SceneTags = [new SceneTag { TagId = childA.Id }, new SceneTag { TagId = childB.Id }],
+            Title = "shared video",
+            VideoTags = [new VideoTag { TagId = childA.Id }, new VideoTag { TagId = childB.Id }],
         });
         await context.SaveChangesAsync();
 
         var repository = new TagRepository(context);
         var filter = new TagFilter
         {
-            SceneCountCriterion = new IntCriterion
+            VideoCountCriterion = new IntCriterion
             {
                 Modifier = CriterionModifier.Equals,
                 Value = 1,
             },
-            SceneCountIncludesChildren = true,
+            VideoCountIncludesChildren = true,
         };
 
         var (items, totalCount) = await repository.FindAsync(filter, new FindFilter { Page = 1, PerPage = 20, Sort = "name" });
@@ -340,3 +340,4 @@ public class TagFilterBehaviorTests
         }
     }
 }
+

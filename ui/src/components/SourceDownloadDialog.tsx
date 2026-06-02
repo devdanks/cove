@@ -4,7 +4,7 @@ import { Check, Download, FileText, Headphones, Image as ImageIcon, Layers3, Loa
 import { groups, system } from "../api/client";
 import type { DownloaderMatch } from "../api/types";
 import { formatBatchDownloadSummary, type BatchDownloadResult } from "../utils/batchDownloads";
-import { loadScrapeApplyPreferences } from "./sceneScrapeUtils";
+import { loadScrapeApplyPreferences } from "./videoScrapeUtils";
 
 type SourceDownloadEntity = "Audio" | "Image" | "Text";
 type GroupMode = "none" | "existing" | "create";
@@ -176,7 +176,7 @@ export function SourceDownloadDialog({ open, entity, sourceUrl, matches, baseTit
             createEntityIfMissing: true,
             autoApplyMetadata,
             ...metadataApplyOptions,
-            groupIds: groupId ? [{ groupId, sceneIndex: index }] : undefined,
+            groupIds: groupId ? [{ groupId, videoIndex: index }] : undefined,
           };
         }),
         followUp: {

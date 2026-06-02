@@ -7,11 +7,11 @@ interface UseRawSegmentsQueryOptions {
   pageNumber: number;
   perPage: number;
   q: string;
-  sceneTitle: string;
+  videoTitle: string;
   sort: string;
   direction: "asc" | "desc";
-  includeSceneIds: number[];
-  excludeSceneIds: number[];
+  includeVideoIds: number[];
+  excludeVideoIds: number[];
   rawSegmentIds: number[];
   rawFilter: RawSegmentFilterValue;
   enabled: boolean;
@@ -23,20 +23,20 @@ export function buildRawSegmentListOptions({
   pageNumber,
   perPage,
   q,
-  sceneTitle,
+  videoTitle,
   sort,
   direction,
-  includeSceneIds,
-  excludeSceneIds,
+  includeVideoIds,
+  excludeVideoIds,
   rawSegmentIds,
   rawFilter,
 }: Omit<UseRawSegmentsQueryOptions, "enabled">): RawSegmentListOptions {
   return {
     q: q || undefined,
     ids: rawSegmentIds.length > 0 ? rawSegmentIds.join(",") : undefined,
-    sceneIds: includeSceneIds.length > 0 ? includeSceneIds.join(",") : undefined,
-    excludeSceneIds: excludeSceneIds.length > 0 ? excludeSceneIds.join(",") : undefined,
-    sceneTitle: sceneTitle || undefined,
+    videoIds: includeVideoIds.length > 0 ? includeVideoIds.join(",") : undefined,
+    excludeVideoIds: excludeVideoIds.length > 0 ? excludeVideoIds.join(",") : undefined,
+    videoTitle: videoTitle || undefined,
     tagIds: rawFilter.tagIds.length > 0 ? rawFilter.tagIds.join(",") : undefined,
     kind: rawFilter.kind,
     sourceKey: rawFilter.sourceKey,
@@ -83,11 +83,11 @@ export function useRawSegmentsQuery({
   pageNumber,
   perPage,
   q,
-  sceneTitle,
+  videoTitle,
   sort,
   direction,
-  includeSceneIds,
-  excludeSceneIds,
+  includeVideoIds,
+  excludeVideoIds,
   rawSegmentIds,
   rawFilter,
   enabled,
@@ -99,11 +99,11 @@ export function useRawSegmentsQuery({
       pageNumber,
       perPage,
       q,
-      sceneTitle,
+      videoTitle,
       sort,
       direction,
-      includeSceneIds.join(","),
-      excludeSceneIds.join(","),
+      includeVideoIds.join(","),
+      excludeVideoIds.join(","),
       rawSegmentIds.join(","),
       rawFilter,
     ],
@@ -112,11 +112,11 @@ export function useRawSegmentsQuery({
         pageNumber,
         perPage,
         q,
-        sceneTitle,
+        videoTitle,
         sort,
         direction,
-        includeSceneIds,
-        excludeSceneIds,
+        includeVideoIds,
+        excludeVideoIds,
         rawSegmentIds,
         rawFilter,
       }));
@@ -125,8 +125,8 @@ export function useRawSegmentsQuery({
         items: response.items.map((item) => ({
           ...item,
           key: `segment:${item.id}`,
-          sceneId: item.hostId,
-          sceneTitle: item.hostTitle?.trim() || `Scene #${item.hostId}`,
+          videoId: item.hostId,
+          videoTitle: item.hostTitle?.trim() || `Video #${item.hostId}`,
         })),
         totalCount: response.totalCount,
       };

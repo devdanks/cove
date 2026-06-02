@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Cove.Api.Services;
 
-public sealed record SceneBatchScrapeExecutionSummary(
+public sealed record VideoBatchScrapeExecutionSummary(
     int TotalCount,
     int ScrapedCount,
     int AppliedCount,
@@ -15,20 +15,20 @@ public sealed record SceneBatchScrapeExecutionSummary(
     int FailedCount,
     IReadOnlyList<string> Issues);
 
-public class SceneBatchScrapeService(
+public class VideoBatchScrapeService(
     IServiceScopeFactory scopeFactory,
     CoveConfiguration config,
-    ILogger<SceneBatchScrapeService> logger)
+    ILogger<VideoBatchScrapeService> logger)
 {
-    public async Task<SceneBatchScrapeExecutionSummary> RunAsync(BatchSceneScrapeStartRequestDto request, IJobProgress? progress, CancellationToken ct)
+    public async Task<VideoBatchScrapeExecutionSummary> RunAsync(BatchVideoScrapeStartRequestDto request, IJobProgress? progress, CancellationToken ct)
     {
         var normalizedInputKind = request.InputKind?.Trim().ToLowerInvariant();
         if (normalizedInputKind is not ("url" or "name"))
-            throw new InvalidOperationException($"Unsupported batch scene scrape input kind '{request.InputKind}'.");
+            throw new InvalidOperationException($"Unsupported batch video scrape input kind '{request.InputKind}'.");
 
-        var sceneIds = request.SceneIds.Where(id => id > 0).Distinct().ToList();
-        if (sceneIds.Count == 0)
-            return new SceneBatchScrapeExecutionSummary(0, 0, 0, 0, 0, 0, []);
+        var videoIds = request.VideoIds.Where(id => id > 0).Distinct().ToList();
+        if (videoIds.Count == 0)
+            return new VideoBatchScrapeExecutionSummary(0, 0, 0, 0, 0, 0, []);
 
         var issues = new ConcurrentQueue<string>();
         var processed = 0;
@@ -39,15 +39,15 @@ public class SceneBatchScrapeService(
         var failed = 0;
 
         await Parallel.ForEachAsync(
-            sceneIds,
+            videoIds,
             new ParallelOptions
             {
                 MaxDegreeOfParallelism = ResolveParallelism(),
                 CancellationToken = ct,
             },
-            async (sceneId, token) =>
+            async (videoId, token) =>
             {
-                string label = $"Scene {sceneId}";
+                string label = $"Video {videoId}";
 
                 try
                 {
@@ -55,22 +55,22 @@ public class SceneBatchScrapeService(
                     var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
                     var scrapeAttemptService = scope.ServiceProvider.GetRequiredService<ScrapeAttemptService>();
 
-                    var scene = await db.Scenes
+                    var video = await db.Videos
                         .AsNoTracking()
                         .Include(item => item.Urls)
-                        .FirstOrDefaultAsync(item => item.Id == sceneId, token);
+                        .FirstOrDefaultAsync(item => item.Id == videoId, token);
 
-                    if (scene == null)
+                    if (video == null)
                     {
                         Interlocked.Increment(ref skipped);
-                        issues.Enqueue($"Scene {sceneId}: scene not found.");
+                        issues.Enqueue($"Video {videoId}: video not found.");
                         return;
                     }
 
-                    label = string.IsNullOrWhiteSpace(scene.Title) ? $"Scene {scene.Id}" : scene.Title;
+                    label = string.IsNullOrWhiteSpace(video.Title) ? $"Video {video.Id}" : video.Title;
                     var input = normalizedInputKind == "url"
-                        ? scene.Urls.Select(item => item.Url).FirstOrDefault(url => !string.IsNullOrWhiteSpace(url))
-                        : scene.Title;
+                        ? video.Urls.Select(item => item.Url).FirstOrDefault(url => !string.IsNullOrWhiteSpace(url))
+                        : video.Title;
 
                     if (string.IsNullOrWhiteSpace(input))
                     {
@@ -82,8 +82,8 @@ public class SceneBatchScrapeService(
                     var attempt = await scrapeAttemptService.CreateAttemptAsync(
                         new CreateScrapeAttemptDto(
                             request.ScraperId,
-                            "scene",
-                            scene.Id,
+                            "video",
+                            video.Id,
                             normalizedInputKind,
                             normalizedInputKind == "url" ? input : null,
                             normalizedInputKind == "name" ? input : null,
@@ -102,9 +102,9 @@ public class SceneBatchScrapeService(
                     if (!request.AutoApply)
                         return;
 
-                    var appliedAttempt = await scrapeAttemptService.ApplySceneAttemptWithDefaultPlanAsync(
+                    var appliedAttempt = await scrapeAttemptService.ApplyVideoAttemptWithDefaultPlanAsync(
                         attempt.Id,
-                        new ApplySceneScrapeAttemptDto(
+                        new ApplyVideoScrapeAttemptDto(
                             ReplaceFields: null,
                             CollectionModes: null,
                             CreateMissingTags: request.CreateMissingTags,
@@ -134,17 +134,17 @@ public class SceneBatchScrapeService(
                 {
                     Interlocked.Increment(ref failed);
                     issues.Enqueue($"{label}: {ex.Message}");
-                    logger.LogWarning(ex, "Batch scene scrape failed for {SceneLabel}", label);
+                    logger.LogWarning(ex, "Batch video scrape failed for {VideoLabel}", label);
                 }
                 finally
                 {
                     var completed = Interlocked.Increment(ref processed);
-                    progress?.Report(completed / (double)sceneIds.Count, $"Processed {completed}/{sceneIds.Count}: {label}");
+                    progress?.Report(completed / (double)videoIds.Count, $"Processed {completed}/{videoIds.Count}: {label}");
                 }
             });
 
-        return new SceneBatchScrapeExecutionSummary(
-            sceneIds.Count,
+        return new VideoBatchScrapeExecutionSummary(
+            videoIds.Count,
             scraped,
             applied,
             partialApplied,

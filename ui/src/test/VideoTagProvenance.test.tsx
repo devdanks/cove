@@ -2,13 +2,13 @@ import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 
-import { DetailsTab } from "../pages/SceneDetailPage";
+import { DetailsTab } from "../pages/VideoDetailPage";
 
-describe("Scene tag provenance", () => {
+describe("Video tag provenance", () => {
   it("passes tag provenance through to the shared badge surface", () => {
-    const scene = {
+    const video = {
       id: 17,
-      title: "Provenance scene",
+      title: "Provenance video",
       updatedAt: "2026-05-01T00:00:00Z",
       files: [],
       performers: [],
@@ -46,7 +46,7 @@ describe("Scene tag provenance", () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={queryClient}>
-        <DetailsTab scene={scene as any} onNavigate={vi.fn()} />
+        <DetailsTab video={video as any} onNavigate={vi.fn()} />
       </QueryClientProvider>
     );
 

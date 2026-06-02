@@ -44,7 +44,7 @@ public static class DataServiceExtensions
         // Allow extensions to resolve via DbContext base type
         services.AddScoped<DbContext>(sp => sp.GetRequiredService<CoveContext>());
 
-        services.AddScoped<ISceneRepository, SceneRepository>();
+        services.AddScoped<IVideoRepository, VideoRepository>();
         services.AddScoped<IPerformerRepository, PerformerRepository>();
         services.AddScoped<ITagRepository, TagRepository>();
         services.AddScoped<IStudioRepository, StudioRepository>();
@@ -90,3 +90,4 @@ public static class DataServiceExtensions
         return services;
     }
 }
+

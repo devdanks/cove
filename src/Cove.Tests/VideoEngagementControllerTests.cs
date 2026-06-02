@@ -14,60 +14,60 @@ using Microsoft.Extensions.Caching.Memory;
 
 namespace Cove.Tests;
 
-public class SceneEngagementControllerTests
+public class VideoEngagementControllerTests
 {
     [Fact]
-    public async Task SceneActivityAndRating_AreScopedToCurrentUser()
+    public async Task VideoActivityAndRating_AreScopedToCurrentUser()
     {
         await using var scope = await CreateContextAsync();
         var context = scope.Context;
         var principalAccessor = scope.PrincipalAccessor;
 
-        context.Scenes.Add(new Scene { Title = "Scoped Scene" });
+        context.Videos.Add(new Video { Title = "Scoped Video" });
         await context.SaveChangesAsync();
-        var sceneId = await context.Scenes.Select(scene => scene.Id).SingleAsync();
+        var videoId = await context.Videos.Select(video => video.Id).SingleAsync();
 
-        var scenesController = CreateScenesController(context, principalAccessor);
+        var videosController = CreateVideosController(context, principalAccessor);
         var playbackController = CreatePlaybackController(context, principalAccessor);
 
         principalAccessor.Set(CreatePrincipal(7));
         var sessionId = Guid.NewGuid();
 
         // Record a play (view count)
-        Assert.IsType<NoContentResult>(await scenesController.RecordPlay(sceneId, CancellationToken.None));
+        Assert.IsType<NoContentResult>(await videosController.RecordPlay(videoId, CancellationToken.None));
 
         // Send first set of intervals: watched 42.5–48.0 (5.5s), paused
         Assert.IsType<NoContentResult>(await playbackController.RecordIntervals(new PlaybackIntervalsRequestDto(
-            "scene", sceneId, sessionId, 120.0, 48.0, "paused",
+            "video", videoId, sessionId, 120.0, 48.0, "paused",
             [new PlaybackIntervalInputDto(42.5, 48.0)]), CancellationToken.None));
 
         // Send second set: watched 73.5–120.0 (46.5s), ended at full duration → IsCompleted = true
         Assert.IsType<NoContentResult>(await playbackController.RecordIntervals(new PlaybackIntervalsRequestDto(
-            "scene", sceneId, sessionId, 120.0, 120.0, "ended",
+            "video", videoId, sessionId, 120.0, 120.0, "ended",
             [new PlaybackIntervalInputDto(73.5, 120.0)]), CancellationToken.None));
 
-        var incrementResult = await scenesController.IncrementLike(sceneId, CancellationToken.None);
+        var incrementResult = await videosController.IncrementLike(videoId, CancellationToken.None);
         var incrementOk = Assert.IsType<OkObjectResult>(incrementResult.Result);
         Assert.Equal(1, Assert.IsType<int>(incrementOk.Value));
 
-        var ratingResult = await scenesController.SetRating(sceneId, new SceneRatingDto(88), CancellationToken.None);
+        var ratingResult = await videosController.SetRating(videoId, new VideoRatingDto(88), CancellationToken.None);
         var ratingOk = Assert.IsType<OkObjectResult>(ratingResult.Result);
         Assert.Equal(88, Assert.IsType<int>(ratingOk.Value));
 
-        var audioRatingResult = await scenesController.SetRating(sceneId, new SceneRatingDto(35, "audio"), CancellationToken.None);
+        var audioRatingResult = await videosController.SetRating(videoId, new VideoRatingDto(35, "audio"), CancellationToken.None);
         var audioRatingOk = Assert.IsType<OkObjectResult>(audioRatingResult.Result);
         Assert.Equal(88, Assert.IsType<int>(audioRatingOk.Value));
 
-        var ratingsResult = await scenesController.GetRatings(sceneId, CancellationToken.None);
+        var ratingsResult = await videosController.GetRatings(videoId, CancellationToken.None);
         var ratingsOk = Assert.IsType<OkObjectResult>(ratingsResult.Result);
         var ratingsDto = Assert.IsType<EntityRatingsDto>(ratingsOk.Value);
         Assert.Equal(88, ratingsDto.Ratings["overall"]);
         Assert.Equal(35, ratingsDto.Ratings["audio"]);
 
-        var userOneResult = await scenesController.GetById(sceneId, CancellationToken.None);
+        var userOneResult = await videosController.GetById(videoId, CancellationToken.None);
         var userOneOk = Assert.IsType<OkObjectResult>(userOneResult.Result);
-        var userOneScene = Assert.IsType<SceneDto>(userOneOk.Value);
-        var userOneSnapshot = await new UserEngagementService(context, principalAccessor).GetSnapshotAsync(AffinityHostType.Scene, sceneId, CancellationToken.None);
+        var userOneVideo = Assert.IsType<VideoDto>(userOneOk.Value);
+        var userOneSnapshot = await new UserEngagementService(context, principalAccessor).GetSnapshotAsync(AffinityHostType.Video, videoId, CancellationToken.None);
         Assert.NotNull(userOneSnapshot);
         Assert.Equal(88, userOneSnapshot.Rating);
         Assert.Equal(120.0, userOneSnapshot.ResumeTime);
@@ -75,9 +75,9 @@ public class SceneEngagementControllerTests
         Assert.Equal(2, userOneSnapshot.PlayCount);
         Assert.Equal(1, userOneSnapshot.LikeCount);
 
-        var historyResult = await scenesController.GetHistory(sceneId, CancellationToken.None);
+        var historyResult = await videosController.GetHistory(videoId, CancellationToken.None);
         var historyOk = Assert.IsType<OkObjectResult>(historyResult.Result);
-        var history = Assert.IsType<SceneHistoryDto>(historyOk.Value);
+        var history = Assert.IsType<VideoHistoryDto>(historyOk.Value);
         Assert.Single(history.PlayHistory);
         Assert.Single(history.LikeHistory);
         Assert.NotNull(history.AllTimeWatchedIntervals);
@@ -97,10 +97,10 @@ public class SceneEngagementControllerTests
         context.ChangeTracker.Clear();
         principalAccessor.Set(CreatePrincipal(9));
 
-        var userTwoResult = await scenesController.GetById(sceneId, CancellationToken.None);
+        var userTwoResult = await videosController.GetById(videoId, CancellationToken.None);
         var userTwoOk = Assert.IsType<OkObjectResult>(userTwoResult.Result);
-        var userTwoScene = Assert.IsType<SceneDto>(userTwoOk.Value);
-        var userTwoSnapshot = await new UserEngagementService(context, principalAccessor).GetSnapshotAsync(AffinityHostType.Scene, sceneId, CancellationToken.None);
+        var userTwoVideo = Assert.IsType<VideoDto>(userTwoOk.Value);
+        var userTwoSnapshot = await new UserEngagementService(context, principalAccessor).GetSnapshotAsync(AffinityHostType.Video, videoId, CancellationToken.None);
         Assert.NotNull(userTwoSnapshot);
         Assert.Null(userTwoSnapshot.Rating);
         Assert.Equal(0d, userTwoSnapshot.ResumeTime);
@@ -108,7 +108,7 @@ public class SceneEngagementControllerTests
         Assert.Equal(0, userTwoSnapshot.PlayCount);
         Assert.Equal(0, userTwoSnapshot.LikeCount);
 
-        var userTwoRatingsResult = await scenesController.GetRatings(sceneId, CancellationToken.None);
+        var userTwoRatingsResult = await videosController.GetRatings(videoId, CancellationToken.None);
         var userTwoRatingsOk = Assert.IsType<OkObjectResult>(userTwoRatingsResult.Result);
         var userTwoRatingsDto = Assert.IsType<EntityRatingsDto>(userTwoRatingsOk.Value);
         Assert.Empty(userTwoRatingsDto.Ratings);
@@ -124,8 +124,8 @@ public class SceneEngagementControllerTests
         var playbackSessions = await context.PlaybackSessions.IgnoreQueryFilters().ToListAsync();
         var playbackSession = Assert.Single(playbackSessions);
         Assert.Equal(7, playbackSession.UserId);
-        Assert.Equal(InteractionHostType.Scene, playbackSession.HostType);
-        Assert.Equal(sceneId, playbackSession.HostId);
+        Assert.Equal(InteractionHostType.Video, playbackSession.HostType);
+        Assert.Equal(videoId, playbackSession.HostId);
         Assert.Equal(sessionId, playbackSession.SessionId);
         Assert.True(playbackSession.IsCompleted);
         Assert.Equal(52.0, playbackSession.TotalWatchedSec, precision: 5);
@@ -158,12 +158,12 @@ public class SceneEngagementControllerTests
             });
     }
 
-    private static ScenesController CreateScenesController(CoveContext context, CurrentPrincipalAccessor principalAccessor)
+    private static VideosController CreateVideosController(CoveContext context, CurrentPrincipalAccessor principalAccessor)
     {
-        var repository = new SceneRepository(context);
+        var repository = new VideoRepository(context);
         var engagementService = new UserEngagementService(context, principalAccessor);
         var memoryCache = new MemoryCache(new MemoryCacheOptions());
-        return new ScenesController(repository, context, null!, null!, null!, memoryCache, null!, null!, null!, engagementService, new CustomFieldService(context), null, principalAccessor);
+        return new VideosController(repository, context, null!, null!, null!, memoryCache, null!, null!, null!, engagementService, new CustomFieldService(context), null, principalAccessor);
     }
 
     private static PlaybackController CreatePlaybackController(CoveContext context, CurrentPrincipalAccessor principalAccessor)
@@ -180,7 +180,7 @@ public class SceneEngagementControllerTests
         Roles = new HashSet<string>(),
         Permissions = new HashSet<string>
         {
-            Permissions.ScenesRead,
+            Permissions.VideosRead,
         },
     };
 
@@ -194,12 +194,12 @@ public class SceneEngagementControllerTests
             .UseSqlite(connection)
             .Options;
 
-        var context = new SceneEngagementTestContext(options, principalAccessor);
+        var context = new VideoEngagementTestContext(options, principalAccessor);
         await context.Database.EnsureCreatedAsync();
         return new TestContextScope(context, connection, principalAccessor);
     }
 
-    private sealed class SceneEngagementTestContext(DbContextOptions<CoveContext> options, ICurrentPrincipalAccessor principalAccessor) : CoveContext(options, principalAccessor)
+    private sealed class VideoEngagementTestContext(DbContextOptions<CoveContext> options, ICurrentPrincipalAccessor principalAccessor) : CoveContext(options, principalAccessor)
     {
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
@@ -221,3 +221,4 @@ public class SceneEngagementControllerTests
         }
     }
 }
+

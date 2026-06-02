@@ -79,8 +79,8 @@ a, button { transition: color 0.15s, background-color 0.15s, box-shadow 0.15s, o
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 
-/* Scene card preview video */
-.scene-card-preview-video {
+/* Video card preview video */
+.video-card-preview-video {
   position: absolute;
   top: 0;
   left: 0;
@@ -91,24 +91,24 @@ a, button { transition: color 0.15s, background-color 0.15s, box-shadow 0.15s, o
   pointer-events: none;
   transition: opacity 0.15s ease-out;
 }
-.scene-card:hover .scene-card-preview-video,
-.scene-card:active .scene-card-preview-video {
+.video-card:hover .video-card-preview-video,
+.video-card:active .video-card-preview-video {
   opacity: 1;
   transition-delay: 0.2s;
 }
 
-.extra-scene-info { display: none; }
+.extra-video-info { display: none; }
 
-/* Scene specs overlay — fade out on hover */
-.scene-card:hover .scene-specs-overlay,
-.scene-card:hover .rating-banner-container {
+/* Video specs overlay — fade out on hover */
+.video-card:hover .video-specs-overlay,
+.video-card:hover .rating-banner-container {
   opacity: 0;
   transition: opacity 0.5s;
 }
 .rating-banner-container { transition: opacity 0.5s; }
 
 /* Card zoom levels */
-.scene-card { --card-min-width: 240px; }
+.video-card { --card-min-width: 240px; }
 
 /* Card title typography */
 .card-title {
@@ -231,7 +231,7 @@ html[data-component-style*="glass"] .bg-input {
 
 /* Glass: entity cards — blur controlled by --sv-card-blur (0-100, default 27 → ~8px) */
 html[data-component-style*="glass"] .entity-card,
-html[data-component-style*="glass"] .scene-card {
+html[data-component-style*="glass"] .video-card {
   contain: style;
   border: 1px solid rgba(255, 255, 255, 0.08);
   -webkit-backdrop-filter: blur(calc(var(--sv-card-blur, 27) * 0.3px));
@@ -241,7 +241,7 @@ html[data-component-style*="glass"] .scene-card {
 }
 
 html[data-component-style*="glass"] .entity-card:hover,
-html[data-component-style*="glass"] .scene-card:hover {
+html[data-component-style*="glass"] .video-card:hover {
   box-shadow:
     0 16px 48px rgba(0, 0, 0, 0.35);
   border-color: rgba(255, 255, 255, 0.14);
@@ -299,12 +299,12 @@ html[data-component-style*="glass"] .bg-black * {
 }
 
 /* PERF: CSS containment on card grids */
-.entity-card, .scene-card { contain: style; }
+.entity-card, .video-card { contain: style; }
 
 /* PERF: Prefer reduced-motion */
 @media (prefers-reduced-motion: reduce) {
   html[data-component-style*="animated"] .entity-card,
-  html[data-component-style*="animated"] .scene-card,
+  html[data-component-style*="animated"] .video-card,
   html[data-component-style*="animated"] nav.cove-navbar {
     animation: none !important;
   }
@@ -517,7 +517,7 @@ html[data-theme-bg-animation][data-component-style*="glass"] .bg-nav {
 
 /* BG Animation + Glass: entity cards — softer borders */
 html[data-theme-bg-animation][data-component-style*="glass"] .entity-card,
-html[data-theme-bg-animation][data-component-style*="glass"] .scene-card {
+html[data-theme-bg-animation][data-component-style*="glass"] .video-card {
   border: 1px solid rgba(255, 255, 255, 0.04);
   border-radius: 16px;
   overflow: hidden;
@@ -526,7 +526,7 @@ html[data-theme-bg-animation][data-component-style*="glass"] .scene-card {
 
 /* BG Animation + Glass: card hover — soft glow, no harsh borders */
 html[data-theme-bg-animation][data-component-style*="glass"] .entity-card:hover,
-html[data-theme-bg-animation][data-component-style*="glass"] .scene-card:hover {
+html[data-theme-bg-animation][data-component-style*="glass"] .video-card:hover {
   border-color: rgba(255, 255, 255, 0.08);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
 }
@@ -596,9 +596,9 @@ html[data-theme-bg-animation] .border-r {
 
 /* BG Animation: internal card borders — nearly invisible */
 html[data-theme-bg-animation] .entity-card .border-t,
-html[data-theme-bg-animation] .scene-card .border-t,
+html[data-theme-bg-animation] .video-card .border-t,
 html[data-theme-bg-animation] .entity-card hr,
-html[data-theme-bg-animation] .scene-card hr {
+html[data-theme-bg-animation] .video-card hr {
   border-color: rgba(255, 255, 255, 0.03);
 }
 
@@ -675,7 +675,7 @@ html[data-theme-bg-animation]:not([data-component-style*="glass"]) .bg-surface {
   backdrop-filter: blur(12px);
 }
 html[data-theme-bg-animation]:not([data-component-style*="glass"]) .entity-card,
-html[data-theme-bg-animation]:not([data-component-style*="glass"]) .scene-card {
+html[data-theme-bg-animation]:not([data-component-style*="glass"]) .video-card {
   border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
@@ -760,13 +760,13 @@ html[data-component-style*="gradient"] nav.cove-navbar {
 
 /* Gradient cards: position relative for ::after overlay */
 html[data-component-style*="gradient"] .entity-card,
-html[data-component-style*="gradient"] .scene-card {
+html[data-component-style*="gradient"] .video-card {
   position: relative;
 }
 
 /* Full-card gradient overlay */
 html[data-component-style*="gradient"] .entity-card::after,
-html[data-component-style*="gradient"] .scene-card::after {
+html[data-component-style*="gradient"] .video-card::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -783,7 +783,7 @@ html[data-component-style*="gradient"] .scene-card::after {
   );
 }
 html[data-style-gradient-cards="0"][data-component-style*="gradient"] .entity-card::after,
-html[data-style-gradient-cards="0"][data-component-style*="gradient"] .scene-card::after {
+html[data-style-gradient-cards="0"][data-component-style*="gradient"] .video-card::after {
   display: none;
 }
 
@@ -848,12 +848,12 @@ html[data-component-style*="gradient"] textarea {
 
 /* Animated: card image zoom on hover */
 html[data-component-style*="animated"] .entity-card img,
-html[data-component-style*="animated"] .scene-card img,
+html[data-component-style*="animated"] .video-card img,
 html[data-component-style*="animated"] .group img {
   transition: transform 0.3s ease;
 }
 html[data-component-style*="animated"] .entity-card:hover img,
-html[data-component-style*="animated"] .scene-card:hover img,
+html[data-component-style*="animated"] .video-card:hover img,
 html[data-component-style*="animated"] .group:hover img {
   transform: scale(1.05);
 }
@@ -898,7 +898,7 @@ html[data-component-style*="animated"] .image-detail-viewer:hover .image-detail-
 
 /* Animated hover: pulse glow — continuous via --sv-hover-glow (0-100, default 67) */
 html[data-component-style*="animated"] .entity-card:hover,
-html[data-component-style*="animated"] .scene-card:hover {
+html[data-component-style*="animated"] .video-card:hover {
   --_hover-dur: calc(max(1, 4 - var(--sv-hover-glow, 67) * 0.03) * 1s);
   animation: pulse-glow var(--_hover-dur) ease-in-out infinite;
   border-color: transparent !important;
@@ -906,7 +906,7 @@ html[data-component-style*="animated"] .scene-card:hover {
   outline-offset: -1px;
 }
 html[data-style-animated-hover="0"] .entity-card:hover,
-html[data-style-animated-hover="0"] .scene-card:hover {
+html[data-style-animated-hover="0"] .video-card:hover {
   animation: none;
   box-shadow: none;
 }
@@ -942,7 +942,7 @@ html[data-theme-bg-animation][data-component-style*="animated"] button:hover:not
 /* --- Component Style: Rounded --- */
 html[data-component-style*="rounded"] button { border-radius: 9999px; }
 html[data-component-style*="rounded"] .entity-card,
-html[data-component-style*="rounded"] .scene-card {
+html[data-component-style*="rounded"] .video-card {
   border-radius: 16px;
   overflow: hidden;
 }
@@ -975,7 +975,7 @@ html[data-color-scheme="light"][data-component-style*="glass"] .border-b { borde
 html[data-color-scheme="light"][data-component-style*="glass"] .border-l { border-color: rgba(0, 0, 0, 0.08); }
 html[data-color-scheme="light"][data-component-style*="glass"] .border-t { border-color: rgba(0, 0, 0, 0.08); }
 
-html[data-component-style*="glass"] .scene-card > div.bg-card,
+html[data-component-style*="glass"] .video-card > div.bg-card,
 html[data-component-style*="glass"] .entity-card > div:last-of-type {
   position: relative;
 }
@@ -990,7 +990,7 @@ html[data-color-scheme="light"][data-component-style*="gradient"]:not([data-them
 }
 
 /* Light color scheme glass cards */
-html[data-color-scheme="light"][data-component-style*="glass"] .scene-card,
+html[data-color-scheme="light"][data-component-style*="glass"] .video-card,
 html[data-color-scheme="light"][data-component-style*="glass"] .entity-card {
   border-color: rgba(0, 0, 0, 0.1);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 4px 16px rgba(0, 0, 0, 0.06);
@@ -1094,7 +1094,7 @@ section.rounded-2xl .rounded-xl.border-accent:hover {
 }
 
 html[data-component-style*="animated"] .entity-card,
-html[data-component-style*="animated"] .scene-card {
+html[data-component-style*="animated"] .video-card {
   animation: card-enter 0.3s ease-out both;
 }
 
@@ -1149,7 +1149,7 @@ html[data-component-style*="animated"] nav.bg-nav > div > .border-b {
 
 /* Animated off options */
 html[data-style-animated-entrance="off"] .entity-card,
-html[data-style-animated-entrance="off"] .scene-card { animation: none; }
+html[data-style-animated-entrance="off"] .video-card { animation: none; }
 html[data-style-animated-entrance="off"] main { animation: none; }
 html[data-style-animated-surfaceshimmer="off"] nav.bg-nav > div > .border-b { animation: none; }
 html[data-style-animated-buttonglow="off"] .bg-accent:hover { animation: none; }
@@ -1202,9 +1202,9 @@ a, button { transition: color 0.15s, background-color 0.15s, box-shadow 0.15s, o
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 
-/* Scene card preview video — CSS-driven hover: hidden off-screen by default, shown on hover via position change.
+/* Video card preview video — CSS-driven hover: hidden off-screen by default, shown on hover via position change.
    IntersectionObserver in JS detects when video becomes visible and calls play(). */
-.scene-card-preview-video {
+.video-card-preview-video {
   position: absolute;
   top: -9999px;
   left: 0;
@@ -1214,20 +1214,20 @@ a, button { transition: color 0.15s, background-color 0.15s, box-shadow 0.15s, o
   transition: top 0s;
   transition-delay: 0s;
 }
-.scene-card:hover .scene-card-preview-video,
-.scene-card:active .scene-card-preview-video {
+.video-card:hover .video-card-preview-video,
+.video-card:active .video-card-preview-video {
   top: 0;
   transition-delay: 0.2s;
 }
 
-/* Hide extra scene info (filesize, file path) by default — default styling */
-.extra-scene-info {
+/* Hide extra video info (filesize, file path) by default — default styling */
+.extra-video-info {
   display: none;
 }
 
-/* Scene specs overlay — fade out on hover to avoid cluttering the preview */
-.scene-card:hover .scene-specs-overlay,
-.scene-card:hover .rating-banner-container {
+/* Video specs overlay — fade out on hover to avoid cluttering the preview */
+.video-card:hover .video-specs-overlay,
+.video-card:hover .rating-banner-container {
   opacity: 0;
   transition: opacity 0.5s;
 }
@@ -1236,7 +1236,7 @@ a, button { transition: color 0.15s, background-color 0.15s, box-shadow 0.15s, o
 }
 
 /* Card zoom levels */
-.scene-card { --card-min-width: 240px; }
+.video-card { --card-min-width: 240px; }
 
 /* Card title typography — scales with card zoom */
 .card-title {
@@ -1395,7 +1395,7 @@ html[data-component-style*="glass"] .bg-shell-input {
  * Card blur is configurable via glass settings (data-style-glass-cardblur).
  * Default: light (8px) for nice visual effect. Can be turned off for performance. */
 html[data-component-style*="glass"] .entity-card,
-html[data-component-style*="glass"] .scene-card {
+html[data-component-style*="glass"] .video-card {
   contain: layout style paint;
   border: 1px solid rgba(255, 255, 255, 0.1);
   -webkit-backdrop-filter: blur(8px);
@@ -1409,13 +1409,13 @@ html[data-component-style*="glass"] .scene-card {
 
 /* Glass card blur: off */
 html[data-style-glass-cardblur="off"][data-component-style*="glass"] .entity-card,
-html[data-style-glass-cardblur="off"][data-component-style*="glass"] .scene-card {
+html[data-style-glass-cardblur="off"][data-component-style*="glass"] .video-card {
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
 /* Glass card blur: full */
 html[data-style-glass-cardblur="full"][data-component-style*="glass"] .entity-card,
-html[data-style-glass-cardblur="full"][data-component-style*="glass"] .scene-card {
+html[data-style-glass-cardblur="full"][data-component-style*="glass"] .video-card {
   -webkit-backdrop-filter: blur(20px);
   backdrop-filter: blur(20px);
 }
@@ -1448,7 +1448,7 @@ html[data-style-glass-opacity="heavy"][data-component-style*="glass"] {
 }
 
 html[data-component-style*="glass"] .entity-card:hover,
-html[data-component-style*="glass"] .scene-card:hover {
+html[data-component-style*="glass"] .video-card:hover {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.18),
     inset 0 -1px 0 rgba(0, 0, 0, 0.06),
@@ -1505,14 +1505,14 @@ html[data-component-style*="glass"] .bg-black * {
 
 /* PERF: CSS containment on card grids for layout thrashing reduction */
 .entity-card,
-.scene-card {
+.video-card {
   contain: layout style paint;
 }
 
 /* PERF: Prefer reduced-motion — disable all glass/gradient/animated effects */
 @media (prefers-reduced-motion: reduce) {
   html[data-component-style*="animated"] .entity-card,
-  html[data-component-style*="animated"] .scene-card,
+  html[data-component-style*="animated"] .video-card,
   html[data-component-style*="animated"] nav.cove-navbar {
     animation: none !important;
   }
@@ -1622,7 +1622,7 @@ html[data-theme="liquid-glass"][data-component-style*="glass"] .bg-shell-nav {
 
 /* Liquid Glass: entity cards — no blur on cards (PERF), just visual edges */
 html[data-theme="liquid-glass"][data-component-style*="glass"] .entity-card,
-html[data-theme="liquid-glass"][data-component-style*="glass"] .scene-card {
+html[data-theme="liquid-glass"][data-component-style*="glass"] .video-card {
   contain: layout style paint;
   border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: 16px;
@@ -1634,7 +1634,7 @@ html[data-theme="liquid-glass"][data-component-style*="glass"] .scene-card {
 }
 
 html[data-theme="liquid-glass"][data-component-style*="glass"] .entity-card:hover,
-html[data-theme="liquid-glass"][data-component-style*="glass"] .scene-card:hover {
+html[data-theme="liquid-glass"][data-component-style*="glass"] .video-card:hover {
   border-color: rgba(255, 255, 255, 0.35);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.45),
@@ -1890,14 +1890,14 @@ html[data-component-style*="gradient"] nav.cove-navbar {
 
 /* Gradient cards: accent-tinted top edge */
 html[data-component-style*="gradient"] .entity-card,
-html[data-component-style*="gradient"] .scene-card {
+html[data-component-style*="gradient"] .video-card {
   border-top: 2px solid rgba(var(--gradient-r1, 19), var(--gradient-g1, 124), var(--gradient-b1, 189), 0.3);
 }
 
 /* Gradient card bodies: subtle accent-tinted background on card text areas.
- * Targets .card-body (entity cards) and .bg-shell-card inside scene cards. */
+ * Targets .card-body (entity cards) and .bg-shell-card inside video cards. */
 html[data-component-style*="gradient"] .entity-card .card-body,
-html[data-component-style*="gradient"] .scene-card > div.bg-shell-card {
+html[data-component-style*="gradient"] .video-card > div.bg-shell-card {
   background:
     linear-gradient(135deg,
       rgba(var(--gradient-r1, 19), var(--gradient-g1, 124), var(--gradient-b1, 189), var(--card-gradient-opacity, 0.08)) 0%,
@@ -1925,11 +1925,11 @@ html[data-style-gradient-cardstrength="strong"][data-component-style*="gradient"
 
 /* Gradient cards: disable card gradients when turned off */
 html[data-style-gradient-cards="off"][data-component-style*="gradient"] .entity-card .card-body,
-html[data-style-gradient-cards="off"][data-component-style*="gradient"] .scene-card > div.bg-shell-card {
+html[data-style-gradient-cards="off"][data-component-style*="gradient"] .video-card > div.bg-shell-card {
   background: transparent;
 }
 html[data-style-gradient-cards="off"][data-component-style*="gradient"] .entity-card,
-html[data-style-gradient-cards="off"][data-component-style*="gradient"] .scene-card {
+html[data-style-gradient-cards="off"][data-component-style*="gradient"] .video-card {
   border-top-color: var(--color-shell-border);
 }
 
@@ -1989,7 +1989,7 @@ html[data-component-style*="rounded"] button {
   border-radius: 9999px;
 }
 html[data-component-style*="rounded"] .entity-card,
-html[data-component-style*="rounded"] .scene-card {
+html[data-component-style*="rounded"] .video-card {
   border-radius: 16px;
   overflow: hidden;
 }
@@ -2035,7 +2035,7 @@ html[data-theme="light"][data-component-style*="glass"] .border-t {
 }
 
 /* Ensure card text areas have enough contrast even with glass */
-html[data-component-style*="glass"] .scene-card > div.bg-shell-card,
+html[data-component-style*="glass"] .video-card > div.bg-shell-card,
 html[data-component-style*="glass"] .entity-card > div:last-of-type {
   position: relative;
 }
@@ -2062,7 +2062,7 @@ html:not([data-style-gradient-animated])[data-theme="light"][data-component-styl
 }
 
 /* Light theme glass card/entity overrides */
-html[data-theme="light"][data-component-style*="glass"] .scene-card,
+html[data-theme="light"][data-component-style*="glass"] .video-card,
 html[data-theme="light"][data-component-style*="glass"] .entity-card {
   border-color: rgba(0, 0, 0, 0.1);
   box-shadow:
@@ -2136,7 +2136,7 @@ html[data-color-scheme="light"][data-component-style*="glass"] {
 }
 
 html[data-component-style*="glass"] .entity-card,
-html[data-component-style*="glass"] .scene-card,
+html[data-component-style*="glass"] .video-card,
 html[data-component-style*="glass"] .settings-style-card,
 html[data-component-style*="glass"] .theme-option-card,
 html[data-component-style*="glass"] .layout-option-card {
@@ -2144,7 +2144,7 @@ html[data-component-style*="glass"] .layout-option-card {
 }
 
 html[data-color-scheme="light"][data-component-style*="glass"] .entity-card,
-html[data-color-scheme="light"][data-component-style*="glass"] .scene-card,
+html[data-color-scheme="light"][data-component-style*="glass"] .video-card,
 html[data-color-scheme="light"][data-component-style*="glass"] .settings-style-card,
 html[data-color-scheme="light"][data-component-style*="glass"] .theme-option-card,
 html[data-color-scheme="light"][data-component-style*="glass"] .layout-option-card {
@@ -2162,9 +2162,9 @@ html[data-component-style*="glass"] .settings-style-card > .flex > button {
 }
 
 html[data-component-style*="floating"] .entity-card,
-html[data-component-style*="floating"] .scene-card,
+html[data-component-style*="floating"] .video-card,
 html[data-theme-bg-animation][data-component-style*="floating"] .entity-card,
-html[data-theme-bg-animation][data-component-style*="floating"] .scene-card {
+html[data-theme-bg-animation][data-component-style*="floating"] .video-card {
   background: transparent;
   border-color: transparent;
   box-shadow: none;
@@ -2174,7 +2174,7 @@ html[data-theme-bg-animation][data-component-style*="floating"] .scene-card {
 
 html[data-component-style*="floating"] .card-media,
 html[data-component-style*="floating"] .entity-card > div:first-of-type,
-html[data-component-style*="floating"] .scene-card > .scene-card-preview {
+html[data-component-style*="floating"] .video-card > .video-card-preview {
   border-radius: 16px;
   overflow: hidden;
   background: color-mix(in srgb, var(--color-surface) 84%, transparent);
@@ -2182,14 +2182,14 @@ html[data-component-style*="floating"] .scene-card > .scene-card-preview {
 }
 
 html[data-component-style*="floating"] .entity-card:hover,
-html[data-component-style*="floating"] .scene-card:hover {
+html[data-component-style*="floating"] .video-card:hover {
   transform: translateY(-3px);
 }
 
 html[data-component-style*="floating"] .entity-card:hover .card-media,
-html[data-component-style*="floating"] .scene-card:hover .card-media,
+html[data-component-style*="floating"] .video-card:hover .card-media,
 html[data-component-style*="floating"] .entity-card:hover > div:first-of-type,
-html[data-component-style*="floating"] .scene-card:hover > .scene-card-preview {
+html[data-component-style*="floating"] .video-card:hover > .video-card-preview {
   box-shadow: 0 24px 44px color-mix(in srgb, var(--color-overlay, rgba(0, 0, 0, 0.45)) 80%, transparent);
 }
 
@@ -2220,7 +2220,7 @@ html[data-component-style*="floating"] .card-popovers {
 }
 
 html[data-component-style*="floating"] .entity-card hr,
-html[data-component-style*="floating"] .scene-card hr {
+html[data-component-style*="floating"] .video-card hr {
   border-color: transparent;
 }
 
@@ -2238,7 +2238,7 @@ html[data-component-style*="rounded"] .layout-option-card {
 }
 
 html[data-component-style*="rounded"] .entity-card,
-html[data-component-style*="rounded"] .scene-card,
+html[data-component-style*="rounded"] .video-card,
 html[data-component-style*="rounded"] .styled-dropdown-panel,
 html[data-component-style*="rounded"] .filter-dialog,
 html[data-component-style*="rounded"] [role="dialog"] {
@@ -2255,12 +2255,12 @@ html[data-component-style*="rounded"] .card-popovers {
 }
 
 html[data-component-style*="animated"] .entity-card,
-html[data-component-style*="animated"] .scene-card {
+html[data-component-style*="animated"] .video-card {
   transition: transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease;
 }
 
 html[data-component-style*="animated"] .entity-card::before,
-html[data-component-style*="animated"] .scene-card::before {
+html[data-component-style*="animated"] .video-card::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -2272,13 +2272,13 @@ html[data-component-style*="animated"] .scene-card::before {
 }
 
 html[data-component-style*="animated"] .entity-card:hover,
-html[data-component-style*="animated"] .scene-card:hover {
+html[data-component-style*="animated"] .video-card:hover {
   transform: translateY(-4px) scale(1.01);
   box-shadow: 0 18px 42px color-mix(in srgb, var(--color-accent) 18%, transparent);
 }
 
 html[data-component-style*="animated"] .entity-card:hover::before,
-html[data-component-style*="animated"] .scene-card:hover::before {
+html[data-component-style*="animated"] .video-card:hover::before {
   animation: card-sheen-sweep 900ms ease-out;
 }
 
@@ -2346,3 +2346,4 @@ html[data-component-style*="animated"] .bg-accent:hover {
     background: color-mix(in srgb, var(--color-accent) 8%, transparent);
   }
 }
+

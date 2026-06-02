@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GroupDetailPage } from "../pages/GroupDetailPage";
 
-const { mockGroups, mockScenes, mockGoBack } = vi.hoisted(() => ({
+const { mockGroups, mockVideos, mockGoBack } = vi.hoisted(() => ({
   mockGroups: {
     get: vi.fn(),
     find: vi.fn(),
@@ -21,7 +21,7 @@ const { mockGroups, mockScenes, mockGoBack } = vi.hoisted(() => ({
       playbackManifest: vi.fn(),
     },
   },
-  mockScenes: {
+  mockVideos: {
     find: vi.fn(),
   },
   mockGoBack: vi.fn(),
@@ -29,7 +29,7 @@ const { mockGroups, mockScenes, mockGoBack } = vi.hoisted(() => ({
 
 vi.mock("../api/client", () => ({
   groups: mockGroups,
-  scenes: mockScenes,
+  videos: mockVideos,
   entityImages: {
     groupFrontImageUrl: vi.fn(() => "/front.jpg"),
     uploadGroupFrontImage: vi.fn(),
@@ -63,8 +63,8 @@ vi.mock("../components/EntityCards", () => ({
   GroupTile: ({ group, onClick }: { group: { name: string }; onClick: () => void }) => (
     <button type="button" onClick={onClick}>{group.name}</button>
   ),
-  SceneCard: ({ scene, onClick }: { scene: { title?: string; id: number }; onClick: () => void }) => (
-    <button type="button" onClick={onClick}>{scene.title || `Scene #${scene.id}`}</button>
+  VideoCard: ({ video, onClick }: { video: { title?: string; id: number }; onClick: () => void }) => (
+    <button type="button" onClick={onClick}>{video.title || `Video #${video.id}`}</button>
   ),
 }));
 
@@ -143,7 +143,7 @@ function buildGroup(overrides: Record<string, unknown> = {}) {
     customFields: {},
     frontImagePath: undefined,
     backImagePath: undefined,
-    sceneCount: 2,
+    videoCount: 2,
     subGroupCount: 1,
     containingGroupCount: 3,
     createdAt: "2026-05-01T12:00:00Z",
@@ -178,18 +178,18 @@ describe("GroupDetailPage", () => {
   it("renders the shared hero layout with metadata above the tabs", async () => {
     mockGroups.get.mockResolvedValue(buildGroup());
     mockGroups.items.list.mockResolvedValue([
-      { id: 21, orderIndex: 0, sceneId: 10, title: "Clip One", kind: "sceneRange", startSec: 1, endSec: 5 },
+      { id: 21, orderIndex: 0, videoId: 10, title: "Clip One", kind: "videoRange", startSec: 1, endSec: 5 },
     ]);
     mockGroups.items.page.mockResolvedValue({
-      items: [{ id: 21, orderIndex: 0, sceneId: 10, title: "Clip One", kind: "sceneRange", startSec: 1, endSec: 5 }],
+      items: [{ id: 21, orderIndex: 0, videoId: 10, title: "Clip One", kind: "videoRange", startSec: 1, endSec: 5 }],
       totalCount: 1,
       page: 1,
       perPage: 40,
     });
     mockGroups.items.playbackManifest.mockResolvedValue({
-      items: [{ groupItemId: 21, sceneId: 10, title: "Clip One", startSec: 1, endSec: 5, durationSec: 4 }],
+      items: [{ groupItemId: 21, videoId: 10, title: "Clip One", startSec: 1, endSec: 5, durationSec: 4 }],
     });
-    mockScenes.find.mockResolvedValue({ items: [], totalCount: 0 });
+    mockVideos.find.mockResolvedValue({ items: [], totalCount: 0 });
     mockGroups.subGroups.mockResolvedValue([]);
     mockGroups.containingGroups.mockResolvedValue([]);
 
@@ -209,18 +209,18 @@ describe("GroupDetailPage", () => {
   it("opens the group editor from the hero action", async () => {
     mockGroups.get.mockResolvedValue(buildGroup());
     mockGroups.items.list.mockResolvedValue([
-      { id: 21, orderIndex: 0, sceneId: 10, title: "Clip One", kind: "sceneRange", startSec: 1, endSec: 5 },
+      { id: 21, orderIndex: 0, videoId: 10, title: "Clip One", kind: "videoRange", startSec: 1, endSec: 5 },
     ]);
     mockGroups.items.page.mockResolvedValue({
-      items: [{ id: 21, orderIndex: 0, sceneId: 10, title: "Clip One", kind: "sceneRange", startSec: 1, endSec: 5 }],
+      items: [{ id: 21, orderIndex: 0, videoId: 10, title: "Clip One", kind: "videoRange", startSec: 1, endSec: 5 }],
       totalCount: 1,
       page: 1,
       perPage: 40,
     });
     mockGroups.items.playbackManifest.mockResolvedValue({
-      items: [{ groupItemId: 21, sceneId: 10, title: "Clip One", startSec: 1, endSec: 5, durationSec: 4 }],
+      items: [{ groupItemId: 21, videoId: 10, title: "Clip One", startSec: 1, endSec: 5, durationSec: 4 }],
     });
-    mockScenes.find.mockResolvedValue({ items: [], totalCount: 0 });
+    mockVideos.find.mockResolvedValue({ items: [], totalCount: 0 });
     mockGroups.subGroups.mockResolvedValue([]);
     mockGroups.containingGroups.mockResolvedValue([]);
 
@@ -236,7 +236,7 @@ describe("GroupDetailPage", () => {
     mockGroups.items.list.mockResolvedValue([]);
     mockGroups.items.page.mockResolvedValue({ items: [], totalCount: 0, page: 1, perPage: 40 });
     mockGroups.items.playbackManifest.mockResolvedValue({ items: [] });
-    mockScenes.find.mockResolvedValue({ items: [], totalCount: 0 });
+    mockVideos.find.mockResolvedValue({ items: [], totalCount: 0 });
     mockGroups.subGroups.mockResolvedValue([]);
     mockGroups.containingGroups.mockResolvedValue([]);
     mockGroups.find.mockResolvedValue({ items: [buildGroup({ id: 8, name: "Nested Group" })], totalCount: 1, page: 1, perPage: 20 });
@@ -252,3 +252,4 @@ describe("GroupDetailPage", () => {
     await waitFor(() => expect(mockGroups.addSubGroup).toHaveBeenCalledWith(4, 8));
   });
 });
+

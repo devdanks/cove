@@ -18,11 +18,11 @@ public enum CircumcisedEnum
 
 public enum FilterMode
 {
-    Scenes,
+    Videos,
     Performers,
     Studios,
     Galleries,
-    SceneMarkers,
+    VideoMarkers,
     Groups,
     Tags,
     Images
@@ -33,3 +33,4 @@ public enum SortDirection
     Asc,
     Desc
 }
+

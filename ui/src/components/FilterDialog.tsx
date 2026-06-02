@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, useRef, type ReactNode } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { X, ChevronDown, ChevronRight, Search, Pin, PinOff, Plus, Minus, Star } from "lucide-react";
-import { tags as tagsApi, performers as performersApi, studios as studiosApi, groups as groupsApi, galleries as galleriesApi, scenes as scenesApi, tagGroups as tagGroupsApi, faces as facesApi } from "../api/client";
+import { tags as tagsApi, performers as performersApi, studios as studiosApi, groups as groupsApi, galleries as galleriesApi, videos as videosApi, tagGroups as tagGroupsApi, faces as facesApi } from "../api/client";
 import { GroupedTagOptionList } from "./TagSelector";
 import { EntityReferenceSelector } from "./EntityReferenceSelector";
 import {
@@ -24,7 +24,7 @@ import type {
   CustomFieldCriterion,
   TagDurationClause,
   TagDurationCriterion,
-  SceneFilterCriteria,
+  VideoFilterCriteria,
   PerformerFilterCriteria,
   TagFilterCriteria,
   StudioFilterCriteria,
@@ -40,7 +40,7 @@ import { rankByLabel } from "../utils/searchRanking";
 // ===== Criterion definitions =====
 
 export type CriterionType = "string" | "number" | "bool" | "date" | "timestamp" | "duration" | "tagDuration" | "careerLength" | "rating" | "resolution" | "multiId" | "enum" | "hash";
-export type EntityType = "tags" | "tagGroups" | "performers" | "studios" | "groups" | "galleries" | "scenes" | "faces";
+export type EntityType = "tags" | "tagGroups" | "performers" | "studios" | "groups" | "galleries" | "videos" | "faces";
 
 export interface CriterionDefinition<TFilterKey extends string = string> {
   id: string;
@@ -102,7 +102,7 @@ const NON_NULL_TIMESTAMP_MODIFIERS: CriterionModifier[] = ["EQUALS", "NOT_EQUALS
 const VALUE_ONLY_ENUM_MODIFIERS: CriterionModifier[] = ["EQUALS", "NOT_EQUALS"];
 const NULL_VALUE_MODIFIERS = new Set<CriterionModifier>(["IS_NULL", "NOT_NULL"]);
 const RANGE_VALUE_MODIFIERS = new Set<CriterionModifier>(["BETWEEN", "NOT_BETWEEN"]);
-const SCENE_HASH_OPTIONS = [
+const VIDEO_HASH_OPTIONS = [
   { value: "oshash", label: "OSHash" },
   { value: "md5", label: "MD5" },
   { value: "phash", label: "pHash" },
@@ -328,14 +328,14 @@ function sanitizeFilterCriteria(filter: Record<string, unknown>, criteria: Crite
   return sanitized;
 }
 
-// Scene criterion definitions
-export const SCENE_CRITERIA: CriteriaDefinitionList<SceneFilterCriteria> = [
+// Video criterion definitions
+export const VIDEO_CRITERIA: CriteriaDefinitionList<VideoFilterCriteria> = [
   { id: "title", label: "Title", type: "string", filterKey: "titleCriterion" },
   { id: "code", label: "Studio Code", type: "string", filterKey: "codeCriterion" },
   { id: "details", label: "Details", type: "string", filterKey: "detailsCriterion" },
   { id: "director", label: "Director", type: "string", filterKey: "directorCriterion" },
   { id: "path", label: "Path", type: "string", filterKey: "pathCriterion" },
-  { id: "hash", label: "Hash", type: "hash", filterKey: "fingerprintCriterion", options: [...SCENE_HASH_OPTIONS] },
+  { id: "hash", label: "Hash", type: "hash", filterKey: "fingerprintCriterion", options: [...VIDEO_HASH_OPTIONS] },
   { id: "duplicatedPhash", label: "Duplicated (pHash)", type: "bool", filterKey: "duplicatedPhashCriterion" },
   { id: "duplicatedTitle", label: "Duplicated Title", type: "bool", filterKey: "duplicatedTitleCriterion" },
   { id: "duplicatedRemoteId", label: "Duplicated Remote ID", type: "bool", filterKey: "duplicatedRemoteIdCriterion" },
@@ -396,7 +396,7 @@ export const PERFORMER_CRITERIA: CriteriaDefinitionList<PerformerFilterCriteria>
   { id: "country", label: "Country", type: "string", filterKey: "countryCriterion" },
   { id: "tags", label: "Tags", type: "multiId", entityType: "tags", filterKey: "tagsCriterion" },
   { id: "studios", label: "Studios", type: "multiId", entityType: "studios", filterKey: "studiosCriterion", hierarchyToggleLabel: "Include sub-studios" },
-  { id: "sceneCount", label: "Scene Count", type: "number", filterKey: "sceneCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "videoCount", label: "Video Count", type: "number", filterKey: "videoCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "studioCount", label: "Studio Count", type: "number", filterKey: "studioCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "imageCount", label: "Image Count", type: "number", filterKey: "imageCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "galleryCount", label: "Gallery Count", type: "number", filterKey: "galleryCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
@@ -436,7 +436,7 @@ export const PERFORMER_CRITERIA: CriteriaDefinitionList<PerformerFilterCriteria>
 
 export const TAG_CRITERIA: CriteriaDefinitionList<TagFilterCriteria> = [
   { id: "favorite", label: "Favorite", type: "bool", filterKey: "favoriteCriterion" },
-  { id: "sceneCount", label: "Scene Count", type: "number", filterKey: "sceneCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS, auxiliaryToggleKey: "sceneCountIncludesChildren", auxiliaryToggleLabel: "Count scenes from child tags" },
+  { id: "videoCount", label: "Video Count", type: "number", filterKey: "videoCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS, auxiliaryToggleKey: "videoCountIncludesChildren", auxiliaryToggleLabel: "Count videos from child tags" },
   { id: "performerCount", label: "Performer Count", type: "number", filterKey: "performerCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS, auxiliaryToggleKey: "performerCountIncludesChildren", auxiliaryToggleLabel: "Count performers from child tags" },
   { id: "parents", label: "Parent Tags", type: "multiId", entityType: "tags", filterKey: "parentsCriterion" },
   { id: "children", label: "Sub-Tags", type: "multiId", entityType: "tags", filterKey: "childrenCriterion" },
@@ -464,7 +464,7 @@ export const STUDIO_CRITERIA: CriteriaDefinitionList<StudioFilterCriteria> = [
   { id: "rating", label: "Rating", type: "rating", filterKey: "ratingCriterion" },
   { id: "favorite", label: "Favorite", type: "bool", filterKey: "favoriteCriterion" },
   { id: "tags", label: "Tags", type: "multiId", entityType: "tags", filterKey: "tagsCriterion" },
-  { id: "sceneCount", label: "Scene Count", type: "number", filterKey: "sceneCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "videoCount", label: "Video Count", type: "number", filterKey: "videoCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "url", label: "URL", type: "string", filterKey: "urlCriterion" },
   { id: "remoteId", label: "Remote ID", type: "string", filterKey: "remoteIdCriterion" },
   { id: "remoteIdCount", label: "Remote ID Count", type: "number", filterKey: "remoteIdCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
@@ -496,7 +496,7 @@ export const GALLERY_CRITERIA: CriteriaDefinitionList<GalleryFilterCriteria> = [
   { id: "tags", label: "Tags", type: "multiId", entityType: "tags", filterKey: "tagsCriterion" },
   { id: "performers", label: "Performers", type: "multiId", entityType: "performers", filterKey: "performersCriterion" },
   { id: "studios", label: "Studios", type: "multiId", entityType: "studios", filterKey: "studiosCriterion" },
-  { id: "scenes", label: "Scenes", type: "multiId", entityType: "scenes", filterKey: "scenesCriterion" },
+  { id: "videos", label: "Videos", type: "multiId", entityType: "videos", filterKey: "videosCriterion" },
   { id: "performerTags", label: "Performer Tags", type: "multiId", entityType: "tags", filterKey: "performerTagsCriterion" },
   { id: "performerFavorite", label: "Performer Favorite", type: "bool", filterKey: "performerFavoriteCriterion" },
   { id: "imageCount", label: "Image Count", type: "number", filterKey: "imageCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
@@ -619,7 +619,7 @@ export const GROUP_CRITERIA: CriteriaDefinitionList<GroupFilterCriteria> = [
   { id: "hasQuery", label: "Has Dynamic Query", type: "bool", filterKey: "hasQueryCriterion" },
   { id: "lastResolvedAt", label: "Last Resolved", type: "timestamp", filterKey: "lastResolvedAtCriterion" },
   { id: "cachedItemCount", label: "Cached Item Count", type: "number", filterKey: "cachedItemCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
-  { id: "showInSceneLists", label: "Show In Scene Lists", type: "bool", filterKey: "showInSceneListsCriterion" },
+  { id: "showInVideoLists", label: "Show In Video Lists", type: "bool", filterKey: "showInVideoListsCriterion" },
   { id: "allowedHostTypes", label: "Allowed Host Type", type: "string", filterKey: "allowedHostTypesCriterion" },
   { id: "sortOrder", label: "Manual Sort Order", type: "number", filterKey: "sortOrderCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "rating", label: "Rating", type: "rating", filterKey: "ratingCriterion" },
@@ -632,7 +632,7 @@ export const GROUP_CRITERIA: CriteriaDefinitionList<GroupFilterCriteria> = [
   { id: "tags", label: "Tags", type: "multiId", entityType: "tags", filterKey: "tagsCriterion" },
   { id: "performers", label: "Performers", type: "multiId", entityType: "performers", filterKey: "performersCriterion" },
   { id: "itemCount", label: "Item Count", type: "number", filterKey: "itemCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
-  { id: "sceneCount", label: "Scene Count", type: "number", filterKey: "sceneCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
+  { id: "videoCount", label: "Video Count", type: "number", filterKey: "videoCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "imageCount", label: "Image Count", type: "number", filterKey: "imageCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "audioCount", label: "Audio Count", type: "number", filterKey: "audioCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
   { id: "textCount", label: "Text Count", type: "number", filterKey: "textCountCriterion", modifiers: NON_NULL_NUMBER_MODIFIERS },
@@ -1844,7 +1844,7 @@ function MultiIdEditor({ value, onChange, entityType, modifiers, hierarchyToggle
         case "studios": return (await studiosApi.find({ q: trimmedSearchText || undefined, perPage: 50, sort: "name", direction: "asc" })).items;
         case "groups": return (await groupsApi.find({ q: trimmedSearchText || undefined, perPage: 50, sort: "name", direction: "asc" })).items;
         case "galleries": return (await galleriesApi.find({ q: trimmedSearchText || undefined, perPage: 50, sort: "title", direction: "asc" })).items;
-        case "scenes": return (await scenesApi.find({ q: trimmedSearchText || undefined, perPage: 50, sort: "title", direction: "asc" })).items;
+        case "videos": return (await videosApi.find({ q: trimmedSearchText || undefined, perPage: 50, sort: "title", direction: "asc" })).items;
         case "faces": return (await facesApi.list({ q: trimmedSearchText || undefined, merged: false, page: 1, perPage: 50 })).items;
         default: return [];
       }
@@ -2103,7 +2103,7 @@ const MULTI_ID_ENTITY_LABELS: Record<EntityType, { singular: string; plural: str
   studios: { singular: "studio", plural: "studios" },
   groups: { singular: "group", plural: "groups" },
   galleries: { singular: "gallery", plural: "galleries" },
-  scenes: { singular: "scene", plural: "scenes" },
+  videos: { singular: "video", plural: "videos" },
   faces: { singular: "face", plural: "faces" },
 };
 
@@ -2137,9 +2137,9 @@ async function getMultiIdEntityLabel(entityType: EntityType, id: number): Promis
       const gallery = await galleriesApi.get(id);
       return { id, label: gallery.title?.trim() || "Untitled gallery" };
     }
-    case "scenes": {
-      const scene = await scenesApi.get(id);
-      return { id, label: scene.title?.trim() || scene.code?.trim() || scene.files?.[0]?.basename || "Untitled scene" };
+    case "videos": {
+      const video = await videosApi.get(id);
+      return { id, label: video.title?.trim() || video.code?.trim() || video.files?.[0]?.basename || "Untitled video" };
     }
     case "faces": {
       const face = await facesApi.get(id);
@@ -2318,3 +2318,4 @@ export function FilterButton({
     </button>
   );
 }
+

@@ -188,13 +188,13 @@ public class ScanServiceTests
                 ModTime = Directory.GetLastWriteTimeUtc(libraryRoot),
             };
 
-            var scene = new Scene
+            var video = new Video
             {
-                Title = "Known scene",
+                Title = "Known video",
             };
 
             var fileInfo = new FileInfo(videoPath);
-            scene.Files.Add(new VideoFile
+            video.Files.Add(new VideoFile
             {
                 Basename = Path.GetFileName(videoPath),
                 ParentFolder = folder,
@@ -208,7 +208,7 @@ public class ScanServiceTests
                 AudioCodec = "aac",
             });
 
-            db.Scenes.Add(scene);
+            db.Videos.Add(video);
             await db.SaveChangesAsync();
         }
         var jobService = new ImmediateJobService();
@@ -298,14 +298,14 @@ public class ScanServiceTests
 
         public Task<string?> ComputeTextPhashAsync(string path, CancellationToken ct = default) => Task.FromResult<string?>(null);
 
-        public string StartGenerateScenePhashes() => "noop";
+        public string StartGenerateVideoPhashes() => "noop";
 
         public string StartGenerateImagePhashes() => "noop";
     }
 
     private sealed class NoOpThumbnailService : IThumbnailService
     {
-        public Task<string?> GetSceneThumbnailPathAsync(int sceneId, CancellationToken ct = default) => Task.FromResult<string?>(null);
+        public Task<string?> GetVideoThumbnailPathAsync(int videoId, CancellationToken ct = default) => Task.FromResult<string?>(null);
 
         public Task<string?> GetImageFilePathAsync(int imageId, CancellationToken ct = default) => Task.FromResult<string?>(null);
 
@@ -315,33 +315,33 @@ public class ScanServiceTests
 
         public Task<(Stream stream, string contentType, bool supportsRangeRequests)?> GetBlobImageThumbnailStreamAsync(string blobId, int maxDimension = 640, CancellationToken ct = default) => Task.FromResult<(Stream stream, string contentType, bool supportsRangeRequests)?>(null);
 
-        public Task DeleteSceneGeneratedFilesAsync(int sceneId, CancellationToken ct = default) => Task.CompletedTask;
+        public Task DeleteVideoGeneratedFilesAsync(int videoId, CancellationToken ct = default) => Task.CompletedTask;
 
         public Task DeleteImageGeneratedFilesAsync(int imageId, CancellationToken ct = default) => Task.CompletedTask;
 
         public Task DeleteBlobGeneratedFilesAsync(string blobId, CancellationToken ct = default) => Task.CompletedTask;
 
-        public Task GenerateSceneThumbnailAsync(int sceneId, double? atSeconds = null, CancellationToken ct = default) => Task.CompletedTask;
+        public Task GenerateVideoThumbnailAsync(int videoId, double? atSeconds = null, CancellationToken ct = default) => Task.CompletedTask;
 
         public Task GenerateImageThumbnailAsync(int imageId, int maxDimension = 640, bool overwrite = false, CancellationToken ct = default) => Task.CompletedTask;
 
-        public Task GenerateScenePreviewAsync(int sceneId, CancellationToken ct = default) => Task.CompletedTask;
+        public Task GenerateVideoPreviewAsync(int videoId, CancellationToken ct = default) => Task.CompletedTask;
 
-        public Task GenerateSegmentAnimatedPreviewAsync(int sceneId, double startSec, double? endSec = null, CancellationToken ct = default) => Task.CompletedTask;
+        public Task GenerateSegmentAnimatedPreviewAsync(int videoId, double startSec, double? endSec = null, CancellationToken ct = default) => Task.CompletedTask;
 
-        public Task GenerateSceneSpriteAsync(int sceneId, CancellationToken ct = default) => Task.CompletedTask;
+        public Task GenerateVideoSpriteAsync(int videoId, CancellationToken ct = default) => Task.CompletedTask;
 
-        public string GetThumbnailPathForScene(int sceneId) => string.Empty;
+        public string GetThumbnailPathForVideo(int videoId) => string.Empty;
 
-        public string GetTimestampedThumbnailPath(int sceneId, double seconds) => string.Empty;
+        public string GetTimestampedThumbnailPath(int videoId, double seconds) => string.Empty;
 
-        public string GetSegmentAnimatedPreviewPath(int sceneId, double seconds) => string.Empty;
+        public string GetSegmentAnimatedPreviewPath(int videoId, double seconds) => string.Empty;
 
-        public string GetPreviewPath(int sceneId) => string.Empty;
+        public string GetPreviewPath(int videoId) => string.Empty;
 
-        public string GetSpritePath(int sceneId) => string.Empty;
+        public string GetSpritePath(int videoId) => string.Empty;
 
-        public string GetSpriteVttPath(int sceneId) => string.Empty;
+        public string GetSpriteVttPath(int videoId) => string.Empty;
 
         public string StartGenerateAllThumbnails() => "noop";
     }
@@ -357,3 +357,4 @@ public class ScanServiceTests
         }
     }
 }
+

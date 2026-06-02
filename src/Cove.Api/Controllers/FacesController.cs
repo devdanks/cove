@@ -53,9 +53,9 @@ public class FacesController(
         [FromQuery] int? frameSampleCount = null,
         [FromQuery] int? frameSampleCount2 = null,
         [FromQuery] string? frameSampleCountModifier = null,
-        [FromQuery] int? sceneCount = null,
-        [FromQuery] int? sceneCount2 = null,
-        [FromQuery] string? sceneCountModifier = null,
+        [FromQuery] int? videoCount = null,
+        [FromQuery] int? videoCount2 = null,
+        [FromQuery] string? videoCountModifier = null,
         [FromQuery] int? imageCount = null,
         [FromQuery] int? imageCount2 = null,
         [FromQuery] string? imageCountModifier = null,
@@ -113,7 +113,7 @@ public class FacesController(
         query = FilterHelpers.ApplyInt(query, BuildIntCriterion(detectionCount, detectionCount2, detectionCountModifier), face => face.DetectionCount);
         query = FilterHelpers.ApplyInt(query, BuildIntCriterion(appearanceCount, appearanceCount2, appearanceCountModifier), face => face.AppearanceCount);
         query = FilterHelpers.ApplyInt(query, BuildIntCriterion(frameSampleCount, frameSampleCount2, frameSampleCountModifier), face => face.FrameSampleCount);
-        query = FilterHelpers.ApplyInt(query, BuildIntCriterion(sceneCount, sceneCount2, sceneCountModifier), face => face.SceneCount);
+        query = FilterHelpers.ApplyInt(query, BuildIntCriterion(videoCount, videoCount2, videoCountModifier), face => face.VideoCount);
         query = FilterHelpers.ApplyInt(query, BuildIntCriterion(imageCount, imageCount2, imageCountModifier), face => face.ImageCount);
         query = query.ApplyCustomFieldCriteria(db, CustomFieldEntityTypes.Face, null, ParseCustomFieldCriteria(customFieldCriteria));
 
@@ -410,9 +410,9 @@ public class FacesController(
         return Ok(detections.Select(MapDetectionToDto).ToList());
     }
 
-    [HttpGet("/api/scenes/{sceneId:int}/faces")]
-    public async Task<ActionResult<IReadOnlyList<FaceHostFaceDto>>> GetSceneFaces(int sceneId, CancellationToken cancellationToken)
-        => Ok(await LoadHostFacesAsync(FaceAppearanceHostType.Scene, sceneId, cancellationToken));
+    [HttpGet("/api/videos/{videoId:int}/faces")]
+    public async Task<ActionResult<IReadOnlyList<FaceHostFaceDto>>> GetVideoFaces(int videoId, CancellationToken cancellationToken)
+        => Ok(await LoadHostFacesAsync(FaceAppearanceHostType.Video, videoId, cancellationToken));
 
     [HttpGet("/api/images/{imageId:int}/faces")]
     public async Task<ActionResult<IReadOnlyList<FaceHostFaceDto>>> GetImageFaces(int imageId, CancellationToken cancellationToken)
@@ -476,7 +476,7 @@ public class FacesController(
             .Where(run => run.Status == AiRunStatus.Completed
                 && run.StartedAt >= windowStart
                 && (run.CompletedAt ?? run.StartedAt) <= windowEnd
-                && (run.TargetType == AiRunTargetType.Scene || run.TargetType == AiRunTargetType.Image))
+                && (run.TargetType == AiRunTargetType.Video || run.TargetType == AiRunTargetType.Image))
             .OrderByDescending(run => run.CompletedAt ?? run.StartedAt)
             .Select(run => run.RunKey)
             .ToArrayAsync(cancellationToken);
@@ -489,7 +489,7 @@ public class FacesController(
             .Where(appearance => appearance.SourceRunId != null && runKeys.Contains(appearance.SourceRunId))
             .Select(appearance => new
             {
-                TargetType = appearance.HostType == FaceAppearanceHostType.Scene ? AiRunTargetType.Scene : AiRunTargetType.Image,
+                TargetType = appearance.HostType == FaceAppearanceHostType.Video ? AiRunTargetType.Video : AiRunTargetType.Image,
                 TargetId = appearance.HostId,
             })
             .Distinct()
@@ -498,7 +498,7 @@ public class FacesController(
             return Ok(Array.Empty<FaceDto>());
 
         var target = targets[0];
-        var hostType = target.TargetType == AiRunTargetType.Scene ? FaceAppearanceHostType.Scene : FaceAppearanceHostType.Image;
+        var hostType = target.TargetType == AiRunTargetType.Video ? FaceAppearanceHostType.Video : FaceAppearanceHostType.Image;
         return Ok(await LoadReviewFacesForHostAsync(hostType, target.TargetId, take, cancellationToken));
     }
 
@@ -1044,7 +1044,7 @@ public class FacesController(
                     face.CoverBlobId is null ? null : EntityImageUrls.Face(ControllerContext.HttpContext, face.Id, face.UpdatedAt),
                     hasCounts ? counts.AppearanceCount : face.AppearanceCount,
                     hasCounts ? counts.FrameSampleCount : face.FrameSampleCount,
-                    hasCounts ? counts.SceneCount : face.SceneCount,
+                    hasCounts ? counts.VideoCount : face.VideoCount,
                     hasCounts ? counts.ImageCount : face.ImageCount,
                     MinOrNull(group.Select(appearance => appearance.FirstSeenAtSec)),
                     MaxOrNull(group.Select(appearance => appearance.LastSeenAtSec)),
@@ -1099,12 +1099,12 @@ public class FacesController(
             "appearance_count_desc" => query.OrderByDescending(face => face.AppearanceCount).ThenByDescending(face => face.Id),
             "frame_sample_count_asc" => query.OrderBy(face => face.FrameSampleCount).ThenBy(face => face.Id),
             "frame_sample_count_desc" => query.OrderByDescending(face => face.FrameSampleCount).ThenByDescending(face => face.Id),
-            "scene_count_asc" => query.OrderBy(face => face.SceneCount).ThenBy(face => face.Id),
+            "video_count_asc" => query.OrderBy(face => face.VideoCount).ThenBy(face => face.Id),
             "image_count_asc" => query.OrderBy(face => face.ImageCount).ThenBy(face => face.Id),
             "created_desc" => query.OrderByDescending(face => face.CreatedAt).ThenBy(face => face.Id),
             "updated_desc" => query.OrderByDescending(face => face.UpdatedAt).ThenBy(face => face.Id),
             "appearance_desc" => query.OrderBy(face => face.MergedIntoFaceId != null).ThenByDescending(face => face.AppearanceCount).ThenByDescending(face => face.FrameSampleCount).ThenBy(face => face.Label).ThenBy(face => face.Id),
-            "scene_count_desc" => query.OrderByDescending(face => face.SceneCount).ThenByDescending(face => face.AppearanceCount).ThenBy(face => face.Id),
+            "video_count_desc" => query.OrderByDescending(face => face.VideoCount).ThenByDescending(face => face.AppearanceCount).ThenBy(face => face.Id),
             "image_count_desc" => query.OrderByDescending(face => face.ImageCount).ThenByDescending(face => face.AppearanceCount).ThenBy(face => face.Id),
             "suggestion_confidence" => query.OrderBy(face => face.PerformerId != null).ThenByDescending(face => face.AppearanceCount).ThenByDescending(face => face.UpdatedAt).ThenBy(face => face.Id),
             _ => query.OrderBy(face => face.MergedIntoFaceId != null).ThenByDescending(face => face.AppearanceCount).ThenByDescending(face => face.FrameSampleCount).ThenBy(face => face.Label).ThenBy(face => face.Id),
@@ -1127,18 +1127,18 @@ public class FacesController(
         if (appearances.Count == 0)
             return await BuildFallbackAppearanceItemsAsync(faceId, cancellationToken);
 
-        Dictionary<int, string?> sceneTitles = [];
-        var sceneIds = appearances
-            .Where(appearance => appearance.HostType == FaceAppearanceHostType.Scene)
+        Dictionary<int, string?> videoTitles = [];
+        var videoIds = appearances
+            .Where(appearance => appearance.HostType == FaceAppearanceHostType.Video)
             .Select(appearance => appearance.HostId)
             .Distinct()
             .ToArray();
-        if (sceneIds.Length > 0)
+        if (videoIds.Length > 0)
         {
-            sceneTitles = await db.Scenes
+            videoTitles = await db.Videos
                 .AsNoTracking()
-                .Where(scene => sceneIds.Contains(scene.Id))
-                .ToDictionaryAsync(scene => scene.Id, scene => scene.Title, cancellationToken);
+                .Where(video => videoIds.Contains(video.Id))
+                .ToDictionaryAsync(video => video.Id, video => video.Title, cancellationToken);
         }
 
         Dictionary<int, string?> imageTitles = [];
@@ -1165,9 +1165,9 @@ public class FacesController(
                     .First();
                 return new FaceAppearanceDto(
                     primaryAppearance.Id,
-                    primaryAppearance.HostType == FaceAppearanceHostType.Scene ? "scene" : "image",
+                    primaryAppearance.HostType == FaceAppearanceHostType.Video ? "video" : "image",
                     primaryAppearance.HostId,
-                    ResolveAppearanceTitle(primaryAppearance, sceneTitles, imageTitles),
+                    ResolveAppearanceTitle(primaryAppearance, videoTitles, imageTitles),
                     ResolveAppearanceThumbnailUrl(primaryAppearance.HostType, primaryAppearance.HostId),
                     group.Sum(appearance => appearance.SampleCount),
                     group.Sum(appearance => appearance.RetainedSpatialSampleCount),
@@ -1205,7 +1205,7 @@ public class FacesController(
             "label" => OrderBy(items, item => item.Label ?? item.PerformerName ?? string.Empty, ascending).ThenBy(item => item.Id).ToList(),
             "updated_at" => OrderBy(items, item => item.UpdatedAt, ascending).ThenBy(item => item.Id).ToList(),
             "appearance_count" => OrderBy(items, item => item.AppearanceCount, ascending).ThenBy(item => item.Distance).ToList(),
-            "scene_count" => OrderBy(items, item => item.SceneCount, ascending).ThenBy(item => item.Distance).ToList(),
+            "video_count" => OrderBy(items, item => item.VideoCount, ascending).ThenBy(item => item.Distance).ToList(),
             "image_count" => OrderBy(items, item => item.ImageCount, ascending).ThenBy(item => item.Distance).ToList(),
             _ => OrderBy(items, item => item.Distance, ascending).ThenBy(item => item.Id).ToList(),
         };
@@ -1532,7 +1532,7 @@ public class FacesController(
         face.Ignored,
         face.MergedIntoFaceId,
         computedCounts?.DetectionCount ?? face.DetectionCount,
-        computedCounts?.SceneCount ?? face.SceneCount,
+        computedCounts?.VideoCount ?? face.VideoCount,
         computedCounts?.ImageCount ?? face.ImageCount,
         face.PrimarySourceKey,
         face.CreatedAt,
@@ -1561,7 +1561,7 @@ public class FacesController(
         face.Ignored,
         face.MergedIntoFaceId,
         computedCounts?.DetectionCount ?? face.DetectionCount,
-        computedCounts?.SceneCount ?? face.SceneCount,
+        computedCounts?.VideoCount ?? face.VideoCount,
         computedCounts?.ImageCount ?? face.ImageCount,
         face.PrimarySourceKey,
         face.CreatedAt,
@@ -1612,12 +1612,12 @@ public class FacesController(
                 {
                     var rows = group.ToList();
                     var totalDetections = rows.Sum(row => row.Count);
-                    var sceneCount = rows.Where(row => row.HostType == DetectionHostType.Scene).Select(row => row.HostId).Distinct().Count();
+                    var videoCount = rows.Where(row => row.HostType == DetectionHostType.Video).Select(row => row.HostId).Distinct().Count();
                     var imageCount = rows.Where(row => row.HostType == DetectionHostType.Image).Select(row => row.HostId).Distinct().Count();
                     var hostCount = rows.Select(row => (row.HostType, row.HostId)).Distinct().Count();
                     return new FaceComputedCounts(
                         totalDetections,
-                        sceneCount,
+                        videoCount,
                         imageCount,
                         hostCount,
                         totalDetections);
@@ -1632,12 +1632,12 @@ public class FacesController(
                 FaceId = group.Key,
                 AppearanceCount = group.Count(),
                 FrameSampleCount = group.Sum(item => item.SampleCount),
-                SceneCount = group.Where(item => item.HostType == FaceAppearanceHostType.Scene).Select(item => item.HostId).Distinct().Count(),
+                VideoCount = group.Where(item => item.HostType == FaceAppearanceHostType.Video).Select(item => item.HostId).Distinct().Count(),
                 ImageCount = group.Where(item => item.HostType == FaceAppearanceHostType.Image).Select(item => item.HostId).Distinct().Count(),
             })
             .ToDictionaryAsync(
                 item => item.FaceId,
-                item => new FaceStoredCounts(item.AppearanceCount, item.FrameSampleCount, item.SceneCount, item.ImageCount),
+                item => new FaceStoredCounts(item.AppearanceCount, item.FrameSampleCount, item.VideoCount, item.ImageCount),
                 cancellationToken);
 
         var computedCounts = new Dictionary<int, FaceComputedCounts>(distinctFaceIds.Length);
@@ -1648,7 +1648,7 @@ public class FacesController(
 
             computedCounts[faceId] = new FaceComputedCounts(
                 detectionCount.DetectionCount,
-                detectionCount.SceneCount > 0 ? detectionCount.SceneCount : storedCount.SceneCount,
+                detectionCount.VideoCount > 0 ? detectionCount.VideoCount : storedCount.VideoCount,
                 detectionCount.ImageCount > 0 ? detectionCount.ImageCount : storedCount.ImageCount,
                 storedCount.AppearanceCount > 0 ? storedCount.AppearanceCount : detectionCount.AppearanceCount,
                 storedCount.FrameSampleCount > 0 ? storedCount.FrameSampleCount : detectionCount.FrameSampleCount);
@@ -1678,17 +1678,17 @@ public class FacesController(
             .ThenBy(group => group.Key.HostId)
             .ToList();
 
-        Dictionary<int, string?> sceneTitles = [];
-        var sceneIds = groupedDetections
-            .Where(group => group.Key.HostType == DetectionHostType.Scene)
+        Dictionary<int, string?> videoTitles = [];
+        var videoIds = groupedDetections
+            .Where(group => group.Key.HostType == DetectionHostType.Video)
             .Select(group => group.Key.HostId)
             .ToArray();
-        if (sceneIds.Length > 0)
+        if (videoIds.Length > 0)
         {
-            sceneTitles = await db.Scenes
+            videoTitles = await db.Videos
                 .AsNoTracking()
-                .Where(scene => sceneIds.Contains(scene.Id))
-                .ToDictionaryAsync(scene => scene.Id, scene => scene.Title, cancellationToken);
+                .Where(video => videoIds.Contains(video.Id))
+                .ToDictionaryAsync(video => video.Id, video => video.Title, cancellationToken);
         }
 
         Dictionary<int, string?> imageTitles = [];
@@ -1707,15 +1707,15 @@ public class FacesController(
         var items = groupedDetections
             .Select((group, index) =>
             {
-                var hostType = group.Key.HostType == DetectionHostType.Scene
-                    ? FaceAppearanceHostType.Scene
+                var hostType = group.Key.HostType == DetectionHostType.Video
+                    ? FaceAppearanceHostType.Video
                     : FaceAppearanceHostType.Image;
 
                 return new FaceAppearanceDto(
                     -(index + 1),
-                    hostType == FaceAppearanceHostType.Scene ? "scene" : "image",
+                    hostType == FaceAppearanceHostType.Video ? "video" : "image",
                     group.Key.HostId,
-                    ResolveAppearanceTitle(hostType, group.Key.HostId, sceneTitles, imageTitles),
+                    ResolveAppearanceTitle(hostType, group.Key.HostId, videoTitles, imageTitles),
                     ResolveAppearanceThumbnailUrl(hostType, group.Key.HostId),
                     group.Count(),
                     group.Count(),
@@ -1749,24 +1749,24 @@ public class FacesController(
 
     private static string ResolveAppearanceTitle(
         FaceAppearance appearance,
-        IReadOnlyDictionary<int, string?> sceneTitles,
+        IReadOnlyDictionary<int, string?> videoTitles,
         IReadOnlyDictionary<int, string?> imageTitles)
-        => ResolveAppearanceTitle(appearance.HostType, appearance.HostId, sceneTitles, imageTitles);
+        => ResolveAppearanceTitle(appearance.HostType, appearance.HostId, videoTitles, imageTitles);
 
     private static string ResolveAppearanceTitle(
         FaceAppearanceHostType hostType,
         int hostId,
-        IReadOnlyDictionary<int, string?> sceneTitles,
+        IReadOnlyDictionary<int, string?> videoTitles,
         IReadOnlyDictionary<int, string?> imageTitles) => hostType switch
     {
-        FaceAppearanceHostType.Scene => Clean(sceneTitles.GetValueOrDefault(hostId)) ?? $"Scene {hostId}",
+        FaceAppearanceHostType.Video => Clean(videoTitles.GetValueOrDefault(hostId)) ?? $"Video {hostId}",
         FaceAppearanceHostType.Image => Clean(imageTitles.GetValueOrDefault(hostId)) ?? $"Image {hostId}",
         _ => $"Host {hostId}",
     };
 
     private static string ResolveAppearanceThumbnailUrl(FaceAppearanceHostType hostType, int hostId) => hostType switch
     {
-        FaceAppearanceHostType.Scene => $"/api/stream/scene/{hostId}/screenshot",
+        FaceAppearanceHostType.Video => $"/api/stream/video/{hostId}/screenshot",
         FaceAppearanceHostType.Image => $"/api/stream/image/{hostId}/thumbnail?max=320",
         _ => string.Empty,
     };
@@ -1818,7 +1818,7 @@ public class FacesController(
 
     private readonly record struct FaceComputedCounts(
         int DetectionCount,
-        int SceneCount,
+        int VideoCount,
         int ImageCount,
         int AppearanceCount,
         int FrameSampleCount);
@@ -1826,11 +1826,12 @@ public class FacesController(
     private readonly record struct FaceStoredCounts(
         int AppearanceCount,
         int FrameSampleCount,
-        int SceneCount,
+        int VideoCount,
         int ImageCount);
 
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }
+
 
 
 

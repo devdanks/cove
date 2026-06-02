@@ -93,8 +93,8 @@ public sealed class CovePrincipal
     {
         switch (permission)
         {
-            case PermissionKeys.ScenesRead:
-                entityKind = EntityKinds.Scene;
+            case PermissionKeys.VideosRead:
+                entityKind = EntityKinds.Video;
                 return true;
             case PermissionKeys.AudiosRead:
                 entityKind = EntityKinds.Audio;
@@ -141,3 +141,4 @@ public enum PrincipalKind
     ShareLink,
     System,
 }
+

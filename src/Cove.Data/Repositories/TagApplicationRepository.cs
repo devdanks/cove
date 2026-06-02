@@ -32,18 +32,18 @@ public class TagApplicationRepository : ITagApplicationRepository
     public async Task RemoveOrphanedTagLinksAsync(AffinityHostType hostType,
         IReadOnlyList<int> entityIds, string sourceKey, CancellationToken ct = default)
     {
-        if (hostType == AffinityHostType.Scene)
+        if (hostType == AffinityHostType.Video)
         {
-            var sceneTags = _db.Set<SceneTag>();
-            var orphanedTagIds = await sceneTags
-                .Where(st => entityIds.Contains(st.SceneId)
+            var videoTags = _db.Set<VideoTag>();
+            var orphanedTagIds = await videoTags
+                .Where(st => entityIds.Contains(st.VideoId)
                     && !_db.TagApplications.Any(ta =>
-                        ta.HostType == AffinityHostType.Scene
-                        && ta.HostId == st.SceneId
+                        ta.HostType == AffinityHostType.Video
+                        && ta.HostId == st.VideoId
                         && ta.TagId == st.TagId
                         && ta.SourceKey == sourceKey))
                 .ToListAsync(ct);
-            sceneTags.RemoveRange(orphanedTagIds);
+            videoTags.RemoveRange(orphanedTagIds);
         }
         else if (hostType == AffinityHostType.Image)
         {
@@ -63,3 +63,4 @@ public class TagApplicationRepository : ITagApplicationRepository
     public async Task<int> SaveChangesAsync(CancellationToken ct = default)
         => await _db.SaveChangesAsync(ct);
 }
+

@@ -12,20 +12,20 @@ namespace Cove.Tests;
 public class TagsControllerSegmentTests
 {
     [Fact]
-    public async Task TagDetail_UsesSceneSegmentCountsAndReturnsTagSegments()
+    public async Task TagDetail_UsesVideoSegmentCountsAndReturnsTagSegments()
     {
         await using var context = CreateContext();
         var tag = new Tag { Name = "Body" };
         var otherTag = new Tag { Name = "Other" };
-        var scene = new Scene { Title = "Imported Scene" };
-        context.AddRange(tag, otherTag, scene);
+        var video = new Video { Title = "Imported Video" };
+        context.AddRange(tag, otherTag, video);
         await context.SaveChangesAsync();
 
         context.Segments.AddRange(
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 TagId = tag.Id,
                 Kind = "tag",
                 SourceKey = "import:test",
@@ -35,8 +35,8 @@ public class TagsControllerSegmentTests
             },
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 TagId = tag.Id,
                 Kind = "tag",
                 SourceKey = "user",
@@ -55,8 +55,8 @@ public class TagsControllerSegmentTests
             },
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 TagId = otherTag.Id,
                 Kind = "tag",
                 SourceKey = "import:test",
@@ -78,8 +78,8 @@ public class TagsControllerSegmentTests
         Assert.Equal(2, segments!.Count);
         Assert.All(segments, segment =>
         {
-            Assert.Equal(scene.Id, segment.SceneId);
-            Assert.Equal(scene.Title, segment.SceneTitle);
+            Assert.Equal(video.Id, segment.VideoId);
+            Assert.Equal(video.Title, segment.VideoTitle);
         });
     }
 
@@ -89,17 +89,17 @@ public class TagsControllerSegmentTests
         await using var context = CreateContext();
 
         var tag = new Tag { Name = "Body" };
-        var scene = new Scene { Title = "Imported Scene" };
+        var video = new Video { Title = "Imported Video" };
         var performer = new Performer { Name = "Performer" };
         var studio = new Studio { Name = "Studio" };
         var image = new Image { Title = "Image" };
         var gallery = new Gallery { Title = "Gallery" };
         var group = new Group { Name = "Group" };
-        context.AddRange(tag, scene, performer, studio, image, gallery, group);
+        context.AddRange(tag, video, performer, studio, image, gallery, group);
         await context.SaveChangesAsync();
 
         context.AddRange(
-            new SceneTag { SceneId = scene.Id, TagId = tag.Id },
+            new VideoTag { VideoId = video.Id, TagId = tag.Id },
             new ImageTag { ImageId = image.Id, TagId = tag.Id },
             new GalleryTag { GalleryId = gallery.Id, TagId = tag.Id },
             new GroupTag { GroupId = group.Id, TagId = tag.Id },
@@ -107,8 +107,8 @@ public class TagsControllerSegmentTests
             new StudioTag { StudioId = studio.Id, TagId = tag.Id },
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 TagId = tag.Id,
                 Kind = "tag",
                 SourceKey = "user",
@@ -118,7 +118,7 @@ public class TagsControllerSegmentTests
         await context.SaveChangesAsync();
 
         var storedTag = await context.Tags.SingleAsync(candidate => candidate.Id == tag.Id);
-        storedTag.SceneCount = 0;
+        storedTag.VideoCount = 0;
         storedTag.ImageCount = 0;
         storedTag.GalleryCount = 0;
         storedTag.GroupCount = 0;
@@ -131,7 +131,7 @@ public class TagsControllerSegmentTests
         var detailResult = await controller.GetById(tag.Id, CancellationToken.None);
         var detail = Assert.IsType<OkObjectResult>(detailResult.Result).Value as TagDetailDto;
         Assert.NotNull(detail);
-        Assert.Equal(1, detail!.SceneCount);
+        Assert.Equal(1, detail!.VideoCount);
         Assert.Equal(1, detail.ImageCount);
         Assert.Equal(1, detail.GalleryCount);
         Assert.Equal(1, detail.GroupCount);
@@ -141,18 +141,18 @@ public class TagsControllerSegmentTests
     }
 
     [Fact]
-    public async Task TagSceneMarkerCount_TracksSceneSegmentsInsteadOfLegacyMarkers()
+    public async Task TagVideoMarkerCount_TracksVideoSegmentsInsteadOfLegacyMarkers()
     {
         await using var context = CreateContext();
         var tag = new Tag { Name = "Body" };
-        var scene = new Scene { Title = "Imported Scene" };
-        context.AddRange(tag, scene);
+        var video = new Video { Title = "Imported Video" };
+        context.AddRange(tag, video);
         await context.SaveChangesAsync();
 
         var segment = new Segment
         {
-            HostType = SegmentHostType.Scene,
-            HostId = scene.Id,
+            HostType = SegmentHostType.Video,
+            HostId = video.Id,
             TagId = tag.Id,
             Kind = "tag",
             SourceKey = "user",
@@ -164,13 +164,13 @@ public class TagsControllerSegmentTests
         await context.SaveChangesAsync();
 
         var addedTag = await context.Tags.AsNoTracking().SingleAsync(candidate => candidate.Id == tag.Id);
-        Assert.Equal(1, addedTag.SceneMarkerCount);
+        Assert.Equal(1, addedTag.VideoMarkerCount);
 
         context.Segments.Remove(segment);
         await context.SaveChangesAsync();
 
         var removedTag = await context.Tags.AsNoTracking().SingleAsync(candidate => candidate.Id == tag.Id);
-        Assert.Equal(0, removedTag.SceneMarkerCount);
+        Assert.Equal(0, removedTag.VideoMarkerCount);
     }
 
     [Fact]
@@ -217,13 +217,13 @@ public class TagsControllerSegmentTests
     }
 
     [Fact]
-    public async Task GetMarkerStrings_UsesSceneSegmentTitlesInsteadOfLegacyMarkers()
+    public async Task GetMarkerStrings_UsesVideoSegmentTitlesInsteadOfLegacyMarkers()
     {
         await using var context = CreateContext();
         context.Segments.AddRange(
             new Segment
             {
-                HostType = SegmentHostType.Scene,
+                HostType = SegmentHostType.Video,
                 HostId = 1,
                 SourceKey = "user",
                 StartSec = 5.0,
@@ -231,7 +231,7 @@ public class TagsControllerSegmentTests
             },
             new Segment
             {
-                HostType = SegmentHostType.Scene,
+                HostType = SegmentHostType.Video,
                 HostId = 2,
                 SourceKey = "user",
                 StartSec = 15.0,
@@ -239,7 +239,7 @@ public class TagsControllerSegmentTests
             },
             new Segment
             {
-                HostType = SegmentHostType.Scene,
+                HostType = SegmentHostType.Video,
                 HostId = 3,
                 SourceKey = "user",
                 StartSec = 25.0,
@@ -255,7 +255,7 @@ public class TagsControllerSegmentTests
             },
             new Segment
             {
-                HostType = SegmentHostType.Scene,
+                HostType = SegmentHostType.Video,
                 HostId = 5,
                 SourceKey = "user",
                 StartSec = 35.0,
@@ -300,3 +300,4 @@ public class TagsControllerSegmentTests
         }
     }
 }
+

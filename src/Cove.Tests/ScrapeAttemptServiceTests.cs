@@ -71,7 +71,7 @@ public class ScrapeAttemptServiceTests
 
         var result = await service.ApplyAttemptAsync(
             attempt.Id,
-            new ApplySceneScrapeAttemptDto(
+            new ApplyVideoScrapeAttemptDto(
                 ReplaceFields: ["title"],
                 CollectionModes: new Dictionary<string, string>
                 {
@@ -164,7 +164,7 @@ public class ScrapeAttemptServiceTests
 
         var result = await service.ApplyAttemptAsync(
             attempt.Id,
-            new ApplySceneScrapeAttemptDto(
+            new ApplyVideoScrapeAttemptDto(
                 ReplaceFields: [],
                 CollectionModes: new Dictionary<string, string>
                 {
@@ -265,7 +265,7 @@ public class ScrapeAttemptServiceTests
 
         var result = await service.ApplyAttemptAsync(
             attempt.Id,
-            new ApplySceneScrapeAttemptDto(
+            new ApplyVideoScrapeAttemptDto(
                 ReplaceFields: ["name", "duration", "date", "director", "details"],
                 CollectionModes: new Dictionary<string, string>
                 {
@@ -361,7 +361,7 @@ public class ScrapeAttemptServiceTests
 
         var result = await service.ApplyAttemptAsync(
             attempt.Id,
-            new ApplySceneScrapeAttemptDto(
+            new ApplyVideoScrapeAttemptDto(
                 ReplaceFields: ["title", "code", "details", "photographer", "date"],
                 CollectionModes: new Dictionary<string, string>
                 {

@@ -78,7 +78,7 @@ describe("PerformerTagger", () => {
       aliases: [],
       tags: [],
       remoteIds: [],
-      sceneCount: 0,
+      videoCount: 0,
       imageCount: 0,
       galleryCount: 0,
       groupCount: 0,
@@ -102,3 +102,4 @@ describe("PerformerTagger", () => {
     expect(screen.queryByText(/API Error 404/i)).not.toBeInTheDocument();
   });
 });
+

@@ -5,7 +5,7 @@ import { authStore, hasPermission } from "../auth/authStore";
 import type { CoveConfig, SystemStatus } from "../api/types";
 import { normalizeShortcutSequence } from "../keyboard/keybindings";
 
-const defaultMenuItems = ["scenes", "audios", "texts", "images", "performers", "galleries", "studios", "tags", "groups"];
+const defaultMenuItems = ["videos", "audios", "texts", "images", "performers", "galleries", "studios", "tags", "groups"];
 const defaultIdentifyDefaults = {
   createTags: true,
   createPerformers: true,
@@ -264,3 +264,4 @@ export function useAppConfig() {
 export function useOptionalAppConfig() {
   return useContext(AppConfigContext);
 }
+

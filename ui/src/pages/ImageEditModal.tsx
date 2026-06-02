@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { images, system } from "../api/client";
-import type { DownloaderMatch, Image, ImageCreate, SceneGroupInput } from "../api/types";
+import type { DownloaderMatch, Image, ImageCreate, VideoGroupInput } from "../api/types";
 import { CreateModalActions, EditModal, Field, TextInput, TextArea, SaveButton } from "../components/EditModal";
 import { RatingField } from "../components/Rating";
 import { CustomFieldsEditor, buildTagProvenanceById } from "../components/shared";
@@ -39,7 +39,7 @@ interface ImageFormState {
   selectedPerformerIds: number[];
   contextTagIdsByPerformer: Record<number, number[]>;
   selectedGalleryIds: number[];
-  selectedGroups: SceneGroupInput[];
+  selectedGroups: VideoGroupInput[];
   customFields: Record<string, unknown>;
 }
 
@@ -112,7 +112,7 @@ function toFormState(image?: Image): ImageFormState {
     selectedPerformerIds: image.performers.map((performer) => performer.id),
     contextTagIdsByPerformer: buildPerformerContextTagIds(image.contextTagApplications),
     selectedGalleryIds: image.galleryIds ?? [],
-    selectedGroups: (image.groups ?? []).map((group) => ({ groupId: group.id, sceneIndex: group.sceneIndex ?? 0 })),
+    selectedGroups: (image.groups ?? []).map((group) => ({ groupId: group.id, videoIndex: group.videoIndex ?? 0 })),
     customFields: { ...(image.customFields ?? {}) },
   };
 }
@@ -186,7 +186,7 @@ function ImageMetadataModal({ title, open, onClose, initialState, onSubmit, isPe
   const setSelectedGroupIds = (groupIds: number[]) => {
     setForm({
       ...form,
-      selectedGroups: groupIds.map((groupId) => form.selectedGroups.find((group) => group.groupId === groupId) ?? { groupId, sceneIndex: 0 }),
+      selectedGroups: groupIds.map((groupId) => form.selectedGroups.find((group) => group.groupId === groupId) ?? { groupId, videoIndex: 0 }),
     });
   };
 
@@ -551,3 +551,4 @@ export function ImageCreateModal({ open, onClose, onCreated }: ImageCreateProps)
     </>
   );
 }
+

@@ -153,7 +153,7 @@ public sealed class CurrentPrincipalMiddleware
             return true;
         if (resource == "texts" && action is "file" or "image")
             return true;
-        if (resource is "scenes" or "segments" or "performers" or "studios" or "tags" or "galleries"
+        if (resource is "videos" or "segments" or "performers" or "studios" or "tags" or "galleries"
             && action is "image" or "cover")
             return true;
         if (resource == "groups" && action == "image")
@@ -162,3 +162,4 @@ public sealed class CurrentPrincipalMiddleware
         return false;
     }
 }
+

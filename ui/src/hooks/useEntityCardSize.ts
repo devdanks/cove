@@ -14,7 +14,7 @@ const GLOBAL_CARD_SIZE_PROFILE: EntityCardSizeProfile = { baseWidthPx: 225, step
 const DEFAULT_CARD_SIZE_PROFILE: EntityCardSizeProfile = GLOBAL_CARD_SIZE_PROFILE;
 
 const ENTITY_CARD_SIZE_PROFILES: Record<string, EntityCardSizeProfile> = {
-  scene: GLOBAL_CARD_SIZE_PROFILE,
+  video: GLOBAL_CARD_SIZE_PROFILE,
   image: GLOBAL_CARD_SIZE_PROFILE,
   gallery: GLOBAL_CARD_SIZE_PROFILE,
   performer: GLOBAL_CARD_SIZE_PROFILE,
@@ -28,8 +28,8 @@ const ENTITY_CARD_SIZE_PROFILES: Record<string, EntityCardSizeProfile> = {
 };
 
 const ENTITY_ALIASES: Record<string, string> = {
-  scenes: "scene",
-  scene: "scene",
+  videos: "video",
+  video: "video",
   images: "image",
   image: "image",
   galleries: "gallery",

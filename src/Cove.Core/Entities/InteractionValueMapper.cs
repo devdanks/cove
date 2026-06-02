@@ -7,7 +7,7 @@ public static class InteractionValueMapper
         parsed = default;
         return Normalize(hostType) switch
         {
-            "scene" => Assign(InteractionHostType.Scene, out parsed),
+            "video" => Assign(InteractionHostType.Video, out parsed),
             "image" => Assign(InteractionHostType.Image, out parsed),
             "audio" => Assign(InteractionHostType.Audio, out parsed),
             "text" => Assign(InteractionHostType.Text, out parsed),
@@ -26,7 +26,7 @@ public static class InteractionValueMapper
 
     public static string ToName(InteractionHostType hostType) => hostType switch
     {
-        InteractionHostType.Scene => "scene",
+        InteractionHostType.Video => "video",
         InteractionHostType.Image => "image",
         InteractionHostType.Audio => "audio",
         InteractionHostType.Text => "text",

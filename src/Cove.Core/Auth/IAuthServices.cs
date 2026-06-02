@@ -89,7 +89,7 @@ public sealed record UserTrackingPreferencesDto(
     int? MinDerivedLikeSessionSeconds,
     int? SessionIdleTimeoutSec);
 
-public sealed record UserScenesPreferencesDto(
+public sealed record UserVideosPreferencesDto(
     bool? IncludeCompilationGroups);
 
 public sealed record UserPlaybackPreferencesDto(
@@ -99,7 +99,7 @@ public sealed record UserUiPreferencesDto(
     UserThemePreferencesDto? Theme,
     UserRatingSystemOptionsDto? RatingSystemOptions,
     UserTrackingPreferencesDto? Tracking,
-    UserScenesPreferencesDto? Scenes,
+    UserVideosPreferencesDto? Videos,
     Dictionary<string, string>? KeybindingOverrides,
     UserPlaybackPreferencesDto? Playback = null);
 
@@ -206,3 +206,4 @@ public sealed record AuditEventDto(
 public sealed record MeResponse(
     UserDto User,
     IReadOnlyList<string> Permissions);
+

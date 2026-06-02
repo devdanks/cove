@@ -13,7 +13,7 @@ export function Pill({ children }: { children: ReactNode }) {
   );
 }
 
-export function SegmentScenePreview({
+export function SegmentVideoPreview({
   hostId,
   updatedAt,
   startSec,
@@ -33,8 +33,8 @@ export function SegmentScenePreview({
   return <SegmentPreviewMedia hostId={hostId} segmentId={segmentId} updatedAt={updatedAt} startSec={startSec} endSec={endSec} title={title} className={imgClassName} />;
 }
 
-export function buildSpanTitle(span: ResolvedSpan, sceneTitle?: string) {
-  return span.tagName || span.kind || span.sourceKey || sceneTitle || `Span ${span.spanKey}`;
+export function buildSpanTitle(span: ResolvedSpan, videoTitle?: string) {
+  return span.tagName || span.kind || span.sourceKey || videoTitle || `Span ${span.spanKey}`;
 }
 
 export function buildRawSegmentTitle(segment: RawSegmentItem) {

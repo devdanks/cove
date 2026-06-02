@@ -62,4 +62,30 @@ public class CustomFieldRepository : ICustomFieldRepository
 
         await _db.SaveChangesAsync(ct);
     }
+
+    public async Task UpsertNumberValueAsync(string entityType, int entityId, int definitionId, decimal value, CancellationToken ct = default)
+    {
+        var existing = await _db.CustomFieldValues
+            .Where(v => v.EntityType == entityType && v.EntityId == entityId && v.DefinitionId == definitionId)
+            .ToListAsync(ct);
+        _db.CustomFieldValues.RemoveRange(existing);
+        _db.CustomFieldValues.Add(new CustomFieldValue
+        {
+            DefinitionId = definitionId,
+            EntityType = entityType,
+            EntityId = entityId,
+            NumberValue = value,
+        });
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task<decimal?> FindNumberValueAsync(string entityType, int entityId, string definitionKey, CancellationToken ct = default)
+        => await _db.CustomFieldValues
+            .AsNoTracking()
+            .Include(v => v.Definition)
+            .Where(v => v.EntityType == entityType && v.EntityId == entityId
+                && v.Definition != null && v.Definition.Key == definitionKey)
+            .OrderBy(v => v.Position)
+            .Select(v => v.NumberValue)
+            .FirstOrDefaultAsync(ct);
 }

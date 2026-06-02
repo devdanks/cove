@@ -52,7 +52,7 @@ public sealed class ImageDetectionsControllerSmokeTests
     }
 }
 
-public sealed class SceneDetectionsControllerSmokeTests
+public sealed class VideoDetectionsControllerSmokeTests
 {
     [Fact]
     public async Task List_ReturnsOk()
@@ -60,16 +60,16 @@ public sealed class SceneDetectionsControllerSmokeTests
         using var factory = new CoveWebApplicationFactory();
         await factory.ResetDatabaseAsync();
 
-        var sceneId = await factory.WithDbContextAsync(async db =>
+        var videoId = await factory.WithDbContextAsync(async db =>
         {
-            var scene = new Scene { Title = "Detection Scene" };
-            db.Scenes.Add(scene);
+            var video = new Video { Title = "Detection Video" };
+            db.Videos.Add(video);
             await db.SaveChangesAsync();
 
             db.Detections.Add(new Detection
             {
-                HostType = DetectionHostType.Scene,
-                HostId = scene.Id,
+                HostType = DetectionHostType.Video,
+                HostId = video.Id,
                 Class = "face",
                 Score = 0.88f,
                 X = 100,
@@ -87,11 +87,11 @@ public sealed class SceneDetectionsControllerSmokeTests
                 SourceRunId = "run-2",
             });
             await db.SaveChangesAsync();
-            return scene.Id;
+            return video.Id;
         });
 
         using var client = factory.CreateAuthenticatedClient();
-        var response = await client.GetAsync($"/api/scenes/{sceneId}/detections");
+        var response = await client.GetAsync($"/api/videos/{videoId}/detections");
         response.EnsureSuccessStatusCode();
 
         var payload = await response.Content.ReadApiJsonAsync<List<DetectionDto>>();

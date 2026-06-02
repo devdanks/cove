@@ -21,10 +21,10 @@ public static class EffectiveHostTagQuery
     public static IQueryable<EffectiveHostTagRow> ManualForHostType(CoveContext db, AffinityHostType hostType)
         => hostType switch
         {
-            AffinityHostType.Scene => db.Set<SceneTag>().Select(link => new EffectiveHostTagRow
+            AffinityHostType.Video => db.Set<VideoTag>().Select(link => new EffectiveHostTagRow
             {
-                HostType = AffinityHostType.Scene,
-                HostId = link.SceneId,
+                HostType = AffinityHostType.Video,
+                HostId = link.VideoId,
                 TagId = link.TagId,
                 IsManual = true,
                 IsDerived = false,
@@ -130,3 +130,4 @@ public static class EffectiveHostTagQuery
                HostDurationSec = application.HostDurationSec,
            };
 }
+

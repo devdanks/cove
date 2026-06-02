@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { galleries, images, scenes, fileOps } from "../api/client";
-import type { FindFilter, Gallery, Image, ImageFilterCriteria, Scene, SceneFilterCriteria } from "../api/types";
+import { galleries, images, videos, fileOps } from "../api/client";
+import type { FindFilter, Gallery, Image, ImageFilterCriteria, Video, VideoFilterCriteria } from "../api/types";
 import { formatDate, formatDuration, formatFileSize, getResolutionLabel, TagBadge, CustomFieldsDisplay, FieldProvenanceHover, resolveTagProvenance } from "../components/shared";
 import { Film, FolderOpen, HardDrive, ImageIcon, Link as LinkIcon, Pencil, Plus, Trash2, Loader2, MoreVertical, RefreshCw, Star } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -11,7 +11,7 @@ import { ExtensionSlot } from "../router/RouteRegistry";
 import { Lightbox, type LightboxImage } from "../components/Lightbox";
 import { InteractiveRating } from "../components/Rating";
 import { DetailListToolbar } from "../components/DetailListToolbar";
-import { IMAGE_CRITERIA, SCENE_CRITERIA } from "../components/FilterDialog";
+import { IMAGE_CRITERIA, VIDEO_CRITERIA } from "../components/FilterDialog";
 import { PerformerBadgeRow } from "../components/EntityCards";
 import { EntityHeroLayout, HERO_PRIMARY_ACTION_BUTTON_CLASS, HERO_ACTION_BUTTON_CLASS } from "../components/EntityHeroLayout";
 import { CoverImageDialog } from "../components/CoverImageDialog";
@@ -37,7 +37,7 @@ interface Props {
   onNavigate: (r: any) => void;
 }
 
-type TabKey = "images" | "scenes" | "fileinfo" | (string & {});
+type TabKey = "images" | "videos" | "fileinfo" | (string & {});
 
 export function GalleryDetailPage({ id, onNavigate }: Props) {
   const { hasPermission, user } = useAuth();
@@ -65,13 +65,13 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
   const [activeTab, setActiveTab] = useState<TabKey>("images");
   const { allTabs: galleryTabs, renderExtensionTab } = useExtensionTabs("gallery", [
     { key: "images", label: "Images", count: effectiveImageCount },
-    { key: "scenes", label: "Scenes", count: gallery?.sceneCount ?? 0 },
+    { key: "videos", label: "Videos", count: gallery?.videoCount ?? 0 },
     { key: "fileinfo", label: "File Info" },
   ]);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [imageZoom, setImageZoom] = useState(0);
-  const [sceneFilter, setSceneFilter] = useState<FindFilter>({ page: 1, perPage: 24, direction: "desc" });
+  const [videoFilter, setVideoFilter] = useState<FindFilter>({ page: 1, perPage: 24, direction: "desc" });
   const [showAddImages, setShowAddImages] = useState(false);
   const [showOpsMenu, setShowOpsMenu] = useState(false);
   const [coverOpen, setCoverOpen] = useState(false);
@@ -98,7 +98,7 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
   });
   const visibleGalleryTabs = filterItemsByPermission(galleryTabs, {
     images: "images.read",
-    scenes: "scenes.read",
+    videos: "videos.read",
     fileinfo: "galleries.read",
   }, hasPermission);
 
@@ -134,8 +134,8 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
     },
     {
       key: "s",
-      description: "Open scenes tab",
-      handler: () => setActiveTab("scenes"),
+      description: "Open videos tab",
+      handler: () => setActiveTab("videos"),
     },
     {
       key: "f",
@@ -248,8 +248,8 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
             canWriteGallery={canWriteGallery}
           />
         )
-      : activeTab === "scenes"
-        ? <GalleryScenesPanel galleryId={id} filter={sceneFilter} setFilter={setSceneFilter} onNavigate={onNavigate} />
+      : activeTab === "videos"
+        ? <GalleryVideosPanel galleryId={id} filter={videoFilter} setFilter={setVideoFilter} onNavigate={onNavigate} />
         : activeTab === "fileinfo"
           ? <GalleryFileInfo gallery={gallery} />
           : renderExtensionTab(activeTab, id, onNavigate);
@@ -315,7 +315,7 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
         description={gallery.details ? <FieldProvenanceHover fieldProvenance={gallery.fieldProvenance} fieldKey="details" block>{gallery.details}</FieldProvenanceHover> : undefined}
         counts={[
           { key: "images", label: "Images", value: effectiveImageCount, icon: <ImageIcon className="h-4 w-4" /> },
-          { key: "scenes", label: "Scenes", value: gallery.sceneCount, icon: <Film className="h-4 w-4" /> },
+          { key: "videos", label: "Videos", value: gallery.videoCount, icon: <Film className="h-4 w-4" /> },
           { key: "files", label: "Files", value: gallery.files.length, icon: <HardDrive className="h-4 w-4" /> },
         ]}
         metaRow={
@@ -418,26 +418,26 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
   );
 }
 
-function GalleryScenesPanel({ galleryId, filter, setFilter, onNavigate }: {
+function GalleryVideosPanel({ galleryId, filter, setFilter, onNavigate }: {
   galleryId: number;
   filter: FindFilter;
   setFilter: (filter: FindFilter) => void;
   onNavigate: (r: any) => void;
 }) {
   const [zoomLevel, setZoomLevel] = useState(0);
-  const { displayMode, setDisplayMode, availableDisplayModes } = useRelatedEntityDisplayMode("scenes");
+  const { displayMode, setDisplayMode, availableDisplayModes } = useRelatedEntityDisplayMode("videos");
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
   const [objectFilter, setObjectFilter] = useState<Record<string, unknown>>({});
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
-  const { data, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<Scene>({
-    queryKey: ["gallery-scenes", galleryId, objectFilter],
+  const { data, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<Video>({
+    queryKey: ["gallery-videos", galleryId, objectFilter],
     filter,
     queryFn: (nextFilter) => hasObjectFilter
-      ? scenes.findFiltered({
+      ? videos.findFiltered({
           findFilter: nextFilter,
-          objectFilter: withRequiredMultiId(objectFilter as SceneFilterCriteria, "galleriesCriterion", galleryId),
+          objectFilter: withRequiredMultiId(objectFilter as VideoFilterCriteria, "galleriesCriterion", galleryId),
         })
-      : scenes.find(nextFilter, { galleryId: String(galleryId) }),
+      : videos.find(nextFilter, { galleryId: String(galleryId) }),
   });
   const items = data?.items ?? [];
   const { selectedIds, toggle, selectAll, selectAllPending, selectShown, selectNone } = useDetailListSelection({ items, infinitePageSize, infiniteFilterKey, fetchAllIds, resetKeyParts: [objectFilter] });
@@ -455,7 +455,7 @@ function GalleryScenesPanel({ galleryId, filter, setFilter, onNavigate }: {
       ]}
       zoomLevel={zoomLevel}
       onZoomChange={setZoomLevel}
-      cardSizeEntityType="scenes"
+      cardSizeEntityType="videos"
       showSearch
       selectedCount={selectedIds.size}
       onSelectAll={selectAll}
@@ -463,8 +463,8 @@ function GalleryScenesPanel({ galleryId, filter, setFilter, onNavigate }: {
       onSelectAllMatching={selectShown}
       selectAllMatchingLabel="Select shown"
       onSelectNone={selectNone}
-      selectionActions={<BulkSelectionActions entityType="scenes" selectedIds={selectedIds} onDone={selectNone} sceneItems={items} onNavigate={onNavigate} removeFromParent={{ type: "gallery", id: galleryId }} />}
-      criteriaDefinitions={SCENE_CRITERIA}
+      selectionActions={<BulkSelectionActions entityType="videos" selectedIds={selectedIds} onDone={selectNone} videoItems={items} onNavigate={onNavigate} removeFromParent={{ type: "gallery", id: galleryId }} />}
+      criteriaDefinitions={VIDEO_CRITERIA}
       objectFilter={objectFilter}
       onObjectFilterChange={setObjectFilter}
       allowInfinitePageSize
@@ -474,15 +474,15 @@ function GalleryScenesPanel({ galleryId, filter, setFilter, onNavigate }: {
     />
   );
 
-  if (isLoading) return <LoadingPanel icon={<Film className="h-10 w-10" />} message="Loading scenes..." />;
-  if (!data || items.length === 0) return <>{toolbar}<EmptyPanel icon={<Film className="h-12 w-12" />} message="No scenes for this gallery" /></>;
+  if (isLoading) return <LoadingPanel icon={<Film className="h-10 w-10" />} message="Loading videos..." />;
+  if (!data || items.length === 0) return <>{toolbar}<EmptyPanel icon={<Film className="h-12 w-12" />} message="No videos for this gallery" /></>;
 
   return (
     <>
       {toolbar}
-      <RelatedEntityListView entityType="scenes" items={items} displayMode={displayMode} zoomLevel={zoomLevel} selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} onSceneQuickView={setQuickViewId} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} />
+      <RelatedEntityListView entityType="videos" items={items} displayMode={displayMode} zoomLevel={zoomLevel} selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} onVideoQuickView={setQuickViewId} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} />
       {quickViewId !== null && (
-        <QuickViewDialog type="scene" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
+        <QuickViewDialog type="video" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
       )}
     </>
   );
@@ -706,3 +706,4 @@ function GalleryFileInfo({ gallery }: { gallery: { folderPath?: string; files: {
     </div>
   );
 }
+

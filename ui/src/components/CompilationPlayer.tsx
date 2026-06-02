@@ -16,7 +16,7 @@ import {
   SkipForward,
   Video,
 } from "lucide-react";
-import { audios, images, scenes, texts } from "../api/client";
+import { audios, images, videos, texts } from "../api/client";
 import type { GroupPlaybackManifestItem } from "../api/types";
 import { AudioPlayer } from "./AudioPlayer";
 import { MediaDetailLayout } from "./MediaDetailLayout/MediaDetailLayout";
@@ -34,8 +34,8 @@ interface Props {
 }
 
 type CompilationTab = "playlist" | "current" | "filters";
-type MediaKind = "scene" | "audio" | "image" | "text" | "unknown";
-type TypeFilterKey = "scenes" | "segments" | "images" | "texts" | "audios";
+type MediaKind = "video" | "audio" | "image" | "text" | "unknown";
+type TypeFilterKey = "videos" | "segments" | "images" | "texts" | "audios";
 
 const DEFAULT_IMAGE_DISPLAY_DURATION_SEC = 6;
 const DEFAULT_TEXT_DISPLAY_DURATION_SEC = 12;
@@ -56,7 +56,7 @@ export function CompilationPlayer({
   const [autostartToken, setAutostartToken] = useState(0);
   const [activeTab, setActiveTab] = useState<CompilationTab>("playlist");
   const [enabledTypes, setEnabledTypes] = useState<Record<TypeFilterKey, boolean>>({
-    scenes: true,
+    videos: true,
     segments: true,
     images: true,
     texts: true,
@@ -81,19 +81,19 @@ export function CompilationPlayer({
 
   const item = visibleItems[currentItemIndex];
   const nextItem = visibleItems[currentItemIndex + 1] ?? (loopCompilation ? visibleItems[0] : undefined);
-  const currentSceneId = getSceneId(item);
+  const currentVideoId = getVideoId(item);
   const currentAudioId = getAudioId(item);
   const currentImageId = getImageId(item);
   const currentTextId = getTextId(item);
-  const nextSceneId = getSceneId(nextItem);
+  const nextVideoId = getVideoId(nextItem);
   const nextAudioId = getAudioId(nextItem);
   const nextImageId = getImageId(nextItem);
   const nextTextId = getTextId(nextItem);
 
-  const { data: currentScene, isLoading: currentSceneLoading } = useQuery({
-    queryKey: ["scene", currentSceneId],
-    queryFn: () => scenes.get(currentSceneId!),
-    enabled: currentSceneId != null,
+  const { data: currentVideo, isLoading: currentVideoLoading } = useQuery({
+    queryKey: ["video", currentVideoId],
+    queryFn: () => videos.get(currentVideoId!),
+    enabled: currentVideoId != null,
   });
   const { data: currentAudio, isLoading: currentAudioLoading } = useQuery({
     queryKey: ["audio", currentAudioId],
@@ -106,9 +106,9 @@ export function CompilationPlayer({
     enabled: currentTextId != null,
   });
   useQuery({
-    queryKey: ["scene", nextSceneId],
-    queryFn: () => scenes.get(nextSceneId!),
-    enabled: nextSceneId != null,
+    queryKey: ["video", nextVideoId],
+    queryFn: () => videos.get(nextVideoId!),
+    enabled: nextVideoId != null,
     staleTime: 60_000,
   });
   useQuery({
@@ -124,19 +124,19 @@ export function CompilationPlayer({
     staleTime: 60_000,
   });
 
-  const currentFile = currentScene?.files[0];
+  const currentFile = currentVideo?.files[0];
   const currentAudioFile = currentAudio?.files
     .slice()
     .sort((left, right) => (right.duration - left.duration) || (left.id - right.id))[0];
   const mediaKind = getMediaKind(item);
-  const itemIsScene = mediaKind === "scene";
+  const itemIsVideo = mediaKind === "video";
   const itemIsAudio = mediaKind === "audio";
   const itemIsImage = mediaKind === "image";
   const itemIsText = mediaKind === "text";
-  const itemLoading = itemIsAudio ? currentAudioLoading : itemIsScene ? currentSceneLoading : itemIsText ? currentTextLoading : false;
+  const itemLoading = itemIsAudio ? currentAudioLoading : itemIsVideo ? currentVideoLoading : itemIsText ? currentTextLoading : false;
   const currentPlayable = itemIsAudio
     ? currentAudioId != null
-    : itemIsScene
+    : itemIsVideo
       ? !!currentFile
       : itemIsImage
         ? currentImageId != null
@@ -237,10 +237,10 @@ export function CompilationPlayer({
       onNavigate({ page: "text", id: currentTextId });
       return;
     }
-    if (currentSceneId != null) {
-      onNavigate({ page: "scene", id: currentSceneId, seekTo: item.startSec });
+    if (currentVideoId != null) {
+      onNavigate({ page: "video", id: currentVideoId, seekTo: item.startSec });
     }
-  }, [currentAudioId, currentImageId, currentSceneId, currentTextId, item, onNavigate]);
+  }, [currentAudioId, currentImageId, currentVideoId, currentTextId, item, onNavigate]);
 
   const tabs = useMemo(() => [
     { key: "playlist", label: "Playlist", icon: <ListMusic className="h-4 w-4" />, count: visibleItems.length },
@@ -263,7 +263,7 @@ export function CompilationPlayer({
     clipStartSec: item.startSec,
     clipEndSec: item.endSec ?? null,
     context: {
-      sceneId: item.sceneId ?? undefined,
+      videoId: item.videoId ?? undefined,
       audioId: item.audioId ?? undefined,
       imageId: item.imageId ?? undefined,
       textId: item.textId ?? undefined,
@@ -273,7 +273,7 @@ export function CompilationPlayer({
   } : undefined;
   const playerMedia = (
     <div className="relative flex min-h-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden bg-black">
-      {renderPreloads(nextSceneId, nextAudioId, nextImageId)}
+      {renderPreloads(nextVideoId, nextAudioId, nextImageId)}
       {!item ? (
         <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-secondary">
           No compilation items match the active filters.
@@ -282,15 +282,15 @@ export function CompilationPlayer({
         <div className="flex flex-1 items-center justify-center text-sm text-secondary">
           Loading item playback...
         </div>
-      ) : itemIsScene && currentFile && currentSceneId != null ? (
+      ) : itemIsVideo && currentFile && currentVideoId != null ? (
         <div className="flex min-h-0 min-w-0 max-w-full flex-1 overflow-hidden bg-black">
           <VideoPlayer
-            streamUrl={scenes.streamUrl(currentSceneId)}
-            posterUrl={item.posterPath ?? scenes.screenshotUrl(currentSceneId)}
+            streamUrl={videos.streamUrl(currentVideoId)}
+            posterUrl={item.posterPath ?? videos.screenshotUrl(currentVideoId)}
             format={currentFile.format}
             duration={currentFile.duration}
             resumeTime={item.startSec}
-            sceneId={currentSceneId}
+            videoId={currentVideoId}
             detections={[]}
             captions={currentFile.captions}
             onPlay={() => setAutostart(false)}
@@ -459,7 +459,7 @@ export function CompilationPlayer({
           <section className="rounded-lg border border-border bg-card/70 p-4">
             <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">Item Types</div>
             <div className="space-y-2">
-              <TypeToggle label="Scenes" checked={enabledTypes.scenes} onChange={() => toggleType("scenes")} count={countItems(items, "scenes")} />
+              <TypeToggle label="Videos" checked={enabledTypes.videos} onChange={() => toggleType("videos")} count={countItems(items, "videos")} />
               <TypeToggle label="Segments" checked={enabledTypes.segments} onChange={() => toggleType("segments")} count={countItems(items, "segments")} />
               <TypeToggle label="Images" checked={enabledTypes.images} onChange={() => toggleType("images")} count={countItems(items, "images")} />
               <TypeToggle label="Texts" checked={enabledTypes.texts} onChange={() => toggleType("texts")} count={countItems(items, "texts")} />
@@ -590,14 +590,14 @@ function NumberSetting({ label, value, onChange, min, max }: { label: string; va
   );
 }
 
-function renderPreloads(nextSceneId?: number, nextAudioId?: number, nextImageId?: number) {
-  if (nextSceneId == null && nextAudioId == null && nextImageId == null) {
+function renderPreloads(nextVideoId?: number, nextAudioId?: number, nextImageId?: number) {
+  if (nextVideoId == null && nextAudioId == null && nextImageId == null) {
     return null;
   }
 
   return (
     <div className="hidden" aria-hidden="true">
-      {nextSceneId != null ? <video preload="auto" src={scenes.streamUrl(nextSceneId)} /> : null}
+      {nextVideoId != null ? <video preload="auto" src={videos.streamUrl(nextVideoId)} /> : null}
       {nextAudioId != null ? <audio preload="auto" src={audios.streamUrl(nextAudioId)} /> : null}
       {nextImageId != null ? <img src={images.imageUrl(nextImageId)} alt="" /> : null}
     </div>
@@ -635,7 +635,7 @@ function getMediaKind(item?: GroupPlaybackManifestItem): MediaKind {
   if (getImageId(item) != null) return "image";
   if (getTextId(item) != null) return "text";
   if (getAudioId(item) != null) return "audio";
-  if (getSceneId(item) != null) return "scene";
+  if (getVideoId(item) != null) return "video";
   return "unknown";
 }
 
@@ -645,8 +645,8 @@ function getTypeFilterKey(item: GroupPlaybackManifestItem): TypeFilterKey {
     case "audio": return "audios";
     case "image": return "images";
     case "text": return "texts";
-    case "scene": return "scenes";
-    default: return "scenes";
+    case "video": return "videos";
+    default: return "videos";
   }
 }
 
@@ -670,12 +670,12 @@ function isSegmentItem(item?: GroupPlaybackManifestItem) {
   return item?.hostType === "segment" || item?.segmentId != null;
 }
 
-function getSceneId(item?: GroupPlaybackManifestItem) {
+function getVideoId(item?: GroupPlaybackManifestItem) {
   if (!item) {
     return undefined;
   }
 
-  return item.sceneId ?? (item.hostType === "scene" ? item.hostId : undefined);
+  return item.videoId ?? (item.hostType === "video" ? item.hostId : undefined);
 }
 
 function getAudioId(item?: GroupPlaybackManifestItem) {
@@ -703,7 +703,7 @@ function getTextId(item?: GroupPlaybackManifestItem) {
 }
 
 function getItemTitle(item: GroupPlaybackManifestItem) {
-  return item.title || item.sceneTitle || `Untitled ${getItemTypeLabel(item).toLowerCase()}`;
+  return item.title || item.videoTitle || `Untitled ${getItemTypeLabel(item).toLowerCase()}`;
 }
 
 function getItemTypeLabel(item: GroupPlaybackManifestItem) {
@@ -712,7 +712,7 @@ function getItemTypeLabel(item: GroupPlaybackManifestItem) {
     case "audio": return "Audio";
     case "image": return "Image";
     case "text": return "Text";
-    case "scene": return "Scene";
+    case "video": return "Video";
     default: return "Item";
   }
 }
@@ -723,7 +723,7 @@ function getItemIcon(item: GroupPlaybackManifestItem) {
     case "audio": return <Music className="h-4 w-4" />;
     case "image": return <ImageIcon className="h-4 w-4" />;
     case "text": return <FileText className="h-4 w-4" />;
-    case "scene": return <Video className="h-4 w-4" />;
+    case "video": return <Video className="h-4 w-4" />;
     default: return <Info className="h-4 w-4" />;
   }
 }

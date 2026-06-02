@@ -9,7 +9,7 @@ public class RoleContentRule : BaseEntity
 {
     public int RoleId { get; set; }
 
-    /// <summary>'scene' | 'performer' | 'tag' | 'studio' | 'gallery' | 'image' | 'group' | ...</summary>
+    /// <summary>'video' | 'performer' | 'tag' | 'studio' | 'gallery' | 'image' | 'group' | ...</summary>
     public string EntityKind { get; set; } = string.Empty;
 
     /// <summary>'allow' | 'deny'</summary>
@@ -26,3 +26,4 @@ public class RoleContentRule : BaseEntity
 
     public Role? Role { get; set; }
 }
+

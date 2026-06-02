@@ -9,7 +9,7 @@ type KeyboardLikeEvent = Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "al
 
 export const KEYBINDING_DEFAULTS: KeybindingDefinition[] = [
   { id: "global.home", group: "Global Navigation", label: "Home", keys: "g h" },
-  { id: "global.scenes", group: "Global Navigation", label: "Scenes", keys: "g s" },
+  { id: "global.videos", group: "Global Navigation", label: "Videos", keys: "g s" },
   { id: "global.audios", group: "Global Navigation", label: "Audios", keys: "g a" },
   { id: "global.texts", group: "Global Navigation", label: "Texts", keys: "g x" },
   { id: "global.segments", group: "Global Navigation", label: "Segments", keys: "g m" },

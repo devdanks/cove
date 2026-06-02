@@ -100,7 +100,7 @@ export function FaceCompareDialog({
             footer={(
               <div className="space-y-2 text-xs text-secondary">
                 <div>{face.appearanceCount ?? 0} appearance{(face.appearanceCount ?? 0) === 1 ? "" : "s"}</div>
-                <div>{face.sceneCount} scene{face.sceneCount === 1 ? "" : "s"} and {face.imageCount} image{face.imageCount === 1 ? "" : "s"}</div>
+                <div>{face.videoCount} video{face.videoCount === 1 ? "" : "s"} and {face.imageCount} image{face.imageCount === 1 ? "" : "s"}</div>
                 <a {...faceLinkProps} className="inline-flex items-center gap-1 text-accent hover:underline">
                   Open face page
                 </a>
@@ -310,3 +310,4 @@ function formatPercent(value: number) {
   const scaled = value <= 1 ? value * 100 : value;
   return Math.max(0, Math.min(100, Math.round(scaled)));
 }
+

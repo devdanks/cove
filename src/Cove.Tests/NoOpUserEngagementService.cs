@@ -16,7 +16,7 @@ internal sealed class NoOpUserEngagementService : IUserEngagementService
     public Task<Dictionary<int, UserEngagementSnapshot>> GetSnapshotsAsync(AffinityHostType hostType, IEnumerable<int> hostIds, CancellationToken cancellationToken = default)
         => Task.FromResult(new Dictionary<int, UserEngagementSnapshot>());
 
-    public Task<Dictionary<int, UserEngagementSnapshot>> GetSceneSnapshotsAsync(IEnumerable<int> sceneIds, CancellationToken cancellationToken = default)
+    public Task<Dictionary<int, UserEngagementSnapshot>> GetVideoSnapshotsAsync(IEnumerable<int> videoIds, CancellationToken cancellationToken = default)
         => Task.FromResult(new Dictionary<int, UserEngagementSnapshot>());
 
     public Task<UserEngagementSnapshot?> SetFavoriteAsync(AffinityHostType hostType, int hostId, bool isFavorite, CancellationToken cancellationToken = default)
@@ -34,22 +34,22 @@ internal sealed class NoOpUserEngagementService : IUserEngagementService
     public Task<IReadOnlyList<EngagementInteractionDto>> GetInteractionsAsync(InteractionHostType? hostType = null, int? hostId = null, int limit = 100, CancellationToken cancellationToken = default)
         => Task.FromResult<IReadOnlyList<EngagementInteractionDto>>([]);
 
-    public Task<UserEngagementSnapshot?> RecordScenePlayAsync(int sceneId, CancellationToken cancellationToken = default)
+    public Task<UserEngagementSnapshot?> RecordVideoPlayAsync(int videoId, CancellationToken cancellationToken = default)
         => Task.FromResult<UserEngagementSnapshot?>(null);
 
-    public Task<UserEngagementSnapshot?> DeleteScenePlayAsync(int sceneId, CancellationToken cancellationToken = default)
+    public Task<UserEngagementSnapshot?> DeleteVideoPlayAsync(int videoId, CancellationToken cancellationToken = default)
         => Task.FromResult<UserEngagementSnapshot?>(null);
 
-    public Task<UserEngagementSnapshot?> ResetScenePlayAsync(int sceneId, CancellationToken cancellationToken = default)
+    public Task<UserEngagementSnapshot?> ResetVideoPlayAsync(int videoId, CancellationToken cancellationToken = default)
         => Task.FromResult<UserEngagementSnapshot?>(null);
 
-    public Task<UserEngagementSnapshot?> IncrementSceneLikeAsync(int sceneId, CancellationToken cancellationToken = default)
+    public Task<UserEngagementSnapshot?> IncrementVideoLikeAsync(int videoId, CancellationToken cancellationToken = default)
         => Task.FromResult<UserEngagementSnapshot?>(null);
 
-    public Task<UserEngagementSnapshot?> DecrementSceneLikeAsync(int sceneId, CancellationToken cancellationToken = default)
+    public Task<UserEngagementSnapshot?> DecrementVideoLikeAsync(int videoId, CancellationToken cancellationToken = default)
         => Task.FromResult<UserEngagementSnapshot?>(null);
 
-    public Task<UserEngagementSnapshot?> ResetSceneLikeAsync(int sceneId, CancellationToken cancellationToken = default)
+    public Task<UserEngagementSnapshot?> ResetVideoLikeAsync(int videoId, CancellationToken cancellationToken = default)
         => Task.FromResult<UserEngagementSnapshot?>(null);
 
     public Task<UserEngagementSnapshot?> IncrementImageLikeAsync(int imageId, CancellationToken cancellationToken = default)
@@ -61,18 +61,18 @@ internal sealed class NoOpUserEngagementService : IUserEngagementService
     public Task<UserEngagementSnapshot?> ResetImageLikeAsync(int imageId, CancellationToken cancellationToken = default)
         => Task.FromResult<UserEngagementSnapshot?>(null);
 
-    public Task<UserEngagementSnapshot?> ResetSceneActivityAsync(int sceneId, CancellationToken cancellationToken = default)
+    public Task<UserEngagementSnapshot?> ResetVideoActivityAsync(int videoId, CancellationToken cancellationToken = default)
         => Task.FromResult<UserEngagementSnapshot?>(null);
 
     public Task<UserEngagementSnapshot?> ResetActivityAsync(AffinityHostType hostType, int hostId, CancellationToken cancellationToken = default)
         => Task.FromResult<UserEngagementSnapshot?>(null);
 
-    public Task<UserEngagementSnapshot?> SetSceneRatingAsync(int sceneId, int? value, string aspect = "overall", CancellationToken cancellationToken = default)
+    public Task<UserEngagementSnapshot?> SetVideoRatingAsync(int videoId, int? value, string aspect = "overall", CancellationToken cancellationToken = default)
         => Task.FromResult<UserEngagementSnapshot?>(null);
 
-    public Task<SceneHistoryDto?> GetSceneHistoryAsync(int sceneId, CancellationToken cancellationToken = default)
-        => Task.FromResult<SceneHistoryDto?>(null);
+    public Task<VideoHistoryDto?> GetVideoHistoryAsync(int videoId, CancellationToken cancellationToken = default)
+        => Task.FromResult<VideoHistoryDto?>(null);
 
-    public Task<SceneHistoryDto?> GetHistoryAsync(AffinityHostType hostType, int hostId, CancellationToken cancellationToken = default)
-        => Task.FromResult<SceneHistoryDto?>(null);
+    public Task<VideoHistoryDto?> GetHistoryAsync(AffinityHostType hostType, int hostId, CancellationToken cancellationToken = default)
+        => Task.FromResult<VideoHistoryDto?>(null);
 }

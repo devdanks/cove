@@ -19,10 +19,10 @@ namespace Cove.Api.Controllers;
 [RequiresPermission(Permissions.StreamRead)]
 public class StreamController(IStreamService streamService, IThumbnailService thumbnailService, ITranscodeService transcodeService, CoveContext db) : ControllerBase
 {
-    [HttpGet("scene/{sceneId:int}")]
-    public async Task<IActionResult> StreamScene(int sceneId, CancellationToken ct)
+    [HttpGet("video/{videoId:int}")]
+    public async Task<IActionResult> StreamVideo(int videoId, CancellationToken ct)
     {
-        var result = await streamService.GetSceneStream(sceneId, ct);
+        var result = await streamService.GetVideoStream(videoId, ct);
         if (result == null) return NotFound();
 
         var (stream, contentType, fileSize) = result.Value;
@@ -34,10 +34,10 @@ public class StreamController(IStreamService streamService, IThumbnailService th
         return File(stream, contentType);
     }
 
-    [HttpGet("scene/{sceneId:int}/screenshot")]
-    public async Task<IActionResult> GetScreenshot(int sceneId, [FromQuery] double? seconds, CancellationToken ct)
+    [HttpGet("video/{videoId:int}/screenshot")]
+    public async Task<IActionResult> GetScreenshot(int videoId, [FromQuery] double? seconds, CancellationToken ct)
     {
-        var result = await streamService.GetSceneScreenshot(sceneId, seconds, ct);
+        var result = await streamService.GetVideoScreenshot(videoId, seconds, ct);
         if (result == null) return NotFound();
 
         var (stream, contentType, useLongCache) = result.Value;
@@ -47,10 +47,10 @@ public class StreamController(IStreamService streamService, IThumbnailService th
         return File(stream, contentType);
     }
 
-    [HttpGet("scene/{sceneId:int}/segment-preview")]
-    public async Task<IActionResult> GetSegmentPreview(int sceneId, [FromQuery] double seconds, CancellationToken ct)
+    [HttpGet("video/{videoId:int}/segment-preview")]
+    public async Task<IActionResult> GetSegmentPreview(int videoId, [FromQuery] double seconds, CancellationToken ct)
     {
-        var result = await streamService.GetSegmentAnimatedPreview(sceneId, seconds, ct);
+        var result = await streamService.GetSegmentAnimatedPreview(videoId, seconds, ct);
         if (result == null) return NotFound();
 
         var (stream, contentType, useLongCache) = result.Value;
@@ -60,10 +60,10 @@ public class StreamController(IStreamService streamService, IThumbnailService th
         return File(stream, contentType);
     }
 
-    [HttpGet("scene/{sceneId:int}/preview")]
-    public IActionResult GetPreview(int sceneId)
+    [HttpGet("video/{videoId:int}/preview")]
+    public IActionResult GetPreview(int videoId)
     {
-        var path = GetExistingPreviewPath(sceneId);
+        var path = GetExistingPreviewPath(videoId);
         if (path == null) return NotFound();
 
         var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
@@ -71,10 +71,10 @@ public class StreamController(IStreamService streamService, IThumbnailService th
         return File(stream, "video/mp4", enableRangeProcessing: true);
     }
 
-    [HttpHead("scene/{sceneId:int}/preview")]
-    public IActionResult HeadPreview(int sceneId)
+    [HttpHead("video/{videoId:int}/preview")]
+    public IActionResult HeadPreview(int videoId)
     {
-        var path = GetExistingPreviewPath(sceneId);
+        var path = GetExistingPreviewPath(videoId);
         if (path == null) return NotFound();
 
         SetPreviewHeaders();
@@ -83,18 +83,18 @@ public class StreamController(IStreamService streamService, IThumbnailService th
         return Ok();
     }
 
-    [HttpGet("scene/{sceneId:int}/preview/status")]
-    public IActionResult GetPreviewStatus(int sceneId)
+    [HttpGet("video/{videoId:int}/preview/status")]
+    public IActionResult GetPreviewStatus(int videoId)
     {
-        return Ok(new { available = GetExistingPreviewPath(sceneId) != null });
+        return Ok(new { available = GetExistingPreviewPath(videoId) != null });
     }
 
-    private string? GetExistingPreviewPath(int sceneId)
+    private string? GetExistingPreviewPath(int videoId)
     {
-        var sourceSceneId = db is null ? sceneId : ResolveSourceSceneId(sceneId);
-        if (!sourceSceneId.HasValue) return null;
+        var sourceVideoId = db is null ? videoId : ResolveSourceVideoId(videoId);
+        if (!sourceVideoId.HasValue) return null;
 
-        var path = thumbnailService.GetPreviewPath(sourceSceneId.Value);
+        var path = thumbnailService.GetPreviewPath(sourceVideoId.Value);
         return System.IO.File.Exists(path) ? path : null;
     }
 
@@ -104,13 +104,13 @@ public class StreamController(IStreamService streamService, IThumbnailService th
         Response.Headers["Accept-Ranges"] = "bytes";
     }
 
-    [HttpGet("scene/{sceneId:int}/sprite")]
-    public IActionResult GetSprite(int sceneId)
+    [HttpGet("video/{videoId:int}/sprite")]
+    public IActionResult GetSprite(int videoId)
     {
-        var sourceSceneId = db is null ? sceneId : ResolveSourceSceneId(sceneId);
-        if (!sourceSceneId.HasValue) return NotFound();
+        var sourceVideoId = db is null ? videoId : ResolveSourceVideoId(videoId);
+        if (!sourceVideoId.HasValue) return NotFound();
 
-        var path = thumbnailService.GetSpritePath(sourceSceneId.Value);
+        var path = thumbnailService.GetSpritePath(sourceVideoId.Value);
         if (!System.IO.File.Exists(path)) return NotFound();
 
         var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 8192, useAsync: true);
@@ -118,13 +118,13 @@ public class StreamController(IStreamService streamService, IThumbnailService th
         return File(stream, "image/jpeg");
     }
 
-    [HttpGet("scene/{sceneId:int}/vtt/thumbs")]
-    public IActionResult GetSpriteVtt(int sceneId)
+    [HttpGet("video/{videoId:int}/vtt/thumbs")]
+    public IActionResult GetSpriteVtt(int videoId)
     {
-        var sourceSceneId = db is null ? sceneId : ResolveSourceSceneId(sceneId);
-        if (!sourceSceneId.HasValue) return NotFound();
+        var sourceVideoId = db is null ? videoId : ResolveSourceVideoId(videoId);
+        if (!sourceVideoId.HasValue) return NotFound();
 
-        var path = thumbnailService.GetSpriteVttPath(sourceSceneId.Value);
+        var path = thumbnailService.GetSpriteVttPath(sourceVideoId.Value);
         if (!System.IO.File.Exists(path)) return NotFound();
 
         var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 8192, useAsync: true);
@@ -177,14 +177,14 @@ public class StreamController(IStreamService streamService, IThumbnailService th
             .FirstOrDefaultAsync(item => item.Id == detectionId, ct);
         if (detection is null) return NotFound();
 
-        if (detection.HostType == DetectionHostType.Scene)
+        if (detection.HostType == DetectionHostType.Video)
         {
             if (max.GetValueOrDefault(640) > 640)
             {
                 await EnsureHighResolutionDetectionFrameAsync(detection, ct);
             }
 
-            var result = await streamService.GetSceneScreenshot(detection.HostId, detection.ObservedAtSec, ct);
+            var result = await streamService.GetVideoScreenshot(detection.HostId, detection.ObservedAtSec, ct);
             if (result is null) return NotFound();
 
             await using var stream = result.Value.stream;
@@ -210,31 +210,31 @@ public class StreamController(IStreamService streamService, IThumbnailService th
             return;
         }
 
-        var sourceSceneId = await ResolveSourceSceneIdAsync(detection.HostId, ct);
-        if (!sourceSceneId.HasValue)
+        var sourceVideoId = await ResolveSourceVideoIdAsync(detection.HostId, ct);
+        if (!sourceVideoId.HasValue)
         {
             return;
         }
 
-        var framePath = thumbnailService.GetTimestampedThumbnailPath(sourceSceneId.Value, detection.ObservedAtSec.Value);
+        var framePath = thumbnailService.GetTimestampedThumbnailPath(sourceVideoId.Value, detection.ObservedAtSec.Value);
         if (System.IO.File.Exists(framePath))
         {
             return;
         }
 
-        await thumbnailService.GenerateSceneThumbnailAsync(sourceSceneId.Value, detection.ObservedAtSec.Value, ct);
+        await thumbnailService.GenerateVideoThumbnailAsync(sourceVideoId.Value, detection.ObservedAtSec.Value, ct);
     }
 
-    [HttpGet("scene/{sceneId:int}/caption/{captionId:int}")]
-    public async Task<IActionResult> GetCaption(int sceneId, int captionId, CancellationToken ct)
+    [HttpGet("video/{videoId:int}/caption/{captionId:int}")]
+    public async Task<IActionResult> GetCaption(int videoId, int captionId, CancellationToken ct)
     {
-        var sourceSceneId = await ResolveSourceSceneIdAsync(sceneId, ct);
-        if (!sourceSceneId.HasValue) return NotFound();
+        var sourceVideoId = await ResolveSourceVideoIdAsync(videoId, ct);
+        if (!sourceVideoId.HasValue) return NotFound();
 
         var caption = await db.VideoCaptions
             .Include(c => c.File)
             .FirstOrDefaultAsync(c => c.Id == captionId && c.File != null
-                && db.Scenes.Any(s => s.Id == sourceSceneId.Value && s.Files.Any(f => f.Id == c.FileId)), ct);
+                && db.Videos.Any(s => s.Id == sourceVideoId.Value && s.Files.Any(f => f.Id == c.FileId)), ct);
 
         if (caption?.File == null) return NotFound();
 
@@ -250,19 +250,19 @@ public class StreamController(IStreamService streamService, IThumbnailService th
         return File(stream, contentType);
     }
 
-    [HttpGet("scene/{sceneId:int}/captions")]
-    public async Task<IActionResult> GetCaptions(int sceneId, CancellationToken ct)
+    [HttpGet("video/{videoId:int}/captions")]
+    public async Task<IActionResult> GetCaptions(int videoId, CancellationToken ct)
     {
-        var sourceSceneId = await ResolveSourceSceneIdAsync(sceneId, ct);
-        if (!sourceSceneId.HasValue) return NotFound();
+        var sourceVideoId = await ResolveSourceVideoIdAsync(videoId, ct);
+        if (!sourceVideoId.HasValue) return NotFound();
 
-        var scene = await db.Scenes
+        var video = await db.Videos
             .Include(s => s.Files).ThenInclude(f => f.Captions)
-            .FirstOrDefaultAsync(s => s.Id == sourceSceneId.Value, ct);
+            .FirstOrDefaultAsync(s => s.Id == sourceVideoId.Value, ct);
 
-        if (scene == null) return NotFound();
+        if (video == null) return NotFound();
 
-        var captions = scene.Files
+        var captions = video.Files
             .SelectMany(f => f.Captions)
             .Select(c => new { c.Id, c.LanguageCode, c.CaptionType, c.Filename })
             .ToList();
@@ -272,10 +272,10 @@ public class StreamController(IStreamService streamService, IThumbnailService th
 
     // ===== Transcoding / HLS =====
 
-    [HttpGet("scene/{sceneId:int}/transcode")]
-    public async Task<IActionResult> TranscodeScene(int sceneId, [FromQuery] string? resolution, [FromQuery] double? start, CancellationToken ct)
+    [HttpGet("video/{videoId:int}/transcode")]
+    public async Task<IActionResult> TranscodeVideo(int videoId, [FromQuery] string? resolution, [FromQuery] double? start, CancellationToken ct)
     {
-        var filePath = await GetSceneFilePathAsync(sceneId, ct);
+        var filePath = await GetVideoFilePathAsync(videoId, ct);
         if (filePath == null) return NotFound();
 
         var startSeconds = start.HasValue && double.IsFinite(start.Value) ? Math.Max(0, start.Value) : 0;
@@ -286,13 +286,13 @@ public class StreamController(IStreamService streamService, IThumbnailService th
         return File(stream, "video/mp4");
     }
 
-    [HttpGet("scene/{sceneId:int}/hls/master.m3u8")]
-    public async Task<IActionResult> GetHlsMasterPlaylist(int sceneId, CancellationToken ct)
+    [HttpGet("video/{videoId:int}/hls/master.m3u8")]
+    public async Task<IActionResult> GetHlsMasterPlaylist(int videoId, CancellationToken ct)
     {
-        var sourceSceneId = await ResolveSourceSceneIdAsync(sceneId, ct);
-        if (!sourceSceneId.HasValue) return NotFound();
+        var sourceVideoId = await ResolveSourceVideoIdAsync(videoId, ct);
+        if (!sourceVideoId.HasValue) return NotFound();
 
-        var file = await db.VideoFiles.FirstOrDefaultAsync(f => f.SceneId == sourceSceneId.Value, ct);
+        var file = await db.VideoFiles.FirstOrDefaultAsync(f => f.VideoId == sourceVideoId.Value, ct);
         if (file == null) return NotFound();
 
         var resolutions = transcodeService.GetAvailableResolutions(file.Width, file.Height);
@@ -305,62 +305,62 @@ public class StreamController(IStreamService streamService, IThumbnailService th
         {
             var bw = res switch { "240p" => 400000, "360p" => 800000, "480p" => 1200000, "720p" => 2500000, "1080p" => 5000000, "1440p" => 8000000, "4K" => 15000000, _ => 5000000 };
             lines.Add($"#EXT-X-STREAM-INF:BANDWIDTH={bw},RESOLUTION={GetResForLabel(res)},NAME=\"{res}\"");
-            lines.Add(AppendMediaAuthQuery($"/api/stream/scene/{sceneId}/hls/{res}.m3u8"));
+            lines.Add(AppendMediaAuthQuery($"/api/stream/video/{videoId}/hls/{res}.m3u8"));
         }
 
         Response.Headers["Cache-Control"] = "no-cache";
         return Content(string.Join("\n", lines), "application/vnd.apple.mpegurl");
     }
 
-    [HttpGet("scene/{sceneId:int}/hls/{profile}.m3u8")]
-    public async Task<IActionResult> GetHlsPlaylist(int sceneId, string profile, CancellationToken ct)
+    [HttpGet("video/{videoId:int}/hls/{profile}.m3u8")]
+    public async Task<IActionResult> GetHlsPlaylist(int videoId, string profile, CancellationToken ct)
     {
-        var filePath = await GetSceneFilePathAsync(sceneId, ct);
+        var filePath = await GetVideoFilePathAsync(videoId, ct);
         if (filePath == null) return NotFound();
 
         var resolution = profile == "original" ? null : profile;
-        var manifest = await transcodeService.GenerateHlsManifestAsync(sceneId, filePath, resolution, ct);
+        var manifest = await transcodeService.GenerateHlsManifestAsync(videoId, filePath, resolution, ct);
         if (manifest == null) return StatusCode(503, "HLS generation failed — FFmpeg not found or error occurred");
 
-        manifest = RewriteHlsSegmentUrls(manifest, sceneId, resolution ?? "original");
+        manifest = RewriteHlsSegmentUrls(manifest, videoId, resolution ?? "original");
 
         Response.Headers["Cache-Control"] = "no-cache";
         return Content(manifest, "application/vnd.apple.mpegurl");
     }
 
-    [HttpGet("scene/{sceneId:int}/hls/segment/{segment}")]
-    public async Task<IActionResult> GetHlsSegment(int sceneId, string segment, CancellationToken ct)
+    [HttpGet("video/{videoId:int}/hls/segment/{segment}")]
+    public async Task<IActionResult> GetHlsSegment(int videoId, string segment, CancellationToken ct)
     {
-        if (!await db.Scenes.AsNoTracking().AnyAsync(scene => scene.Id == sceneId, ct))
+        if (!await db.Videos.AsNoTracking().AnyAsync(video => video.Id == videoId, ct))
             return NotFound();
 
-        var stream = await transcodeService.GetHlsSegmentAsync(sceneId, segment, ct);
+        var stream = await transcodeService.GetHlsSegmentAsync(videoId, segment, ct);
         if (stream == null) return NotFound();
 
         Response.Headers["Cache-Control"] = "public, max-age=86400";
         return File(stream, "video/mp2t");
     }
 
-    [HttpGet("scene/{sceneId:int}/resolutions")]
-    public async Task<IActionResult> GetAvailableResolutions(int sceneId, CancellationToken ct)
+    [HttpGet("video/{videoId:int}/resolutions")]
+    public async Task<IActionResult> GetAvailableResolutions(int videoId, CancellationToken ct)
     {
-        var sourceSceneId = await ResolveSourceSceneIdAsync(sceneId, ct);
-        if (!sourceSceneId.HasValue) return NotFound();
+        var sourceVideoId = await ResolveSourceVideoIdAsync(videoId, ct);
+        if (!sourceVideoId.HasValue) return NotFound();
 
-        var file = await db.VideoFiles.FirstOrDefaultAsync(f => f.SceneId == sourceSceneId.Value, ct);
+        var file = await db.VideoFiles.FirstOrDefaultAsync(f => f.VideoId == sourceVideoId.Value, ct);
         if (file == null) return NotFound();
 
         return Ok(transcodeService.GetAvailableResolutions(file.Width, file.Height));
     }
 
-    private async Task<string?> GetSceneFilePathAsync(int sceneId, CancellationToken ct)
+    private async Task<string?> GetVideoFilePathAsync(int videoId, CancellationToken ct)
     {
-        var sourceSceneId = await ResolveSourceSceneIdAsync(sceneId, ct);
-        if (!sourceSceneId.HasValue) return null;
+        var sourceVideoId = await ResolveSourceVideoIdAsync(videoId, ct);
+        if (!sourceVideoId.HasValue) return null;
 
         var videoFile = await db.VideoFiles
             .Include(f => f.ParentFolder)
-            .FirstOrDefaultAsync(f => f.SceneId == sourceSceneId.Value, ct);
+            .FirstOrDefaultAsync(f => f.VideoId == sourceVideoId.Value, ct);
 
         if (videoFile == null) return null;
 
@@ -371,10 +371,10 @@ public class StreamController(IStreamService streamService, IThumbnailService th
         return System.IO.File.Exists(filePath) ? filePath : null;
     }
 
-    private string RewriteHlsSegmentUrls(string manifest, int sceneId, string profile)
+    private string RewriteHlsSegmentUrls(string manifest, int videoId, string profile)
     {
         var segmentPrefix = profile + "_";
-        var apiPrefix = $"/api/stream/scene/{sceneId}/hls/segment/";
+        var apiPrefix = $"/api/stream/video/{videoId}/hls/segment/";
         var lines = manifest.Replace("\r\n", "\n").Split('\n');
         for (var index = 0; index < lines.Length; index++)
         {
@@ -414,20 +414,20 @@ public class StreamController(IStreamService streamService, IThumbnailService th
         }
     }
 
-    private int? ResolveSourceSceneId(int sceneId)
-        => db.Scenes.AsNoTracking()
-            .Where(scene => scene.Id == sceneId)
-            .Select(scene => (int?)(scene.ParentSceneId ?? scene.Id))
+    private int? ResolveSourceVideoId(int videoId)
+        => db.Videos.AsNoTracking()
+            .Where(video => video.Id == videoId)
+            .Select(video => (int?)(video.ParentVideoId ?? video.Id))
             .FirstOrDefault();
 
-    private async Task<int?> ResolveSourceSceneIdAsync(int sceneId, CancellationToken ct)
+    private async Task<int?> ResolveSourceVideoIdAsync(int videoId, CancellationToken ct)
     {
-        var scene = await db.Scenes.AsNoTracking()
-            .Where(item => item.Id == sceneId)
-            .Select(item => new { item.Id, item.ParentSceneId })
+        var video = await db.Videos.AsNoTracking()
+            .Where(item => item.Id == videoId)
+            .Select(item => new { item.Id, item.ParentVideoId })
             .FirstOrDefaultAsync(ct);
 
-        return scene?.ParentSceneId ?? scene?.Id;
+        return video?.ParentVideoId ?? video?.Id;
     }
 
     private async Task<IActionResult> BuildDetectionCropResultAsync(Detection detection, Stream sourceStream, int? max, CancellationToken ct)
@@ -534,3 +534,4 @@ public class StreamController(IStreamService streamService, IThumbnailService th
         _ => "1920x1080"
     };
 }
+

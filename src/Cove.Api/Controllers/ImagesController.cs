@@ -532,7 +532,7 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
     private static List<GroupSummaryDto> GetGroups(IReadOnlyDictionary<int, List<GroupSummaryDto>> lookup, int imageId)
         => lookup.TryGetValue(imageId, out var groups) ? groups : [];
 
-    private async Task ReplaceWholeImageGroupItemsAsync(int imageId, IReadOnlyCollection<SceneGroupInputDto> groups, string? imageTitle, CancellationToken ct)
+    private async Task ReplaceWholeImageGroupItemsAsync(int imageId, IReadOnlyCollection<VideoGroupInputDto> groups, string? imageTitle, CancellationToken ct)
     {
         var existing = await db.GroupItems
             .Where(item => item.HostType == "image" && item.HostId == imageId && item.Kind == GroupItemKind.Image)
@@ -586,3 +586,4 @@ public class ImagesController(IImageRepository imageRepo, Data.CoveContext db, I
     private static List<TagProvenanceDto> GetTagProvenance(IReadOnlyDictionary<int, List<TagProvenanceDto>>? provenanceLookup, int tagId)
         => provenanceLookup != null && provenanceLookup.TryGetValue(tagId, out var provenance) ? provenance : [];
 }
+

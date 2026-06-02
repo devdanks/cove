@@ -11,22 +11,22 @@ vi.stubGlobal("IntersectionObserver", vi.fn(function IntersectionObserver() {
   };
 }));
 
-const { mockEntityImages, mockScenes, mockSegmentLibrary, mockTags, mockGoBack } = vi.hoisted(() => ({
+const { mockEntityImages, mockVideos, mockSegmentLibrary, mockTags, mockGoBack } = vi.hoisted(() => ({
   mockEntityImages: {
     segmentCoverUrl: vi.fn(() => "/segment-cover.jpg"),
-    sceneCoverUrl: vi.fn(() => "/scene-cover.jpg"),
+    videoCoverUrl: vi.fn(() => "/video-cover.jpg"),
     studioImageUrl: vi.fn(() => "/studio-image.jpg"),
     uploadSegmentCoverImage: vi.fn(),
     deleteSegmentCoverImage: vi.fn(),
     setSegmentCoverFromFrame: vi.fn(),
   },
-  mockScenes: {
+  mockVideos: {
     get: vi.fn(),
-    createSubScene: vi.fn(),
-    streamUrl: vi.fn(() => "/stream/scene.mp4"),
-    screenshotUrl: vi.fn(() => "/scene.jpg"),
-    previewUrl: vi.fn(() => "/scene-preview.mp4"),
-    previewStatusUrl: vi.fn(() => "/scene-preview-status"),
+    createSubVideo: vi.fn(),
+    streamUrl: vi.fn(() => "/stream/video.mp4"),
+    screenshotUrl: vi.fn(() => "/video.jpg"),
+    previewUrl: vi.fn(() => "/video-preview.mp4"),
+    previewStatusUrl: vi.fn(() => "/video-preview-status"),
     segments: {
       list: vi.fn(),
       spans: vi.fn(),
@@ -45,7 +45,7 @@ const { mockEntityImages, mockScenes, mockSegmentLibrary, mockTags, mockGoBack }
 
 vi.mock("../api/client", () => ({
   entityImages: mockEntityImages,
-  scenes: mockScenes,
+  videos: mockVideos,
   segmentLibrary: mockSegmentLibrary,
   tags: mockTags,
 }));
@@ -76,8 +76,8 @@ function buildSegment(overrides: Record<string, unknown> = {}) {
   return {
     id: 7,
     hostId: 99,
-    hostType: "scene",
-    hostTitle: "Scene 99",
+    hostType: "video",
+    hostTitle: "Video 99",
     title: "Episode Intro",
     kind: "intro",
     sourceKey: "detector.segment",
@@ -96,25 +96,25 @@ function buildSegment(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function buildScene(overrides: Record<string, unknown> = {}) {
+function buildVideo(overrides: Record<string, unknown> = {}) {
   return {
     id: 99,
-    title: "Scene 99",
+    title: "Video 99",
     code: "SC-99",
-    details: "Parent scene details",
+    details: "Parent video details",
     director: "Director Example",
     date: "2026-05-01",
     organized: true,
     studioId: 12,
     studioName: "Studio 12",
-    urls: ["https://example.test/scene-99"],
+    urls: ["https://example.test/video-99"],
     tags: [
       { id: 5, name: "Opening" },
       { id: 6, name: "Action" },
     ],
     performers: [{ id: 11, name: "Performer One" }],
     galleries: [{ id: 15, title: "Gallery Fifteen", date: "2026-04-15" }],
-    groups: [{ id: 17, name: "Highlights", sceneIndex: 3 }],
+    groups: [{ id: 17, name: "Highlights", videoIndex: 3 }],
     customFields: { mood: "intense" },
     files: [{ format: "mp4", duration: 120, captions: [] }],
     ...overrides,
@@ -146,13 +146,13 @@ describe("SegmentDetailPage", () => {
 
   it("renders media layout tabs and timeline context", async () => {
     mockSegmentLibrary.get.mockResolvedValue(buildSegment());
-    mockScenes.get.mockResolvedValue(buildScene());
-    mockScenes.segments.list.mockResolvedValue([
+    mockVideos.get.mockResolvedValue(buildVideo());
+    mockVideos.segments.list.mockResolvedValue([
       buildSegment({ id: 6, title: "Cold Open", startSec: 5, endSec: 10, tagName: "Teaser" }),
       buildSegment(),
       buildSegment({ id: 8, title: "Action Beat", startSec: 22, endSec: 34, tagName: "Action" }),
     ]);
-    mockScenes.segments.spans.mockResolvedValue({
+    mockVideos.segments.spans.mockResolvedValue({
       profileId: 3,
       spans: [
         {
@@ -186,13 +186,13 @@ describe("SegmentDetailPage", () => {
 
   it("supports keyboard shortcuts for edit and adjacent navigation", async () => {
     mockSegmentLibrary.get.mockResolvedValue(buildSegment());
-    mockScenes.get.mockResolvedValue(buildScene());
-    mockScenes.segments.list.mockResolvedValue([
+    mockVideos.get.mockResolvedValue(buildVideo());
+    mockVideos.segments.list.mockResolvedValue([
       buildSegment({ id: 6, title: "Cold Open", startSec: 5, endSec: 10 }),
       buildSegment(),
       buildSegment({ id: 8, title: "Action Beat", startSec: 22, endSec: 34 }),
     ]);
-    mockScenes.segments.spans.mockResolvedValue({ profileId: 3, spans: [] });
+    mockVideos.segments.spans.mockResolvedValue({ profileId: 3, spans: [] });
     mockTags.find.mockResolvedValue({ items: [] });
 
     const { onNavigate } = renderPage();
@@ -207,48 +207,49 @@ describe("SegmentDetailPage", () => {
     expect(onNavigate).toHaveBeenCalledWith({ page: "segment", id: 8 });
 
     fireEvent.keyDown(window, { key: "s" });
-    expect(onNavigate).toHaveBeenCalledWith({ page: "scene", id: 99, seekTo: 12 });
+    expect(onNavigate).toHaveBeenCalledWith({ page: "video", id: 99, seekTo: 12 });
   });
 
-  it("creates a metadata-preserving sub-scene from the current segment", async () => {
+  it("creates a metadata-preserving sub-video from the current segment", async () => {
     mockSegmentLibrary.get.mockResolvedValue(buildSegment());
-    mockScenes.get.mockResolvedValue(buildScene());
-    mockScenes.createSubScene.mockResolvedValue({ id: 1234 });
-    mockScenes.segments.list.mockResolvedValue([buildSegment()]);
-    mockScenes.segments.spans.mockResolvedValue({ profileId: 3, spans: [] });
+    mockVideos.get.mockResolvedValue(buildVideo());
+    mockVideos.createSubVideo.mockResolvedValue({ id: 1234 });
+    mockVideos.segments.list.mockResolvedValue([buildSegment()]);
+    mockVideos.segments.spans.mockResolvedValue({ profileId: 3, spans: [] });
     mockTags.find.mockResolvedValue({ items: [] });
 
     const { onNavigate } = renderPage();
 
     fireEvent.click(await screen.findByTitle("Operations"));
-    const makeSceneButton = await screen.findByRole("button", { name: /make scene/i });
+    const makeVideoButton = await screen.findByRole("button", { name: /make video/i });
     await waitFor(() => {
-      expect(makeSceneButton).toBeEnabled();
+      expect(makeVideoButton).toBeEnabled();
     });
-    fireEvent.click(makeSceneButton);
+    fireEvent.click(makeVideoButton);
 
     await waitFor(() => {
-      expect(mockScenes.createSubScene).toHaveBeenCalledWith(99, expect.objectContaining({
+      expect(mockVideos.createSubVideo).toHaveBeenCalledWith(99, expect.objectContaining({
         title: "Episode Intro",
         code: "SC-99",
-        details: "Parent scene details",
+        details: "Parent video details",
         director: "Director Example",
         date: "2026-05-01",
         organized: true,
         studioId: 12,
-        urls: ["https://example.test/scene-99"],
+        urls: ["https://example.test/video-99"],
         tagIds: [5, 6],
         performerIds: [11],
         galleryIds: [15],
-        groups: [{ groupId: 17, sceneIndex: 3 }],
+        groups: [{ groupId: 17, videoIndex: 3 }],
         customFields: { mood: "intense" },
-        parentSceneId: 99,
+        parentVideoId: 99,
         clipStartSec: 12,
         clipEndSec: 21,
       }));
     });
     await waitFor(() => {
-      expect(onNavigate).toHaveBeenCalledWith({ page: "scene", id: 1234 });
+      expect(onNavigate).toHaveBeenCalledWith({ page: "video", id: 1234 });
     });
   });
 });
+

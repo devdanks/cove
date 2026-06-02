@@ -64,9 +64,9 @@ public sealed class ExtensionEventBridge : IHostedService, IDisposable
 
     private static string MapEventType(EventType type) => type switch
     {
-        EventType.SceneCreated => "scene.created",
-        EventType.SceneUpdated => "scene.updated",
-        EventType.SceneDeleted => "scene.deleted",
+        EventType.VideoCreated => "video.created",
+        EventType.VideoUpdated => "video.updated",
+        EventType.VideoDeleted => "video.deleted",
         EventType.PerformerCreated => "performer.created",
         EventType.PerformerUpdated => "performer.updated",
         EventType.PerformerDeleted => "performer.deleted",
@@ -93,3 +93,4 @@ public sealed class ExtensionEventBridge : IHostedService, IDisposable
 
     public void Dispose() => _subscription?.Dispose();
 }
+

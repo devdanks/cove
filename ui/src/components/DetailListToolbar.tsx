@@ -264,8 +264,9 @@ export function DetailListToolbar({ filter, onFilterChange, totalCount, sortOpti
 
 function inferCardSizeEntityType(sortOptions?: { value: string; label: string }[]) {
   const values = new Set((sortOptions ?? []).map((option) => option.value));
-  if (values.has("framerate") || values.has("bitrate") || values.has("play_duration") || values.has("performer_age")) return "scenes";
+  if (values.has("framerate") || values.has("bitrate") || values.has("play_duration") || values.has("performer_age")) return "videos";
   if (values.has("measurements") || values.has("birthdate") || values.has("career_length")) return "performers";
   if (values.has("image_count") && values.has("path")) return "galleries";
   return undefined;
 }
+

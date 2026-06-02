@@ -192,10 +192,10 @@ public class AutoTagService(
 
     private async Task<List<AutoTagContentWorkItem>> LoadContentWorkItemsAsync(CoveContext db, CancellationToken ct)
     {
-        var scenes = await db.Scenes
-            .Include(scene => scene.Files).ThenInclude(file => file.ParentFolder)
-            .Include(scene => scene.ScenePerformers)
-            .Include(scene => scene.SceneTags)
+        var videos = await db.Videos
+            .Include(video => video.Files).ThenInclude(file => file.ParentFolder)
+            .Include(video => video.VideoPerformers)
+            .Include(video => video.VideoTags)
             .ToListAsync(ct);
 
         var images = await db.Images
@@ -211,23 +211,23 @@ public class AutoTagService(
             .Include(gallery => gallery.GalleryTags)
             .ToListAsync(ct);
 
-        var workItems = new List<AutoTagContentWorkItem>(scenes.Count + images.Count + galleries.Count);
-        workItems.AddRange(scenes.Select(BuildSceneWorkItem).Where(item => item != null)!);
+        var workItems = new List<AutoTagContentWorkItem>(videos.Count + images.Count + galleries.Count);
+        workItems.AddRange(videos.Select(BuildVideoWorkItem).Where(item => item != null)!);
         workItems.AddRange(images.Select(BuildImageWorkItem).Where(item => item != null)!);
         workItems.AddRange(galleries.Select(BuildGalleryWorkItem).Where(item => item != null)!);
         return workItems;
     }
 
-    private static AutoTagContentWorkItem? BuildSceneWorkItem(Scene scene)
+    private static AutoTagContentWorkItem? BuildVideoWorkItem(Video video)
     {
-        var file = scene.Files.FirstOrDefault();
-        var searchText = BuildSearchText(scene.Title, file?.Path, file?.Basename);
+        var file = video.Files.FirstOrDefault();
+        var searchText = BuildSearchText(video.Title, file?.Path, file?.Basename);
         if (string.IsNullOrWhiteSpace(searchText))
             return null;
 
         return new AutoTagContentWorkItem(
-            new AutoTagContentCandidate(AutoTagContentType.Scene, scene.Id, searchText, scene.Title ?? file?.Basename ?? $"Scene {scene.Id}"),
-            scene);
+            new AutoTagContentCandidate(AutoTagContentType.Video, video.Id, searchText, video.Title ?? file?.Basename ?? $"Video {video.Id}"),
+            video);
     }
 
     private static AutoTagContentWorkItem? BuildImageWorkItem(Image image)
@@ -418,7 +418,7 @@ public class AutoTagService(
     {
         return entity switch
         {
-            Scene scene => scene.ScenePerformers.Any(link => link.PerformerId == performerId),
+            Video video => video.VideoPerformers.Any(link => link.PerformerId == performerId),
             Image image => image.ImagePerformers.Any(link => link.PerformerId == performerId),
             Gallery gallery => gallery.GalleryPerformers.Any(link => link.PerformerId == performerId),
             _ => true,
@@ -429,8 +429,8 @@ public class AutoTagService(
     {
         switch (entity)
         {
-            case Scene scene:
-                scene.ScenePerformers.Add(new ScenePerformer { SceneId = scene.Id, PerformerId = performerId });
+            case Video video:
+                video.VideoPerformers.Add(new VideoPerformer { VideoId = video.Id, PerformerId = performerId });
                 break;
             case Image image:
                 image.ImagePerformers.Add(new ImagePerformer { ImageId = image.Id, PerformerId = performerId });
@@ -445,7 +445,7 @@ public class AutoTagService(
     {
         return entity switch
         {
-            Scene scene => scene.StudioId.HasValue,
+            Video video => video.StudioId.HasValue,
             Image image => image.StudioId.HasValue,
             Gallery gallery => gallery.StudioId.HasValue,
             _ => true,
@@ -456,8 +456,8 @@ public class AutoTagService(
     {
         switch (entity)
         {
-            case Scene scene:
-                scene.StudioId = studioId;
+            case Video video:
+                video.StudioId = studioId;
                 break;
             case Image image:
                 image.StudioId = studioId;
@@ -472,7 +472,7 @@ public class AutoTagService(
     {
         return entity switch
         {
-            Scene scene => scene.SceneTags.Any(link => link.TagId == tagId),
+            Video video => video.VideoTags.Any(link => link.TagId == tagId),
             Image image => image.ImageTags.Any(link => link.TagId == tagId),
             Gallery gallery => gallery.GalleryTags.Any(link => link.TagId == tagId),
             _ => true,
@@ -483,8 +483,8 @@ public class AutoTagService(
     {
         switch (entity)
         {
-            case Scene scene:
-                scene.SceneTags.Add(new SceneTag { SceneId = scene.Id, TagId = tagId });
+            case Video video:
+                video.VideoTags.Add(new VideoTag { VideoId = video.Id, TagId = tagId });
                 break;
             case Image image:
                 image.ImageTags.Add(new ImageTag { ImageId = image.Id, TagId = tagId });
@@ -499,9 +499,9 @@ public class AutoTagService(
     {
         switch (entity)
         {
-            case Scene scene:
-                hostType = AffinityHostType.Scene;
-                hostId = scene.Id;
+            case Video video:
+                hostType = AffinityHostType.Video;
+                hostId = video.Id;
                 return true;
             case Image image:
                 hostType = AffinityHostType.Image;
@@ -585,3 +585,4 @@ public class AutoTagService(
         public void Report(double percent, string? message = null) => inner.Report(percent / 100.0, message);
     }
 }
+

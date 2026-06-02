@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type ImgHTMLAttributes, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
-import { scenes, images, performers, galleries, studios, groups, audios, texts, entityImages, faces as facesApi } from "../api/client";
-import type { AffinityHostType, Audio, EntityEngagement, Face, FaceAppearance, FieldProvenance, Gallery, Group, GroupItem, GroupSummary, Image, PerformerSummary, Scene, SegmentRecord, Studio, Tag as TagType, TextDocument } from "../api/types";
+import { videos, images, performers, galleries, studios, groups, audios, texts, entityImages, faces as facesApi } from "../api/client";
+import type { AffinityHostType, Audio, EntityEngagement, Face, FaceAppearance, FieldProvenance, Gallery, Group, GroupItem, GroupSummary, Image, PerformerSummary, Video, SegmentRecord, Studio, Tag as TagType, TextDocument } from "../api/types";
 import { formatDate, FieldProvenanceHover, formatDuration, formatFileSize, getResolutionLabel } from "./shared";
 import { RatingBanner, RatingBadge } from "./Rating";
 import { BookOpenText, Building2, FileText, Fingerprint, FolderOpen, GripVertical, Headphones, Layers, Link2, Tag, User, Film, Box, Images as ImagesIcon, Heart, Eye, ThumbsUp, Mic2, MonitorPlay, PlayCircle, Merge } from "lucide-react";
@@ -207,7 +207,7 @@ function EntityLinkIcon({ page, color }: { page: string; color?: string | null }
       return <ImagesIcon className={className} />;
     case "performer":
       return <User className={className} />;
-    case "scene":
+    case "video":
       return <Film className={className} />;
     case "studio":
       return <Building2 className={className} />;
@@ -358,21 +358,21 @@ export function PopoverButton({ icon, count, title, children, wide, preferBelow 
   );
 }
 
-// ===== Lazy scene list popover content =====
+// ===== Lazy video list popover content =====
 
-export function ScenesPopoverContent({ filter }: { filter: Record<string, string | number> }) {
+export function VideosPopoverContent({ filter }: { filter: Record<string, string | number> }) {
   const { data, isLoading } = useQuery({
-    queryKey: ["scenes-popover", filter],
-    queryFn: () => scenes.find({ perPage: 10, sort: "date", direction: "desc" }, filter),
+    queryKey: ["videos-popover", filter],
+    queryFn: () => videos.find({ perPage: 10, sort: "date", direction: "desc" }, filter),
   });
   if (isLoading) return <p className="text-[11px] text-muted px-1">LoadingÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦</p>;
   const items = data?.items ?? [];
-  if (items.length === 0) return <p className="text-[11px] text-muted px-1">No scenes</p>;
+  if (items.length === 0) return <p className="text-[11px] text-muted px-1">No videos</p>;
   return (
     <div className="space-y-1">
       {items.map((s) => (
         <div key={s.id} className="flex items-center gap-2 px-1 py-0.5 rounded hover:bg-card">
-          <img src={scenes.screenshotUrl(s.id, s.updatedAt)} alt="" className="w-12 h-7 rounded object-cover flex-shrink-0 bg-surface" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+          <img src={videos.screenshotUrl(s.id, s.updatedAt)} alt="" className="w-12 h-7 rounded object-cover flex-shrink-0 bg-surface" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
           <span className="text-[11px] text-foreground truncate">{s.title || "Untitled"}</span>
         </div>
       ))}
@@ -541,46 +541,46 @@ export function GroupsPopoverContent({ filter }: { filter: Record<string, string
   );
 }
 
-// ===== SceneCardPopovers =====
+// ===== VideoCardPopovers =====
 
-export function SceneCardPopovers({ scene, engagement, onNavigate }: { scene: Scene; engagement?: EntityEngagement; onNavigate?: (r: any) => void }) {
+export function VideoCardPopovers({ video, engagement, onNavigate }: { video: Video; engagement?: EntityEngagement; onNavigate?: (r: any) => void }) {
   const likeCount = engagement?.likeCount ?? 0;
   const hasFavorite = engagement?.isFavorite === true;
   const hasPopovers =
-    scene.tags.length > 0 || scene.performers.length > 0 || scene.groups.length > 0 ||
-    scene.galleries.length > 0 || likeCount > 0 || hasFavorite || scene.organized;
+    video.tags.length > 0 || video.performers.length > 0 || video.groups.length > 0 ||
+    video.galleries.length > 0 || likeCount > 0 || hasFavorite || video.organized;
   return (
     <>
       <hr className="border-border/50 my-0" />
       <div className="relative z-10 flex flex-wrap items-center justify-center gap-1 px-2 py-1.5 rounded-b card-popovers min-h-[28px]">
         {!hasPopovers && <span className="text-[10px] text-muted/30 select-none">&nbsp;</span>}
-        {scene.performers.length > 0 && (
-          <PopoverButton icon={<User className="w-3.5 h-3.5" />} count={scene.performers.length} title="Performers" wide preferBelow>
-            <PerformerPreviewGrid performers={scene.performers} onNavigate={onNavigate} />
+        {video.performers.length > 0 && (
+          <PopoverButton icon={<User className="w-3.5 h-3.5" />} count={video.performers.length} title="Performers" wide preferBelow>
+            <PerformerPreviewGrid performers={video.performers} onNavigate={onNavigate} />
           </PopoverButton>
         )}
-        {scene.tags.length > 0 && (
-          <PopoverButton icon={<Tag className="w-3.5 h-3.5" />} count={scene.tags.length} title="Tags" preferBelow>
-            <EntityLinkList items={scene.tags.map((tag: any) => ({ id: tag.id, label: tag.name, color: tag.color ?? tag.tagGroupColor }))} page="tag" onNavigate={onNavigate} />
+        {video.tags.length > 0 && (
+          <PopoverButton icon={<Tag className="w-3.5 h-3.5" />} count={video.tags.length} title="Tags" preferBelow>
+            <EntityLinkList items={video.tags.map((tag: any) => ({ id: tag.id, label: tag.name, color: tag.color ?? tag.tagGroupColor }))} page="tag" onNavigate={onNavigate} />
           </PopoverButton>
         )}
         {likeCount > 0 && (
           <LikeCounter count={likeCount} />
         )}
         {hasFavorite ? (
-          <CardFavoriteButton hostType="scene" hostId={scene.id} favorite={engagement?.isFavorite ?? false} />
+          <CardFavoriteButton hostType="video" hostId={video.id} favorite={engagement?.isFavorite ?? false} />
         ) : null}
-        {scene.groups.length > 0 && (
-          <PopoverButton icon={<Layers className="w-3.5 h-3.5" />} count={scene.groups.length} title="Groups" preferBelow>
-            <EntityLinkList items={scene.groups.map((group: any) => ({ id: group.id, label: group.name }))} page="group" onNavigate={onNavigate} />
+        {video.groups.length > 0 && (
+          <PopoverButton icon={<Layers className="w-3.5 h-3.5" />} count={video.groups.length} title="Groups" preferBelow>
+            <EntityLinkList items={video.groups.map((group: any) => ({ id: group.id, label: group.name }))} page="group" onNavigate={onNavigate} />
           </PopoverButton>
         )}
-        {scene.galleries.length > 0 && (
-          <PopoverButton icon={<ImagesIcon className="w-3.5 h-3.5" />} count={scene.galleries.length} title="Galleries" preferBelow>
-            <EntityLinkList items={scene.galleries.map((gallery: any) => ({ id: gallery.id, label: gallery.title || "Untitled" }))} page="gallery" onNavigate={onNavigate} />
+        {video.galleries.length > 0 && (
+          <PopoverButton icon={<ImagesIcon className="w-3.5 h-3.5" />} count={video.galleries.length} title="Galleries" preferBelow>
+            <EntityLinkList items={video.galleries.map((gallery: any) => ({ id: gallery.id, label: gallery.title || "Untitled" }))} page="gallery" onNavigate={onNavigate} />
           </PopoverButton>
         )}
-        {scene.organized && (
+        {video.organized && (
           <span className="p-1 text-muted" title="Organized"><Box className="w-3.5 h-3.5" /></span>
         )}
       </div>
@@ -764,38 +764,38 @@ export function MediaStudioSubtitle({ date, studioId, studioName, fieldProvenanc
   );
 }
 
-// ===== SceneCard (redesigned - cleaner, performer badges, 2-line title) =====
-export function SceneCard({ scene, engagement, onClick, selected, onSelect, onNavigate, selecting, onQuickView, bookmarkInitiallySaved }: { scene: Scene; engagement?: EntityEngagement; onClick: () => void; selected?: boolean; onSelect?: () => void; selecting?: boolean; onNavigate?: (r: any) => void; onQuickView?: () => void; bookmarkInitiallySaved?: boolean }) {
+// ===== VideoCard (redesigned - cleaner, performer badges, 2-line title) =====
+export function VideoCard({ video, engagement, onClick, selected, onSelect, onNavigate, selecting, onQuickView, bookmarkInitiallySaved }: { video: Video; engagement?: EntityEngagement; onClick: () => void; selected?: boolean; onSelect?: () => void; selecting?: boolean; onNavigate?: (r: any) => void; onQuickView?: () => void; bookmarkInitiallySaved?: boolean }) {
   const appConfig = useOptionalAppConfig();
-  const file = scene.files[0];
-  const clipDuration = typeof scene.clipStartSec === "number" && typeof scene.clipEndSec === "number"
-    ? Math.max(0, scene.clipEndSec - scene.clipStartSec)
+  const file = video.files[0];
+  const clipDuration = typeof video.clipStartSec === "number" && typeof video.clipEndSec === "number"
+    ? Math.max(0, video.clipEndSec - video.clipStartSec)
     : undefined;
   const duration = clipDuration ?? file?.duration ?? 0;
   const resLabel = file ? getResolutionLabel(file.width, file.height) : null;
-  const coverUrl = entityImages.sceneCoverUrl(scene.id, scene.updatedAt, 1280);
-  const previewUrl = scenes.previewUrl(scene.id);
+  const coverUrl = entityImages.videoCoverUrl(video.id, video.updatedAt, 1280);
+  const previewUrl = videos.previewUrl(video.id);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const visibleResumeTime = typeof scene.clipStartSec === "number" && typeof engagement?.resumeTime === "number"
-    ? Math.max(0, engagement.resumeTime - scene.clipStartSec)
+  const visibleResumeTime = typeof video.clipStartSec === "number" && typeof engagement?.resumeTime === "number"
+    ? Math.max(0, engagement.resumeTime - video.clipStartSec)
     : engagement?.resumeTime;
   const progressPercent = duration > 0 && visibleResumeTime ? Math.min(100, (visibleResumeTime / duration) * 100) : 0;
-  const cardTitle = scene.title || file?.basename || "Untitled";
+  const cardTitle = video.title || file?.basename || "Untitled";
   const [scrubSeconds, setScrubSeconds] = useState<number | null>(null);
-  const scrubPercent = duration > 0 && scrubSeconds != null ? Math.min(100, Math.max(0, ((scrubSeconds - (scene.clipStartSec ?? 0)) / duration) * 100)) : 0;
+  const scrubPercent = duration > 0 && scrubSeconds != null ? Math.min(100, Math.max(0, ((scrubSeconds - (video.clipStartSec ?? 0)) / duration) * 100)) : 0;
   const scrubTimestamp = scrubSeconds != null ? formatDuration(scrubSeconds) : null;
   const scrubTimestampPercent = scrubSeconds != null ? Math.min(88, Math.max(12, scrubPercent)) : 0;
-  const scrubImageUrl = scrubSeconds != null ? scenes.screenshotUrl(scene.id, scene.updatedAt, scrubSeconds) : null;
-  const scenePreviewObjectFit = appConfig?.config?.ui.videoObjectFit === "contain" ? "contain" : "cover";
+  const scrubImageUrl = scrubSeconds != null ? videos.screenshotUrl(video.id, video.updatedAt, scrubSeconds) : null;
+  const videoPreviewObjectFit = appConfig?.config?.ui.videoObjectFit === "contain" ? "contain" : "cover";
 
   const updateScrubPreview = useCallback((event: MouseEvent<HTMLDivElement>) => {
     if (duration <= 0) return;
     const rect = event.currentTarget.getBoundingClientRect();
     const percent = Math.min(1, Math.max(0, (event.clientX - rect.left) / Math.max(1, rect.width)));
-    const clipStart = scene.clipStartSec ?? 0;
+    const clipStart = video.clipStartSec ?? 0;
     const nextSeconds = Math.round(clipStart + percent * duration);
     setScrubSeconds((current) => current === nextSeconds ? current : nextSeconds);
-  }, [duration, scene.clipStartSec]);
+  }, [duration, video.clipStartSec]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -811,47 +811,47 @@ export function SceneCard({ scene, engagement, onClick, selected, onSelect, onNa
   }, []);
 
   return (
-    <div onClick={selecting ? onClick : undefined} className={`scene-card relative cursor-pointer group rounded border bg-card overflow-hidden flex flex-col h-full ${selected ? "ring-2 ring-accent border-accent" : "border-border"}`}>
-      <RouteCardLinkOverlay route={{ page: "scene", id: scene.id }} onClick={onClick} label={`Open scene ${cardTitle}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
-      <div className="scene-card-preview card-media relative aspect-video bg-black overflow-hidden">
+    <div onClick={selecting ? onClick : undefined} className={`video-card relative cursor-pointer group rounded border bg-card overflow-hidden flex flex-col h-full ${selected ? "ring-2 ring-accent border-accent" : "border-border"}`}>
+      <RouteCardLinkOverlay route={{ page: "video", id: video.id }} onClick={onClick} label={`Open video ${cardTitle}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
+      <div className="video-card-preview card-media relative aspect-video bg-black overflow-hidden">
         <img
           src={coverUrl}
-          alt={scene.title || ""}
-          className="scene-card-preview-image h-full w-full"
-          style={{ objectFit: scenePreviewObjectFit }}
+          alt={video.title || ""}
+          className="video-card-preview-image h-full w-full"
+          style={{ objectFit: videoPreviewObjectFit }}
           loading="lazy"
         />
-        <video ref={videoRef} disableRemotePlayback playsInline muted loop preload="none" src={previewUrl} className="scene-card-preview-video" style={{ objectFit: scenePreviewObjectFit }} />
+        <video ref={videoRef} disableRemotePlayback playsInline muted loop preload="none" src={previewUrl} className="video-card-preview-video" style={{ objectFit: videoPreviewObjectFit }} />
         {scrubImageUrl ? (
           <img
             src={scrubImageUrl}
             alt=""
             className="absolute inset-0 z-[7] h-full w-full"
-            style={{ objectFit: scenePreviewObjectFit }}
+            style={{ objectFit: videoPreviewObjectFit }}
             draggable={false}
           />
         ) : null}
         {(selected !== undefined || selecting) && <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />}
         {!selecting && (
           <BookmarkButton
-            hostType="scene"
-            hostId={scene.id}
+            hostType="video"
+            hostId={video.id}
             compact
             deferUntilHover
             initialSaved={bookmarkInitiallySaved}
             className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100"
           />
         )}
-        {scene.studioName && scene.studioId && !selecting && (
+        {video.studioName && video.studioId && !selecting && (
           <div className="absolute top-0 right-0 p-1 z-[5]">
-            <img src={entityImages.studioImageUrl(scene.studioId)} alt={scene.studioName} className="h-8 w-auto max-w-[120px] object-contain drop-shadow-md"
+            <img src={entityImages.studioImageUrl(video.studioId)} alt={video.studioName} className="h-8 w-auto max-w-[120px] object-contain drop-shadow-md"
               onError={(e) => { const el = e.target as HTMLImageElement; el.style.display = "none"; if (el.nextElementSibling) (el.nextElementSibling as HTMLElement).style.display = ""; }} />
-            <span className="text-xs font-medium text-white bg-black/60 px-1.5 py-0.5 rounded" style={{ display: "none" }}>{scene.studioName}</span>
+            <span className="text-xs font-medium text-white bg-black/60 px-1.5 py-0.5 rounded" style={{ display: "none" }}>{video.studioName}</span>
           </div>
         )}
         {(duration > 0 || resLabel) && (
-          <div className="scene-specs-overlay absolute bottom-0 right-0 flex items-center gap-0.5 px-1.5 py-1 text-xs text-white z-[5] transition-opacity">
-            {file && <span className="bg-black/70 px-1 py-0.5 rounded extra-scene-info hidden">{formatFileSize(file.size)}</span>}
+          <div className="video-specs-overlay absolute bottom-0 right-0 flex items-center gap-0.5 px-1.5 py-1 text-xs text-white z-[5] transition-opacity">
+            {file && <span className="bg-black/70 px-1 py-0.5 rounded extra-video-info hidden">{formatFileSize(file.size)}</span>}
             {resLabel && <span className="bg-black/70 px-1 py-0.5 rounded font-black uppercase">{resLabel}</span>}
             {duration > 0 && <span className="bg-black/70 px-1 py-0.5 rounded">{formatDuration(duration)}</span>}
           </div>
@@ -901,50 +901,50 @@ export function SceneCard({ scene, engagement, onClick, selected, onSelect, onNa
             {cardTitle}
           </p>
           <div className="mt-1 flex items-center gap-2 text-[11px] text-muted">
-            {scene.date && <span>{scene.date}</span>}
-            {scene.studioName && <span className="truncate">{scene.studioName}</span>}
+            {video.date && <span>{video.date}</span>}
+            {video.studioName && <span className="truncate">{video.studioName}</span>}
           </div>
         </div>
-        {scene.performers.length > 0 && (
+        {video.performers.length > 0 && (
           <div className="relative z-10 flex items-center gap-1.5 overflow-hidden flex-wrap">
-            {scene.performers.slice(0, 4).map((performer) => {
+            {video.performers.slice(0, 4).map((performer) => {
               const navigationHandlers = createNestedEntityNavigationHandlers<HTMLAnchorElement>({ page: "performer", id: performer.id }, onNavigate);
 
               return <PerformerBadge key={performer.id} performer={performer} navigationHandlers={navigationHandlers} />;
             })}
-            {scene.performers.length > 4 && <span className="text-[10px] text-muted">+{scene.performers.length - 4}</span>}
+            {video.performers.length > 4 && <span className="text-[10px] text-muted">+{video.performers.length - 4}</span>}
           </div>
         )}
-        {scene.details && <p className="text-xs text-secondary line-clamp-2 leading-snug">{scene.details}</p>}
+        {video.details && <p className="text-xs text-secondary line-clamp-2 leading-snug">{video.details}</p>}
       </div>
-      <SceneCardPopovers scene={scene} engagement={engagement} onNavigate={onNavigate} />
+      <VideoCardPopovers video={video} engagement={engagement} onNavigate={onNavigate} />
     </div>
   );
 }
 
-// ===== SceneTile =====
+// ===== VideoTile =====
 
-interface SceneTileProps {
-  scene: Scene;
+interface VideoTileProps {
+  video: Video;
   onClick: () => void;
 }
 
-export function SceneTile({ scene, onClick }: SceneTileProps) {
-  const file = scene.files[0];
-  const clipDuration = typeof scene.clipStartSec === "number" && typeof scene.clipEndSec === "number"
-    ? Math.max(0, scene.clipEndSec - scene.clipStartSec)
+export function VideoTile({ video, onClick }: VideoTileProps) {
+  const file = video.files[0];
+  const clipDuration = typeof video.clipStartSec === "number" && typeof video.clipEndSec === "number"
+    ? Math.max(0, video.clipEndSec - video.clipStartSec)
     : undefined;
   const duration = clipDuration ?? file?.duration ?? 0;
   const resLabel = file ? getResolutionLabel(file.width, file.height) : null;
-  const coverUrl = entityImages.sceneCoverUrl(scene.id, scene.updatedAt, 960);
-  const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "scene", id: scene.id }, onClick);
+  const coverUrl = entityImages.videoCoverUrl(video.id, video.updatedAt, 960);
+  const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "video", id: video.id }, onClick);
 
   return (
     <a {...linkProps} className="group text-left">
       <div className="relative aspect-video overflow-hidden rounded-lg border border-border bg-card shadow-md shadow-black/30">
         <img
           src={coverUrl}
-          alt={scene.title || ""}
+          alt={video.title || ""}
           className="h-full w-full object-cover"
           loading="lazy"
         />
@@ -953,8 +953,8 @@ export function SceneTile({ scene, onClick }: SceneTileProps) {
         <RatingBanner rating={undefined} />
       </div>
       <div className="pt-2">
-        <p className="card-title font-medium text-foreground line-clamp-2 group-hover:text-accent">{scene.title || "Untitled"}</p>
-        <p className="mt-0.5 truncate text-xs text-secondary">{scene.date || scene.studioName || ""}</p>
+        <p className="card-title font-medium text-foreground line-clamp-2 group-hover:text-accent">{video.title || "Untitled"}</p>
+        <p className="mt-0.5 truncate text-xs text-secondary">{video.date || video.studioName || ""}</p>
       </div>
     </a>
   );
@@ -970,7 +970,7 @@ interface PerformerTileEntity {
   birthdate?: string;
   favorite?: boolean;
   tags?: Array<{ id: number; name: string }>;
-  sceneCount?: number;
+  videoCount?: number;
   imageCount?: number;
   galleryCount?: number;
   audioCount?: number;
@@ -989,14 +989,14 @@ interface PerformerTileProps {
 }
 
 export function PerformerTile({ performer, engagement, onClick, onNavigate, children, selected, onSelect, selecting }: PerformerTileProps & { engagement?: EntityEngagement }) {
-  const sceneCount = performer.sceneCount ?? 0;
+  const videoCount = performer.videoCount ?? 0;
   const imageCount = performer.imageCount ?? 0;
   const galleryCount = performer.galleryCount ?? 0;
   const audioCount = performer.audioCount ?? 0;
   const textCount = performer.textCount ?? 0;
   const groupCount = performer.groupCount ?? 0;
   const performerImageUrl = performer.imagePath || null;
-  const hasFooter = (performer.tags?.length ?? 0) > 0 || sceneCount > 0 || imageCount > 0 || galleryCount > 0 || audioCount > 0 || textCount > 0 || groupCount > 0;
+  const hasFooter = (performer.tags?.length ?? 0) > 0 || videoCount > 0 || imageCount > 0 || galleryCount > 0 || audioCount > 0 || textCount > 0 || groupCount > 0;
 
   return (
     <EntityTileFrame
@@ -1050,9 +1050,9 @@ export function PerformerTile({ performer, engagement, onClick, onNavigate, chil
                 </div>
               </PopoverButton>
             )}
-            {sceneCount > 0 && (
-              <PopoverButton icon={<Film className="w-3.5 h-3.5" />} count={sceneCount} title="Scenes" wide preferBelow>
-                <ScenesPopoverContent filter={{ performerIds: String(performer.id) }} />
+            {videoCount > 0 && (
+              <PopoverButton icon={<Film className="w-3.5 h-3.5" />} count={videoCount} title="Videos" wide preferBelow>
+                <VideosPopoverContent filter={{ performerIds: String(performer.id) }} />
               </PopoverButton>
             )}
             {imageCount > 0 && (
@@ -1098,7 +1098,7 @@ interface StudioTileProps {
 }
 
 export function StudioTile({ studio, engagement, onClick, onNavigate, children, selected, onSelect, selecting }: StudioTileProps & { engagement?: EntityEngagement }) {
-  const hasFooter = studio.tags.length > 0 || studio.sceneCount > 0 || studio.performerCount > 0 || studio.imageCount > 0 || studio.galleryCount > 0 || studio.groupCount > 0 || studio.childStudioCount > 0;
+  const hasFooter = studio.tags.length > 0 || studio.videoCount > 0 || studio.performerCount > 0 || studio.imageCount > 0 || studio.galleryCount > 0 || studio.groupCount > 0 || studio.childStudioCount > 0;
 
   return (
     <EntityTileFrame
@@ -1148,9 +1148,9 @@ export function StudioTile({ studio, engagement, onClick, onNavigate, children, 
                 <EntityLinkList items={studio.tags.map((tag) => ({ id: tag.id, label: tag.name, color: tag.color ?? tag.tagGroupColor }))} page="tag" onNavigate={onNavigate} />
               </PopoverButton>
             ) : null}
-            {studio.sceneCount > 0 && (
-              <PopoverButton icon={<Film className="w-3.5 h-3.5" />} count={studio.sceneCount} title="Scenes" wide preferBelow>
-                <ScenesPopoverContent filter={{ studioId: studio.id }} />
+            {studio.videoCount > 0 && (
+              <PopoverButton icon={<Film className="w-3.5 h-3.5" />} count={studio.videoCount} title="Videos" wide preferBelow>
+                <VideosPopoverContent filter={{ studioId: studio.id }} />
               </PopoverButton>
             )}
             {studio.performerCount > 0 && (
@@ -1311,7 +1311,7 @@ interface GalleryTileProps {
 }
 
 export function GalleryTile({ gallery, engagement, onClick, onNavigate, selected, onSelect, selecting, bookmarkInitiallySaved }: GalleryTileProps & { engagement?: EntityEngagement }) {
-  const hasFooter = gallery.imageCount > 0 || gallery.sceneCount > 0 || gallery.tags.length > 0 || gallery.performers.length > 0 || gallery.organized;
+  const hasFooter = gallery.imageCount > 0 || gallery.videoCount > 0 || gallery.tags.length > 0 || gallery.performers.length > 0 || gallery.organized;
   const title = gallery.title || "Untitled";
   const galleryCoverSrc = gallery.coverPath ?? galleries.coverUrl(gallery.id, gallery.updatedAt, 960);
 
@@ -1363,9 +1363,9 @@ export function GalleryTile({ gallery, engagement, onClick, onNavigate, selected
                 <ImagesPopoverContent filter={{ galleryId: gallery.id }} />
               </PopoverButton>
             ) : null}
-            {gallery.sceneCount > 0 ? (
-              <PopoverButton icon={<Film className="w-3.5 h-3.5" />} count={gallery.sceneCount} title="Scenes" wide preferBelow>
-                <ScenesPopoverContent filter={{ galleryId: gallery.id }} />
+            {gallery.videoCount > 0 ? (
+              <PopoverButton icon={<Film className="w-3.5 h-3.5" />} count={gallery.videoCount} title="Videos" wide preferBelow>
+                <VideosPopoverContent filter={{ galleryId: gallery.id }} />
               </PopoverButton>
             ) : null}
             {gallery.tags.length > 0 ? (
@@ -1385,12 +1385,12 @@ export function GalleryTile({ gallery, engagement, onClick, onNavigate, selected
   );
 }
 
-type GroupPreviewKind = "scene" | "image" | "audio" | "text" | "segment";
+type GroupPreviewKind = "video" | "image" | "audio" | "text" | "segment";
 
 const GROUP_ITEMS_POPOVER_LIMIT = 10;
 
 const GROUP_PREVIEW_EMPTY_LABELS: Record<GroupPreviewKind, string> = {
-  scene: "No scenes",
+  video: "No videos",
   image: "No images",
   audio: "No audio",
   text: "No texts",
@@ -1398,8 +1398,8 @@ const GROUP_PREVIEW_EMPTY_LABELS: Record<GroupPreviewKind, string> = {
 };
 
 function groupItemMatchesPreviewKind(item: GroupItem, kind: GroupPreviewKind) {
-  if (kind === "scene") {
-    return item.kind === "scene" || item.kind === "sceneRange" || item.hostType === "scene";
+  if (kind === "video") {
+    return item.kind === "video" || item.kind === "videoRange" || item.hostType === "video";
   }
 
   return item.kind === kind || item.hostType === kind;
@@ -1407,8 +1407,8 @@ function groupItemMatchesPreviewKind(item: GroupItem, kind: GroupPreviewKind) {
 
 function getGroupItemPreviewId(item: GroupItem, kind: GroupPreviewKind) {
   switch (kind) {
-    case "scene":
-      return item.sceneId ?? (item.hostType === "scene" ? item.hostId : undefined);
+    case "video":
+      return item.videoId ?? (item.hostType === "video" ? item.hostId : undefined);
     case "image":
       return item.imageId ?? (item.hostType === "image" ? item.hostId : undefined);
     case "audio":
@@ -1421,7 +1421,7 @@ function getGroupItemPreviewId(item: GroupItem, kind: GroupPreviewKind) {
 }
 
 function getGroupItemPreviewTitle(item: GroupItem, kind: GroupPreviewKind) {
-  const explicitTitle = item.title?.trim() || item.sceneTitle?.trim() || item.imageTitle?.trim() || item.childGroupName?.trim();
+  const explicitTitle = item.title?.trim() || item.videoTitle?.trim() || item.imageTitle?.trim() || item.childGroupName?.trim();
   if (explicitTitle) return explicitTitle;
 
   const id = getGroupItemPreviewId(item, kind);
@@ -1437,8 +1437,8 @@ function getGroupItemPreviewRoute(item: GroupItem, kind: GroupPreviewKind) {
 
 function GroupItemPreviewMedia({ item, kind }: { item: GroupItem; kind: GroupPreviewKind }) {
   const previewId = getGroupItemPreviewId(item, kind);
-  if (kind === "scene" && previewId) {
-    return <img src={scenes.screenshotUrl(previewId, item.updatedAt)} alt="" className="h-9 w-14 flex-shrink-0 rounded bg-surface object-cover" loading="lazy" onError={(event) => { (event.currentTarget as HTMLImageElement).style.display = "none"; }} />;
+  if (kind === "video" && previewId) {
+    return <img src={videos.screenshotUrl(previewId, item.updatedAt)} alt="" className="h-9 w-14 flex-shrink-0 rounded bg-surface object-cover" loading="lazy" onError={(event) => { (event.currentTarget as HTMLImageElement).style.display = "none"; }} />;
   }
 
   if (kind === "image" && previewId) {
@@ -1533,8 +1533,8 @@ export function GroupTile({ group, engagement, onClick, onNavigate, selected, on
     { key: "tagItems", title: "Tag Items", count: group.tagItemCount ?? 0, icon: <Tag className="w-3.5 h-3.5" /> },
     { key: "faces", title: "Faces", count: group.faceCount ?? 0, icon: <Fingerprint className="w-3.5 h-3.5" /> },
   ].filter((item) => item.count > 0);
-  const hasUncategorizedItems = group.kind === "dynamic" && (group.itemCount ?? 0) > 0 && group.sceneCount === 0 && previewCountItems.length === 0 && countItems.length === 0;
-  const hasFooter = (group.tags?.length ?? 0) > 0 || group.sceneCount > 0 || previewCountItems.length > 0 || countItems.length > 0 || hasUncategorizedItems;
+  const hasUncategorizedItems = group.kind === "dynamic" && (group.itemCount ?? 0) > 0 && group.videoCount === 0 && previewCountItems.length === 0 && countItems.length === 0;
+  const hasFooter = (group.tags?.length ?? 0) > 0 || group.videoCount > 0 || previewCountItems.length > 0 || countItems.length > 0 || hasUncategorizedItems;
 
   return (
     <EntityTileFrame
@@ -1579,14 +1579,14 @@ export function GroupTile({ group, engagement, onClick, onNavigate, selected, on
       )}
       footer={hasFooter ? (
         <>
-            {group.sceneCount > 0 ? (
+            {group.videoCount > 0 ? (
               group.kind === "dynamic" ? (
-                <PopoverButton icon={<Film className="w-3.5 h-3.5" />} count={group.sceneCount} title="Scenes" wide preferBelow>
-                  <GroupItemsPopoverContent groupId={group.id} kind="scene" totalCount={group.sceneCount} onNavigate={onNavigate} />
+                <PopoverButton icon={<Film className="w-3.5 h-3.5" />} count={group.videoCount} title="Videos" wide preferBelow>
+                  <GroupItemsPopoverContent groupId={group.id} kind="video" totalCount={group.videoCount} onNavigate={onNavigate} />
                 </PopoverButton>
               ) : (
-                <PopoverButton icon={<Film className="w-3.5 h-3.5" />} count={group.sceneCount} title="Scenes" wide preferBelow>
-                  <ScenesPopoverContent filter={{ groupId: group.id }} />
+                <PopoverButton icon={<Film className="w-3.5 h-3.5" />} count={group.videoCount} title="Videos" wide preferBelow>
+                  <VideosPopoverContent filter={{ groupId: group.id }} />
                 </PopoverButton>
               )
             ) : null}
@@ -1738,7 +1738,7 @@ export function TextTile({ text, selected, onSelect, selecting, onClick, onNavig
 
 export function TagTile({ tag, engagement, onClick, onNavigate, children, selected, onSelect, selecting }: { tag: TagType; engagement?: EntityEngagement; onClick: () => void; onNavigate?: (r: any) => void; children?: ReactNode; selected?: boolean; onSelect?: () => void; selecting?: boolean }) {
   const favorite = engagement?.isFavorite ?? tag.favorite;
-  const hasFooter = Boolean(tag.sceneCount || tag.segmentCount || tag.imageCount || tag.galleryCount || tag.groupCount || tag.performerCount || tag.studioCount);
+  const hasFooter = Boolean(tag.videoCount || tag.segmentCount || tag.imageCount || tag.galleryCount || tag.groupCount || tag.performerCount || tag.studioCount);
 
   return (
     <EntityTileFrame
@@ -1770,7 +1770,7 @@ export function TagTile({ tag, engagement, onClick, onNavigate, children, select
       )}
       footer={hasFooter ? (
         <>
-          {tag.sceneCount != null && tag.sceneCount > 0 ? <PopoverButton icon={<Film className="w-3 h-3" />} count={tag.sceneCount} title="Scenes" wide preferBelow><ScenesPopoverContent filter={{ tagIds: String(tag.id) }} /></PopoverButton> : null}
+          {tag.videoCount != null && tag.videoCount > 0 ? <PopoverButton icon={<Film className="w-3 h-3" />} count={tag.videoCount} title="Videos" wide preferBelow><VideosPopoverContent filter={{ tagIds: String(tag.id) }} /></PopoverButton> : null}
           {tag.imageCount != null && tag.imageCount > 0 ? <PopoverButton icon={<ImagesIcon className="w-3 h-3" />} count={tag.imageCount} title="Images" wide preferBelow><ImagesPopoverContent filter={{ tagIds: String(tag.id) }} /></PopoverButton> : null}
           {tag.galleryCount != null && tag.galleryCount > 0 ? <PopoverButton icon={<FolderOpen className="w-3 h-3" />} count={tag.galleryCount} title="Galleries" wide preferBelow><GalleriesPopoverContent filter={{ tagIds: String(tag.id) }} /></PopoverButton> : null}
           {tag.groupCount != null && tag.groupCount > 0 ? <PopoverButton icon={<Layers className="w-3 h-3" />} count={tag.groupCount} title="Groups" wide preferBelow><GroupsPopoverContent filter={{ tagIds: String(tag.id) }} /></PopoverButton> : null}
@@ -1821,9 +1821,9 @@ export function FaceTile({ face, onClick, selected, onSelect, selecting, childre
       footer={(
         <>
           <CountPill icon={<Eye className="w-3.5 h-3.5" />} count={face.detectionCount} title="Detections" />
-          {face.sceneCount > 0 ? (
-            <PopoverButton icon={<Film className="w-3.5 h-3.5" />} count={face.sceneCount} title="Scenes" wide preferBelow>
-              <FaceAppearancesPopoverContent faceId={face.id} hostType="scene" />
+          {face.videoCount > 0 ? (
+            <PopoverButton icon={<Film className="w-3.5 h-3.5" />} count={face.videoCount} title="Videos" wide preferBelow>
+              <FaceAppearancesPopoverContent faceId={face.id} hostType="video" />
             </PopoverButton>
           ) : null}
           {face.imageCount > 0 ? (
@@ -1839,7 +1839,7 @@ export function FaceTile({ face, onClick, selected, onSelect, selecting, childre
   );
 }
 
-function FaceAppearancesPopoverContent({ faceId, hostType }: { faceId: number; hostType: "scene" | "image" }) {
+function FaceAppearancesPopoverContent({ faceId, hostType }: { faceId: number; hostType: "video" | "image" }) {
   const { data, isLoading } = useQuery({
     queryKey: ["face-card-appearances-popover", faceId, hostType],
     queryFn: () => facesApi.appearances(faceId, { sort: "last_seen", direction: "desc", perPage: 24 }),
@@ -1852,7 +1852,7 @@ function FaceAppearancesPopoverContent({ faceId, hostType }: { faceId: number; h
 
   const items = (data?.items ?? []).filter((item) => item.hostType === hostType).slice(0, 8);
   if (items.length === 0) {
-    return <p className="px-1 text-[11px] text-muted">No {hostType === "scene" ? "scenes" : "images"}</p>;
+    return <p className="px-1 text-[11px] text-muted">No {hostType === "video" ? "videos" : "images"}</p>;
   }
 
   return hostType === "image" ? (
@@ -1868,7 +1868,7 @@ function FaceAppearancesPopoverContent({ faceId, hostType }: { faceId: number; h
       {items.map((item) => (
         <div key={item.appearanceId} className="flex items-center gap-2 rounded px-1 py-0.5 hover:bg-card">
           <img src={item.thumbnailUrl} alt="" className="h-7 w-12 flex-shrink-0 rounded bg-surface object-cover" loading="lazy" onError={(event) => { (event.currentTarget as HTMLImageElement).style.display = "none"; }} />
-          <span className="truncate text-[11px] text-foreground">{item.title || `Scene #${item.hostId}`}</span>
+          <span className="truncate text-[11px] text-foreground">{item.title || `Video #${item.hostId}`}</span>
         </div>
       ))}
     </div>
@@ -1876,7 +1876,7 @@ function FaceAppearancesPopoverContent({ faceId, hostType }: { faceId: number; h
 }
 
 export function FaceAppearanceTile({ appearance, onClick }: { appearance: FaceAppearance; onClick: () => void }) {
-  const hostLabel = appearance.title || `${appearance.hostType === "image" ? "Image" : "Scene"} #${appearance.hostId}`;
+  const hostLabel = appearance.title || `${appearance.hostType === "image" ? "Image" : "Video"} #${appearance.hostId}`;
   const Icon = appearance.hostType === "image" ? ImagesIcon : Film;
 
   return (
@@ -1906,7 +1906,7 @@ export function FaceAppearanceTile({ appearance, onClick }: { appearance: FaceAp
               <Icon className="h-3 w-3" />
               {appearance.hostType}
             </span>
-            {appearance.hostType === "scene" ? <span>{formatFaceAppearanceTimeRange(appearance)}</span> : <span>Image appearance</span>}
+            {appearance.hostType === "video" ? <span>{formatFaceAppearanceTimeRange(appearance)}</span> : <span>Image appearance</span>}
           </div>
           <h3 className="card-title truncate text-sm font-semibold text-foreground group-hover:text-accent">{hostLabel}</h3>
           {appearance.topConfidence != null ? <div className="text-xs text-secondary">{Math.round(appearance.topConfidence * 100)}% confidence</div> : null}
@@ -1926,7 +1926,7 @@ export function FaceAppearanceTile({ appearance, onClick }: { appearance: FaceAp
 function formatFaceAppearanceTimeRange(appearance: FaceAppearance) {
   const start = appearance.firstSeenAtSec == null ? null : formatFaceAppearanceTime(appearance.firstSeenAtSec);
   const end = appearance.lastSeenAtSec == null ? null : formatFaceAppearanceTime(appearance.lastSeenAtSec);
-  return start && end && start !== end ? `${start} - ${end}` : start ?? end ?? "Scene appearance";
+  return start && end && start !== end ? `${start} - ${end}` : start ?? end ?? "Video appearance";
 }
 
 function formatFaceAppearanceTime(totalSeconds: number) {
@@ -1965,11 +1965,11 @@ export function SegmentTile({ segment, route, label, eyebrow, footer, onClick, s
   const confidenceLabel = segment.confidence == null ? null : `${Math.round(segment.confidence * 100)}%`;
 
   return (
-    <article onClick={selecting ? onClick : undefined} className={`entity-card scene-card group relative overflow-hidden rounded border bg-card transition-all ${selected ? "border-accent ring-2 ring-accent" : "border-border hover:border-accent/60"}`}>
+    <article onClick={selecting ? onClick : undefined} className={`entity-card video-card group relative overflow-hidden rounded border bg-card transition-all ${selected ? "border-accent ring-2 ring-accent" : "border-border hover:border-accent/60"}`}>
       <RouteCardLinkOverlay route={cardRoute} onClick={onClick} label={label ?? `Open segment ${title}`} disabled={selecting} selectionSafeZone={selected !== undefined || selecting} />
       <div className="card-media relative aspect-video w-full overflow-hidden bg-surface/70">
         {(selected !== undefined || selecting) ? <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} /> : null}
-        {segment.hostType === "scene" ? <SegmentHoverPreview hostId={segment.hostId} segmentId={typeof segment.id === "number" ? segment.id : undefined} updatedAt={segment.updatedAt} startSec={segment.startSec} endSec={segment.endSec} title={title} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" /> : <div className="flex h-full w-full items-center justify-center bg-surface text-muted"><Layers className="h-10 w-10" /></div>}
+        {segment.hostType === "video" ? <SegmentHoverPreview hostId={segment.hostId} segmentId={typeof segment.id === "number" ? segment.id : undefined} updatedAt={segment.updatedAt} startSec={segment.startSec} endSec={segment.endSec} title={title} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" /> : <div className="flex h-full w-full items-center justify-center bg-surface text-muted"><Layers className="h-10 w-10" /></div>}
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/35 to-transparent p-3 text-white">
           <div className="flex items-end justify-between gap-3">
             <div className="line-clamp-2 min-w-0 text-sm font-semibold">{title}</div>
@@ -2024,3 +2024,4 @@ function formatSegmentSourceLabel(sourceKey?: string) {
 function SegmentHoverPreview({ hostId, segmentId, updatedAt, startSec, endSec, title, className }: { hostId: number; segmentId?: number; updatedAt?: string; startSec: number; endSec?: number; title: string; className: string }) {
   return <SegmentPreviewMedia hostId={hostId} segmentId={segmentId} updatedAt={updatedAt} startSec={startSec} endSec={endSec} title={title} className={className} />;
 }
+

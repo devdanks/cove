@@ -1,10 +1,10 @@
 export const PERFORMER_SORT_OPTIONS: { value: string; label: string }[] = [
   { value: "name", label: "Name" },
   { value: "rating", label: "Rating" },
-  { value: "scene_count", label: "Scene Count" },
+  { value: "video_count", label: "Video Count" },
   { value: "image_count", label: "Image Count" },
   { value: "gallery_count", label: "Gallery Count" },
-  { value: "latest_scene_date", label: "Latest Scene Date" },
+  { value: "latest_video_date", label: "Latest Video Date" },
   { value: "total_file_size", label: "Total File Size" },
   { value: "tag_count", label: "Tag Count" },
   { value: "career_length", label: "Career Length" },

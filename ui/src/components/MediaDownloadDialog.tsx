@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Download, Link2, Loader2, Search, X } from "lucide-react";
 import { system } from "../api/client";
 import type { DownloaderMatch } from "../api/types";
-import { loadScrapeApplyPreferences, saveScrapeApplyPreferences } from "./sceneScrapeUtils";
+import { loadScrapeApplyPreferences, saveScrapeApplyPreferences } from "./videoScrapeUtils";
 import { useFileBackedCreatePreferences } from "../hooks/useFileBackedCreatePreferences";
 import type { DownloadEntityName } from "../utils/createFromUrlDownload";
 

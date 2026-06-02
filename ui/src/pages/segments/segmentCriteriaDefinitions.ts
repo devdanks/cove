@@ -11,8 +11,8 @@ export interface SegmentCriteriaOptions {
 }
 
 export const SEGMENT_CRITERIA: CriterionDefinition[] = [
-  { id: "sceneTitle", label: "Scene Title", type: "string", filterKey: "sceneTitleCriterion" },
-  { id: "scenes", label: "Scenes", type: "multiId", entityType: "scenes", filterKey: "scenesCriterion" },
+  { id: "videoTitle", label: "Video Title", type: "string", filterKey: "videoTitleCriterion" },
+  { id: "videos", label: "Videos", type: "multiId", entityType: "videos", filterKey: "videosCriterion" },
 ];
 
 export function createSegmentCriteria(options: SegmentCriteriaOptions = {}): CriterionDefinition[] {
@@ -23,7 +23,7 @@ export function createSegmentCriteria(options: SegmentCriteriaOptions = {}): Cri
   { id: "updatedAt", label: "Updated At", type: "timestamp", filterKey: "rawUpdatedAtCriterion" },
   { id: "startSec", label: "Start Time", type: "duration", filterKey: "rawStartSecCriterion", modifiers: SEGMENT_NUMBER_MODIFIERS },
   { id: "endSec", label: "End Time", type: "duration", filterKey: "rawEndSecCriterion", modifiers: SEGMENT_NUMBER_MODIFIERS },
-  { id: "hostType", label: "Host Type", type: "enum", filterKey: "rawHostTypeCriterion", modifiers: ["EQUALS"], options: [{ value: "scene", label: "Scene" }] },
+  { id: "hostType", label: "Host Type", type: "enum", filterKey: "rawHostTypeCriterion", modifiers: ["EQUALS"], options: [{ value: "video", label: "Video" }] },
   { id: "tags", label: "Tags", type: "multiId", entityType: "tags", filterKey: "rawTagsCriterion", modifiers: SEGMENT_INCLUDE_ONLY_MODIFIERS },
   { id: "performers", label: "Performers", type: "multiId", entityType: "performers", filterKey: "rawPerformersCriterion", modifiers: SEGMENT_INCLUDE_ONLY_MODIFIERS },
   { id: "faces", label: "Faces", type: "multiId", entityType: "faces", filterKey: "rawFacesCriterion", modifiers: SEGMENT_INCLUDE_ONLY_MODIFIERS },
@@ -40,12 +40,12 @@ export function createSegmentCriteria(options: SegmentCriteriaOptions = {}): Cri
 
 export const RAW_SEGMENT_CRITERIA: CriterionDefinition[] = createSegmentCriteria();
 
-export interface SceneSelectionCriterion {
+export interface VideoSelectionCriterion {
   includeIds: number[];
   excludeIds: number[];
 }
 
-interface SceneSelectionCriterionValue {
+interface VideoSelectionCriterionValue {
   value?: unknown;
   excludes?: unknown;
 }
@@ -59,12 +59,12 @@ export function readStringCriterion(value: unknown) {
   return typeof candidate === "string" ? candidate.trim() : "";
 }
 
-export function readSceneSelectionCriterion(value: unknown): SceneSelectionCriterion {
+export function readVideoSelectionCriterion(value: unknown): VideoSelectionCriterion {
   if (!value || typeof value !== "object") {
     return { includeIds: [], excludeIds: [] };
   }
 
-  const criterion = value as SceneSelectionCriterionValue;
+  const criterion = value as VideoSelectionCriterionValue;
   const included = Array.isArray(criterion.value)
     ? criterion.value.filter((item): item is number => typeof item === "number" && Number.isFinite(item))
     : [];

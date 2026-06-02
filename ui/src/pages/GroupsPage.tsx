@@ -34,7 +34,7 @@ const SORT_OPTIONS = [
   { value: "created_at", label: "Created At" },
   { value: "updated_at", label: "Updated At" },
   { value: "item_count", label: "Item Count" },
-  { value: "scene_count", label: "Scene Count" },
+  { value: "video_count", label: "Video Count" },
   { value: "image_count", label: "Image Count" },
   { value: "audio_count", label: "Audio Count" },
   { value: "text_count", label: "Text Count" },
@@ -50,12 +50,12 @@ const SORT_OPTIONS = [
   { value: "cached_item_count", label: "Cached Item Count" },
   { value: "last_resolved_at", label: "Last Resolved" },
   { value: "query_source_key", label: "Query Source" },
-  { value: "show_in_scene_lists", label: "Show In Scene Lists" },
+  { value: "show_in_video_lists", label: "Show In Video Lists" },
   { value: "aliases", label: "Aliases" },
 ];
 
 function getGroupItemCount(group: Group) {
-  return group.itemCount ?? (group.kind === "dynamic" ? group.cachedItemCount ?? group.sceneCount : group.sceneCount);
+  return group.itemCount ?? (group.kind === "dynamic" ? group.cachedItemCount ?? group.videoCount : group.videoCount);
 }
 
 interface Props {
@@ -426,3 +426,4 @@ function GroupCreateModal({ open, onClose, onCreated }: { open: boolean; onClose
     </EditModal>
   );
 }
+

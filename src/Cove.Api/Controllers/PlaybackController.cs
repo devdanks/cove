@@ -30,7 +30,7 @@ public class PlaybackController(IUserEngagementService engagementService, ICurre
     {
         var permission = hostType switch
         {
-            InteractionHostType.Scene => Permissions.ScenesRead,
+            InteractionHostType.Video => Permissions.VideosRead,
             InteractionHostType.Image => Permissions.ImagesRead,
             InteractionHostType.Audio => Permissions.AudiosRead,
             InteractionHostType.Text => Permissions.TextsRead,
@@ -41,3 +41,4 @@ public class PlaybackController(IUserEngagementService engagementService, ICurre
         return permission is null || principalAccessor.Current?.Has(permission) == true;
     }
 }
+

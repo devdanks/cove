@@ -3,29 +3,29 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Loader2, Search, X } from "lucide-react";
 import { scrapeAttempts, system } from "../api/client";
 import { useAppConfig } from "../state/AppConfigContext";
-import { SceneScrapeDialog } from "./SceneScrapeDialog";
-import type { BatchInputKind, ScrapeApplyPreferences, SceneScrapeScene } from "./sceneScrapeUtils";
+import { VideoScrapeDialog } from "./VideoScrapeDialog";
+import type { BatchInputKind, ScrapeApplyPreferences, VideoScrapeVideo } from "./videoScrapeUtils";
 import {
   findDefaultKind,
   findPreferredScraperId,
-  getSceneLabel,
-  getSceneNameSearchInput,
+  getVideoLabel,
+  getVideoNameSearchInput,
   loadScrapeApplyPreferences,
   saveScrapeApplyPreferences,
-  sortScrapersForScene,
+  sortScrapersForVideo,
   supportsScrapeKind,
-} from "./sceneScrapeUtils";
+} from "./videoScrapeUtils";
 
 interface Props {
   open: boolean;
   onClose: () => void;
-  scenes: SceneScrapeScene[];
+  videos: VideoScrapeVideo[];
 }
 
 type BatchStatus = "pending" | "queued" | "scraped" | "applied" | "appliedpartial" | "skipped" | "failure";
 
 interface BatchResult {
-  sceneId: number;
+  videoId: number;
   label: string;
   status: BatchStatus;
   message: string;
@@ -49,7 +49,7 @@ function statusTone(status: BatchStatus) {
   }
 }
 
-export function SceneBatchScrapeDialog({ open, onClose, scenes }: Props) {
+export function VideoBatchScrapeDialog({ open, onClose, videos }: Props) {
   const queryClient = useQueryClient();
   const { config } = useAppConfig();
   const [preferences, setPreferences] = useState<ScrapeApplyPreferences>(() => loadScrapeApplyPreferences());
@@ -69,16 +69,16 @@ export function SceneBatchScrapeDialog({ open, onClose, scenes }: Props) {
 
   const scraperPreferences = config?.scraping.scraperPreferences ?? [];
 
-  const sceneScrapers = useMemo(
-    () => sortScrapersForScene(scrapers.filter((scraper) => scraper.entityType.toLowerCase() === "scene"), scenes[0]?.urls[0], scraperPreferences),
-    [scenes, scraperPreferences, scrapers],
+  const videoScrapers = useMemo(
+    () => sortScrapersForVideo(scrapers.filter((scraper) => scraper.entityType.toLowerCase() === "video"), videos[0]?.urls[0], scraperPreferences),
+    [videos, scraperPreferences, scrapers],
   );
 
   const selectedScraper = useMemo(
-    () => sceneScrapers.find((scraper) => scraper.id === selectedScraperId),
-    [sceneScrapers, selectedScraperId],
+    () => videoScrapers.find((scraper) => scraper.id === selectedScraperId),
+    [videoScrapers, selectedScraperId],
   );
-  const sceneIdsKey = useMemo(() => scenes.map((scene) => scene.id).join(","), [scenes]);
+  const videoIdsKey = useMemo(() => videos.map((video) => video.id).join(","), [videos]);
 
   useEffect(() => {
     if (!open) {
@@ -101,17 +101,17 @@ export function SceneBatchScrapeDialog({ open, onClose, scenes }: Props) {
     setReviewIndex(null);
     setAutoApply(true);
     setError(null);
-  }, [open, sceneIdsKey]);
+  }, [open, videoIdsKey]);
 
   useEffect(() => {
     if (!open) {
       return;
     }
 
-    if (!selectedScraperId || !sceneScrapers.some((scraper) => scraper.id === selectedScraperId)) {
-      setSelectedScraperId(findPreferredScraperId(sceneScrapers, scenes[0]?.urls[0], scraperPreferences));
+    if (!selectedScraperId || !videoScrapers.some((scraper) => scraper.id === selectedScraperId)) {
+      setSelectedScraperId(findPreferredScraperId(videoScrapers, videos[0]?.urls[0], scraperPreferences));
     }
-  }, [open, sceneScrapers, scenes, scraperPreferences, selectedScraperId]);
+  }, [open, videoScrapers, videos, scraperPreferences, selectedScraperId]);
 
   useEffect(() => {
     if (!selectedScraper) {
@@ -124,8 +124,8 @@ export function SceneBatchScrapeDialog({ open, onClose, scenes }: Props) {
     });
   }, [selectedScraper]);
 
-  const updateResult = (sceneId: number, patch: Partial<BatchResult>) => {
-    setResults((current) => current.map((result) => (result.sceneId === sceneId ? { ...result, ...patch } : result)));
+  const updateResult = (videoId: number, patch: Partial<BatchResult>) => {
+    setResults((current) => current.map((result) => (result.videoId === videoId ? { ...result, ...patch } : result)));
   };
 
   const startReviewFlow = () => {
@@ -134,15 +134,15 @@ export function SceneBatchScrapeDialog({ open, onClose, scenes }: Props) {
       return;
     }
 
-    if (scenes.length === 0) {
-      setError("Select at least one scene to batch scrape.");
+    if (videos.length === 0) {
+      setError("Select at least one video to batch scrape.");
       return;
     }
 
     reviewAppliedRef.current = false;
-    setResults(scenes.map((scene, index) => ({
-      sceneId: scene.id,
-      label: getSceneLabel(scene),
+    setResults(videos.map((video, index) => ({
+      videoId: video.id,
+      label: getVideoLabel(video),
       status: index === 0 ? "queued" : "pending",
       message: index === 0 ? "Opening review dialog." : "Waiting for previous reviews.",
     })));
@@ -154,16 +154,16 @@ export function SceneBatchScrapeDialog({ open, onClose, scenes }: Props) {
       return;
     }
 
-    const scene = scenes[reviewIndex];
-    if (scene && !reviewAppliedRef.current) {
-      updateResult(scene.id, { status: "skipped", message: "Review closed without applying changes." });
+    const video = videos[reviewIndex];
+    if (video && !reviewAppliedRef.current) {
+      updateResult(video.id, { status: "skipped", message: "Review closed without applying changes." });
     }
 
     reviewAppliedRef.current = false;
     const nextIndex = reviewIndex + 1;
-    if (nextIndex < scenes.length) {
-      const nextScene = scenes[nextIndex];
-      updateResult(nextScene.id, { status: "queued", message: "Opening review dialog." });
+    if (nextIndex < videos.length) {
+      const nextVideo = videos[nextIndex];
+      updateResult(nextVideo.id, { status: "queued", message: "Opening review dialog." });
       setReviewIndex(nextIndex);
     } else {
       setReviewIndex(null);
@@ -176,14 +176,14 @@ export function SceneBatchScrapeDialog({ open, onClose, scenes }: Props) {
         throw new Error("Select a scraper first.");
       }
 
-      if (scenes.length === 0) {
-        throw new Error("Select at least one scene to batch scrape.");
+      if (videos.length === 0) {
+        throw new Error("Select at least one video to batch scrape.");
       }
 
-      return scrapeAttempts.startSceneBatch({
+      return scrapeAttempts.startVideoBatch({
         scraperId: selectedScraper.id,
         inputKind,
-        sceneIds: scenes.map((scene) => scene.id),
+        videoIds: videos.map((video) => video.id),
         autoApply,
         createMissingTags: preferences.createMissingTags,
         createMissingPerformers: preferences.createMissingPerformers,
@@ -193,9 +193,9 @@ export function SceneBatchScrapeDialog({ open, onClose, scenes }: Props) {
       });
     },
     onSuccess: async ({ jobId }) => {
-      setResults(scenes.map((scene) => ({
-        sceneId: scene.id,
-        label: getSceneLabel(scene),
+      setResults(videos.map((video) => ({
+        videoId: video.id,
+        label: getVideoLabel(video),
         status: "queued",
         message: `Queued in job ${jobId}. Track progress in Jobs.`,
       })));
@@ -216,8 +216,8 @@ export function SceneBatchScrapeDialog({ open, onClose, scenes }: Props) {
 
   const canRun = Boolean(selectedScraper) && supportsScrapeKind(selectedScraper, inputKind);
   const completedCount = results.filter((result) => result.status !== "pending").length;
-  const reviewScene = reviewIndex != null ? scenes[reviewIndex] : null;
-  const reviewAutoRunKey = reviewScene ? `${selectedScraperId}:${inputKind}:${reviewScene.id}:${reviewIndex}` : null;
+  const reviewVideo = reviewIndex != null ? videos[reviewIndex] : null;
+  const reviewAutoRunKey = reviewVideo ? `${selectedScraperId}:${inputKind}:${reviewVideo.id}:${reviewIndex}` : null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
@@ -226,10 +226,10 @@ export function SceneBatchScrapeDialog({ open, onClose, scenes }: Props) {
           <div>
             <h2 className="flex items-center gap-2 text-lg font-bold text-foreground">
               <Search className="h-5 w-5 text-accent" />
-              Batch Scene Scrape
+              Batch Video Scrape
             </h2>
             <p className="mt-0.5 text-xs text-secondary">
-              Run one scraper across {scenes.length} selected scene{scenes.length === 1 ? "" : "s"} and optionally apply the default review plan automatically.
+              Run one scraper across {videos.length} selected video{videos.length === 1 ? "" : "s"} and optionally apply the default review plan automatically.
             </p>
           </div>
           <button onClick={onClose} className="text-muted hover:text-foreground" aria-label="Close batch scrape dialog">
@@ -242,8 +242,8 @@ export function SceneBatchScrapeDialog({ open, onClose, scenes }: Props) {
             <div className="space-y-4">
               <div className="rounded-2xl border border-border bg-card p-4">
                 <div className="text-xs uppercase tracking-[0.18em] text-muted">Selection</div>
-                <div className="mt-1 text-2xl font-semibold text-foreground">{scenes.length}</div>
-                <div className="mt-1 text-xs text-secondary">Selected scenes ready for batch scraping.</div>
+                <div className="mt-1 text-2xl font-semibold text-foreground">{videos.length}</div>
+                <div className="mt-1 text-xs text-secondary">Selected videos ready for batch scraping.</div>
               </div>
 
               <div className="space-y-2">
@@ -253,8 +253,8 @@ export function SceneBatchScrapeDialog({ open, onClose, scenes }: Props) {
                   onChange={(event) => setSelectedScraperId(event.target.value)}
                   className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground outline-none"
                 >
-                  {sceneScrapers.length === 0 ? <option value="">No scene scrapers found</option> : null}
-                  {sceneScrapers.map((scraper) => (
+                  {videoScrapers.length === 0 ? <option value="">No video scrapers found</option> : null}
+                  {videoScrapers.map((scraper) => (
                     <option key={scraper.id} value={scraper.id}>
                       {scraper.name}
                     </option>
@@ -294,13 +294,13 @@ export function SceneBatchScrapeDialog({ open, onClose, scenes }: Props) {
                   <span>
                     <span className="block font-medium">Auto-apply default review choices</span>
                     <span className="mt-1 block text-xs text-secondary">
-                      Uses the same default field-selection logic as the single-scene scrape review.
+                      Uses the same default field-selection logic as the single-video scrape review.
                     </span>
                   </span>
                 </label>
                 {inputKind === "name" ? (
                   <div className="rounded-xl border border-border bg-surface px-3 py-3 text-xs text-secondary">
-                    Scene titles are searched with a cleaned version of each title. Example query: <span className="text-foreground">{scenes[0] ? getSceneNameSearchInput(scenes[0]) : ""}</span>
+                    Video titles are searched with a cleaned version of each title. Example query: <span className="text-foreground">{videos[0] ? getVideoNameSearchInput(videos[0]) : ""}</span>
                   </div>
                 ) : null}
               </div>
@@ -366,20 +366,20 @@ export function SceneBatchScrapeDialog({ open, onClose, scenes }: Props) {
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card/70 px-4 py-3">
                 <div>
                   <div className="text-sm font-semibold text-foreground">Run Progress</div>
-                  <div className="text-xs text-secondary">{completedCount} of {scenes.length} scene{scenes.length === 1 ? "" : "s"} processed.</div>
+                  <div className="text-xs text-secondary">{completedCount} of {videos.length} video{videos.length === 1 ? "" : "s"} processed.</div>
                 </div>
                 <div className="text-xs text-muted">
-                  {autoApply ? "Scrapes will be applied with default field choices." : "Each scrape opens in review before the next scene starts."}
+                  {autoApply ? "Scrapes will be applied with default field choices." : "Each scrape opens in review before the next video starts."}
                 </div>
               </div>
 
               {results.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-border bg-card/40 p-4">
-                  <div className="text-sm font-medium text-foreground">Selected Scenes</div>
+                  <div className="text-sm font-medium text-foreground">Selected Videos</div>
                   <div className="mt-3 space-y-2">
-                    {scenes.map((scene) => (
-                      <div key={scene.id} className="rounded-xl border border-border bg-card px-3 py-2 text-sm text-secondary">
-                        {getSceneLabel(scene)}
+                    {videos.map((video) => (
+                      <div key={video.id} className="rounded-xl border border-border bg-card px-3 py-2 text-sm text-secondary">
+                        {getVideoLabel(video)}
                       </div>
                     ))}
                   </div>
@@ -387,7 +387,7 @@ export function SceneBatchScrapeDialog({ open, onClose, scenes }: Props) {
               ) : (
                 <div className="space-y-2">
                   {results.map((result) => (
-                    <div key={result.sceneId} className="rounded-2xl border border-border bg-card p-4">
+                    <div key={result.videoId} className="rounded-2xl border border-border bg-card p-4">
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
                           <div className="text-sm font-medium text-foreground">{result.label}</div>
@@ -418,7 +418,7 @@ export function SceneBatchScrapeDialog({ open, onClose, scenes }: Props) {
                 startReviewFlow();
               }
             }}
-            disabled={!canRun || runMutation.isPending || scenes.length === 0 || reviewIndex != null}
+            disabled={!canRun || runMutation.isPending || videos.length === 0 || reviewIndex != null}
             className="inline-flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-60"
           >
             {runMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
@@ -426,17 +426,17 @@ export function SceneBatchScrapeDialog({ open, onClose, scenes }: Props) {
           </button>
         </div>
       </div>
-      {reviewScene ? (
-        <SceneScrapeDialog
-          key={reviewAutoRunKey ?? reviewScene.id}
+      {reviewVideo ? (
+        <VideoScrapeDialog
+          key={reviewAutoRunKey ?? reviewVideo.id}
           open
-          scene={reviewScene}
+          video={reviewVideo}
           initialScraperId={selectedScraperId}
           initialInputKind={inputKind}
           autoRunKey={reviewAutoRunKey ?? undefined}
           onApplied={() => {
             reviewAppliedRef.current = true;
-            updateResult(reviewScene.id, { status: "applied", message: "Reviewed and applied selected fields." });
+            updateResult(reviewVideo.id, { status: "applied", message: "Reviewed and applied selected fields." });
           }}
           onClose={advanceReviewFlow}
         />

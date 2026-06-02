@@ -3,7 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import { studios } from "../api/client";
 import type { Studio, MetadataServerStudioMatch, MetadataServerStudioImportRequest } from "../api/types";
 import { useAppConfig } from "../state/AppConfigContext";
-import { DEFAULT_COLLECTION_MODES, type CollectionMode } from "./sceneScrapeUtils";
+import { DEFAULT_COLLECTION_MODES, type CollectionMode } from "./videoScrapeUtils";
 import {
   CompactCollectionDecision,
   CompactListValue,
@@ -302,7 +302,7 @@ function StudioTaggerRow({
   });
 
   return (
-    <div className={`px-4 py-3 ${state?.saved ? "opacity-50" : ""} ${selected ? "bg-accent/5" : ""}`}>
+    <div className={`px-4 py-3 ${selected ? "bg-accent/5" : ""}`}>
       <div className="flex gap-4">
         {onSelect && (
           <button
@@ -453,7 +453,7 @@ function StudioResultRow({
         </div>
       </div>
 
-      {isSelected && (
+      {isSelected && !saved && (
         <div className="border-t border-border px-3 py-3 space-y-3">
           {scalarRows.map((row) => (
             <CompactScalarDecision
@@ -503,3 +503,4 @@ function StudioResultRow({
     </div>
   );
 }
+

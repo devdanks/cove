@@ -15,20 +15,20 @@ namespace Cove.Tests;
 public sealed class Phase11PlaybackTests
 {
     [Fact]
-    public async Task PlaybackController_PersistsSceneIntervals()
+    public async Task PlaybackController_PersistsVideoIntervals()
     {
         await using var scope = await CreateContextAsync();
-        scope.Context.Scenes.Add(new Scene { Title = "Playback Scene" });
+        scope.Context.Videos.Add(new Video { Title = "Playback Video" });
         await scope.Context.SaveChangesAsync();
-        var sceneId = await scope.Context.Scenes.Select(scene => scene.Id).SingleAsync();
+        var videoId = await scope.Context.Videos.Select(video => video.Id).SingleAsync();
 
         scope.PrincipalAccessor.Set(CreatePrincipal(7));
         var controller = CreateController(scope.Context, scope.PrincipalAccessor);
         var sessionId = Guid.NewGuid();
 
         var result = await controller.RecordIntervals(new PlaybackIntervalsRequestDto(
-            "scene",
-            sceneId,
+            "video",
+            videoId,
             sessionId,
             180.0,
             42.0,
@@ -39,8 +39,8 @@ public sealed class Phase11PlaybackTests
 
         var session = await scope.Context.PlaybackSessions.IgnoreQueryFilters().SingleAsync();
         Assert.Equal(7, session.UserId);
-        Assert.Equal(InteractionHostType.Scene, session.HostType);
-        Assert.Equal(sceneId, session.HostId);
+        Assert.Equal(InteractionHostType.Video, session.HostType);
+        Assert.Equal(videoId, session.HostId);
         Assert.Equal(sessionId, session.SessionId);
         Assert.Equal(42.0, session.TotalWatchedSec, precision: 5);
         Assert.Equal(42.0, session.LastPositionSec);
@@ -102,9 +102,9 @@ public sealed class Phase11PlaybackTests
     public async Task PlaybackController_PersistsPlaybackContextOnSessionAndIntervals()
     {
         await using var scope = await CreateContextAsync();
-        var scene = new Scene { Title = "Compilation Item" };
+        var video = new Video { Title = "Compilation Item" };
         var group = new Group { Name = "Compilation Context" };
-        scope.Context.AddRange(scene, group);
+        scope.Context.AddRange(video, group);
         await scope.Context.SaveChangesAsync();
 
         scope.PrincipalAccessor.Set(CreatePrincipal(12));
@@ -124,8 +124,8 @@ public sealed class Phase11PlaybackTests
             ScopeKey: $"group:{group.Id}",
             ParentHostType: "group",
             ParentHostId: group.Id,
-            ItemHostType: "scene",
-            ItemHostId: scene.Id,
+            ItemHostType: "video",
+            ItemHostId: video.Id,
             GroupItemId: 123,
             SegmentId: null,
             ClipStartSec: 5.0,
@@ -143,8 +143,8 @@ public sealed class Phase11PlaybackTests
         Assert.Equal($"group:{group.Id}", session.ScopeKey);
         Assert.Equal(InteractionHostType.Group, session.ParentHostType);
         Assert.Equal(group.Id, session.ParentHostId);
-        Assert.Equal(InteractionHostType.Scene, session.ItemHostType);
-        Assert.Equal(scene.Id, session.ItemHostId);
+        Assert.Equal(InteractionHostType.Video, session.ItemHostType);
+        Assert.Equal(video.Id, session.ItemHostId);
         Assert.Equal(123, session.GroupItemId);
         Assert.Equal(5.0, session.ClipStartSec);
         Assert.Equal(15.0, session.ClipEndSec);
@@ -158,8 +158,8 @@ public sealed class Phase11PlaybackTests
 
         var interval = await scope.Context.PlaybackIntervals.IgnoreQueryFilters().SingleAsync();
         Assert.Equal("compilation", interval.Surface);
-        Assert.Equal(InteractionHostType.Scene, interval.ItemHostType);
-        Assert.Equal(scene.Id, interval.ItemHostId);
+        Assert.Equal(InteractionHostType.Video, interval.ItemHostType);
+        Assert.Equal(video.Id, interval.ItemHostId);
         Assert.Equal(123, interval.GroupItemId);
         Assert.Equal(1.25, interval.PlaybackRate);
         Assert.Equal("test", interval.Context!.RootElement.GetProperty("source").GetString());
@@ -169,13 +169,13 @@ public sealed class Phase11PlaybackTests
     public async Task SegmentPlayback_CreatesSegmentAffinityAndCompletion()
     {
         await using var scope = await CreateContextAsync();
-        var scene = new Scene { Title = "Segment Host" };
-        scope.Context.Scenes.Add(scene);
+        var video = new Video { Title = "Segment Host" };
+        scope.Context.Videos.Add(video);
         await scope.Context.SaveChangesAsync();
         var segment = new Segment
         {
-            HostType = SegmentHostType.Scene,
-            HostId = scene.Id,
+            HostType = SegmentHostType.Video,
+            HostId = video.Id,
             SourceKey = "test",
             StartSec = 10,
             EndSec = 20,
@@ -197,10 +197,10 @@ public sealed class Phase11PlaybackTests
             [new PlaybackIntervalInputDto(10.0, 20.0)],
             Surface: "segmentDetail",
             ScopeKey: $"segment:{segment.Id}",
-            ParentHostType: "scene",
-            ParentHostId: scene.Id,
-            ItemHostType: "scene",
-            ItemHostId: scene.Id,
+            ParentHostType: "video",
+            ParentHostId: video.Id,
+            ItemHostType: "video",
+            ItemHostId: video.Id,
             SegmentId: segment.Id,
             ClipStartSec: 10.0,
             ClipEndSec: 20.0), CancellationToken.None));
@@ -224,7 +224,7 @@ public sealed class Phase11PlaybackTests
 
         try
         {
-            int sceneId;
+            int videoId;
             int segmentId;
             var setupPrincipalAccessor = new CurrentPrincipalAccessor();
             await using (var setupContext = new PlaybackTestContext(options, setupPrincipalAccessor))
@@ -236,15 +236,15 @@ public sealed class Phase11PlaybackTests
                     Username = "user-29",
                     PasswordHash = "test",
                 });
-                var scene = new Scene { Title = "Concurrent Segment Host" };
-                setupContext.Scenes.Add(scene);
+                var video = new Video { Title = "Concurrent Segment Host" };
+                setupContext.Videos.Add(video);
                 await setupContext.SaveChangesAsync();
-                sceneId = scene.Id;
+                videoId = video.Id;
 
                 var segment = new Segment
                 {
-                    HostType = SegmentHostType.Scene,
-                    HostId = sceneId,
+                    HostType = SegmentHostType.Video,
+                    HostId = videoId,
                     SourceKey = "test",
                     StartSec = 10,
                     EndSec = 20,
@@ -284,10 +284,10 @@ public sealed class Phase11PlaybackTests
                     [new PlaybackIntervalInputDto(10.0, 12.0)],
                     Surface: "segmentDetail",
                     ScopeKey: $"segment:{segmentId}",
-                    ParentHostType: "scene",
-                    ParentHostId: sceneId,
-                    ItemHostType: "scene",
-                    ItemHostId: sceneId,
+                    ParentHostType: "video",
+                    ParentHostId: videoId,
+                    ItemHostType: "video",
+                    ItemHostId: videoId,
                     SegmentId: segmentId,
                     ClipStartSec: 10.0,
                     ClipEndSec: 20.0), CancellationToken.None);
@@ -345,20 +345,20 @@ public sealed class Phase11PlaybackTests
     {
         await using var scope = await CreateContextAsync();
         await AddUserAsync(scope, 21, "{\"tracking\":{\"enabled\":false}}");
-        scope.Context.Scenes.Add(new Scene { Title = "Muted tracking" });
+        scope.Context.Videos.Add(new Video { Title = "Muted tracking" });
         await scope.Context.SaveChangesAsync();
-        var sceneId = await scope.Context.Scenes.Select(scene => scene.Id).SingleAsync();
+        var videoId = await scope.Context.Videos.Select(video => video.Id).SingleAsync();
 
         scope.PrincipalAccessor.Set(CreatePrincipal(21));
         var playbackController = CreateController(scope.Context, scope.PrincipalAccessor);
         var engagementController = CreateEngagementController(scope.Context, scope.PrincipalAccessor);
 
         var interactionResult = await engagementController.RecordInteraction(
-            new EngagementInteractionWriteDto("scene", sceneId, "pageVisit"),
+            new EngagementInteractionWriteDto("video", videoId, "pageVisit"),
             CancellationToken.None);
         var playbackResult = await playbackController.RecordIntervals(new PlaybackIntervalsRequestDto(
-            "scene",
-            sceneId,
+            "video",
+            videoId,
             Guid.NewGuid(),
             120.0,
             40.0,
@@ -373,20 +373,20 @@ public sealed class Phase11PlaybackTests
     }
 
     [Fact]
-    public async Task ScenePlayback_CountsViewAtMinViewSecondsWithoutCompletion()
+    public async Task VideoPlayback_CountsViewAtMinViewSecondsWithoutCompletion()
     {
         await using var scope = await CreateContextAsync();
         await AddUserAsync(scope, 22);
-        scope.Context.Scenes.Add(new Scene { Title = "Threshold view" });
+        scope.Context.Videos.Add(new Video { Title = "Threshold view" });
         await scope.Context.SaveChangesAsync();
-        var sceneId = await scope.Context.Scenes.Select(scene => scene.Id).SingleAsync();
+        var videoId = await scope.Context.Videos.Select(video => video.Id).SingleAsync();
 
         scope.PrincipalAccessor.Set(CreatePrincipal(22));
         var controller = CreateController(scope.Context, scope.PrincipalAccessor);
 
         Assert.IsType<NoContentResult>(await controller.RecordIntervals(new PlaybackIntervalsRequestDto(
-            "scene",
-            sceneId,
+            "video",
+            videoId,
             Guid.NewGuid(),
             100.0,
             35.0,
@@ -438,16 +438,16 @@ public sealed class Phase11PlaybackTests
     {
         await using var scope = await CreateContextAsync();
         await AddUserAsync(scope, 24);
-        scope.Context.Scenes.Add(new Scene { Title = "Long session" });
+        scope.Context.Videos.Add(new Video { Title = "Long session" });
         await scope.Context.SaveChangesAsync();
-        var sceneId = await scope.Context.Scenes.Select(scene => scene.Id).SingleAsync();
+        var videoId = await scope.Context.Videos.Select(video => video.Id).SingleAsync();
 
         scope.PrincipalAccessor.Set(CreatePrincipal(24));
         var controller = CreateController(scope.Context, scope.PrincipalAccessor);
 
         Assert.IsType<NoContentResult>(await controller.RecordIntervals(new PlaybackIntervalsRequestDto(
-            "scene",
-            sceneId,
+            "video",
+            videoId,
             Guid.NewGuid(),
             180.0,
             65.0,
@@ -457,8 +457,8 @@ public sealed class Phase11PlaybackTests
         var affinity = await scope.Context.UserEntityAffinities.IgnoreQueryFilters().SingleAsync();
         var derivedLike = await scope.Context.Interactions.IgnoreQueryFilters().SingleAsync(interaction => interaction.Kind == InteractionKind.DerivedLike);
         Assert.Equal(1, affinity.DerivedLikeCount);
-        Assert.Equal(InteractionHostType.Scene, derivedLike.HostType);
-        Assert.Equal(sceneId, derivedLike.HostId);
+        Assert.Equal(InteractionHostType.Video, derivedLike.HostType);
+        Assert.Equal(videoId, derivedLike.HostId);
         Assert.Equal(24, derivedLike.UserId);
     }
 
@@ -482,7 +482,7 @@ public sealed class Phase11PlaybackTests
         Roles = new HashSet<string>(),
         Permissions = new HashSet<string>
         {
-            Permissions.ScenesRead,
+            Permissions.VideosRead,
         }.Concat(permissions).ToHashSet(),
     };
 
@@ -534,3 +534,4 @@ public sealed class Phase11PlaybackTests
         }
     }
 }
+

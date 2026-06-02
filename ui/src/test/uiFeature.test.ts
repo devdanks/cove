@@ -42,12 +42,12 @@ describe("Caption Types", () => {
       id: 1,
       languageCode: "en",
       captionType: "vtt",
-      filename: "scene.en.vtt",
+      filename: "video.en.vtt",
     };
     expect(caption.id).toBe(1);
     expect(caption.languageCode).toBe("en");
     expect(caption.captionType).toBe("vtt");
-    expect(caption.filename).toBe("scene.en.vtt");
+    expect(caption.filename).toBe("video.en.vtt");
   });
 
   it("video file can have optional captions", () => {
@@ -74,27 +74,27 @@ describe("Transcode URL Builder", () => {
   const API_BASE = "/api";
 
   const transcodeUrl = (id: number, resolution?: string) =>
-    `${API_BASE}/stream/scene/${id}/transcode${resolution ? `?resolution=${resolution}` : ""}`;
+    `${API_BASE}/stream/video/${id}/transcode${resolution ? `?resolution=${resolution}` : ""}`;
 
   const hlsMasterUrl = (id: number) =>
-    `${API_BASE}/stream/scene/${id}/hls/master.m3u8`;
+    `${API_BASE}/stream/video/${id}/hls/master.m3u8`;
 
   it("builds direct transcode URL without resolution", () => {
-    expect(transcodeUrl(42)).toBe("/api/stream/scene/42/transcode");
+    expect(transcodeUrl(42)).toBe("/api/stream/video/42/transcode");
   });
 
   it("builds transcode URL with resolution", () => {
-    expect(transcodeUrl(42, "720p")).toBe("/api/stream/scene/42/transcode?resolution=720p");
+    expect(transcodeUrl(42, "720p")).toBe("/api/stream/video/42/transcode?resolution=720p");
   });
 
   it("builds HLS master URL", () => {
-    expect(hlsMasterUrl(42)).toBe("/api/stream/scene/42/hls/master.m3u8");
+    expect(hlsMasterUrl(42)).toBe("/api/stream/video/42/hls/master.m3u8");
   });
 
-  it("handles different scene IDs", () => {
-    expect(transcodeUrl(1)).toBe("/api/stream/scene/1/transcode");
-    expect(transcodeUrl(999, "1080p")).toBe("/api/stream/scene/999/transcode?resolution=1080p");
-    expect(hlsMasterUrl(123)).toBe("/api/stream/scene/123/hls/master.m3u8");
+  it("handles different video IDs", () => {
+    expect(transcodeUrl(1)).toBe("/api/stream/video/1/transcode");
+    expect(transcodeUrl(999, "1080p")).toBe("/api/stream/video/999/transcode?resolution=1080p");
+    expect(hlsMasterUrl(123)).toBe("/api/stream/video/123/hls/master.m3u8");
   });
 });
 
@@ -102,11 +102,11 @@ describe("Scraper Request Types", () => {
   it("scrape URL request structure", () => {
     const req = {
       scraperId: "test-scraper",
-      entityType: "scene",
-      url: "https://example.com/scene/123",
+      entityType: "video",
+      url: "https://example.com/video/123",
     };
     expect(req.scraperId).toBe("test-scraper");
-    expect(req.entityType).toBe("scene");
+    expect(req.entityType).toBe("video");
     expect(req.url).toContain("example.com");
   });
 
@@ -124,10 +124,10 @@ describe("Scraper Request Types", () => {
   it("scrape fragment request structure", () => {
     const req = {
       scraperId: "test-scraper",
-      entityType: "scene",
-      fragment: { title: "Test Scene", url: "https://example.com" },
+      entityType: "video",
+      fragment: { title: "Test Video", url: "https://example.com" },
     };
-    expect(req.fragment.title).toBe("Test Scene");
+    expect(req.fragment.title).toBe("Test Video");
     expect(req.fragment.url).toContain("example.com");
   });
 });
@@ -170,3 +170,4 @@ describe("Quality Selection", () => {
     expect(available).toContain(selected);
   });
 });
+

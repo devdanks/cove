@@ -85,23 +85,23 @@ public class MetadataController(
 
     [HttpPost("generate")]
     [RequiresPermission(Permissions.JobsRun)]
-    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite, ActionArgumentName = "opts", PropertyName = "SceneIds")]
+    [RequiresEntityAccess(EntityKinds.Video, Permissions.VideosWrite, ActionArgumentName = "opts", PropertyName = "VideoIds")]
     public ActionResult<object> StartGenerate([FromBody] GenerateOptionsDto? opts)
     {
-        var selectedSceneIds = opts?.SceneIds;
-        var hasSceneSelection = selectedSceneIds is { Count: > 0 };
+        var selectedVideoIds = opts?.VideoIds;
+        var hasVideoSelection = selectedVideoIds is { Count: > 0 };
         var hasPathSelection = opts?.Paths is { Count: > 0 };
-        var requestsExplicitNonSceneWork = opts?.ImagePhashes == true
+        var requestsExplicitNonVideoWork = opts?.ImagePhashes == true
             || opts?.ImageThumbnails == true
             || opts?.GalleryThumbnails == true
             || opts?.AudioPhashes == true
             || opts?.TextPhashes == true;
 
-        if (hasSceneSelection && !hasPathSelection && requestsExplicitNonSceneWork)
+        if (hasVideoSelection && !hasPathSelection && requestsExplicitNonVideoWork)
         {
             return BadRequest(new
             {
-                error = "Non-scene generate options require paths when sceneIds are supplied. Provide paths for image, gallery, audio, or text work, or run those options without sceneIds."
+                error = "Non-video generate options require paths when videoIds are supplied. Provide paths for image, gallery, audio, or text work, or run those options without videoIds."
             });
         }
 
@@ -123,10 +123,10 @@ public class MetadataController(
                 await innerDb.SaveChangesAsync(token);
             }
 
-            var allowNonSceneWork = !hasSceneSelection || hasPathSelection;
-            var generateNonSceneMd5 = opts?.Md5 == true && allowNonSceneWork;
+            var allowNonVideoWork = !hasVideoSelection || hasPathSelection;
+            var generateNonVideoMd5 = opts?.Md5 == true && allowNonVideoWork;
 
-            var sceneWorkRequested = hasSceneSelection
+            var videoWorkRequested = hasVideoSelection
                 || opts?.Thumbnails == true
                 || opts?.Previews == true
                 || opts?.Sprites == true
@@ -136,16 +136,16 @@ public class MetadataController(
                 || opts?.Phashes == true
                 || opts?.Md5 == true;
 
-            var scenes = hasSceneSelection
-                ? await dbCtx.Scenes.Include(s => s.Files).ThenInclude(f => f.ParentFolder).Include(s => s.Files).ThenInclude(f => f.Fingerprints).Where(s => selectedSceneIds!.Contains(s.Id)).AsSplitQuery().ToListAsync(ct)
-                : sceneWorkRequested
-                    ? await dbCtx.Scenes.Include(s => s.Files).ThenInclude(f => f.ParentFolder).Include(s => s.Files).ThenInclude(f => f.Fingerprints).AsSplitQuery().ToListAsync(ct)
-                    : new List<Scene>();
+            var videos = hasVideoSelection
+                ? await dbCtx.Videos.Include(s => s.Files).ThenInclude(f => f.ParentFolder).Include(s => s.Files).ThenInclude(f => f.Fingerprints).Where(s => selectedVideoIds!.Contains(s.Id)).AsSplitQuery().ToListAsync(ct)
+                : videoWorkRequested
+                    ? await dbCtx.Videos.Include(s => s.Files).ThenInclude(f => f.ParentFolder).Include(s => s.Files).ThenInclude(f => f.Fingerprints).AsSplitQuery().ToListAsync(ct)
+                    : new List<Video>();
 
-            if (!hasSceneSelection && opts?.Paths is { Count: > 0 } paths)
+            if (!hasVideoSelection && opts?.Paths is { Count: > 0 } paths)
             {
                 var filterPaths = NormalizeFilterPaths(paths);
-                scenes = scenes.Where(s =>
+                videos = videos.Where(s =>
                 {
                     var file = s.Files.OrderBy(f => f.Id).FirstOrDefault();
                     if (file == null) return false;
@@ -155,15 +155,15 @@ public class MetadataController(
             }
 
             // Build work items (read-only snapshot) so we don't touch DbContext from parallel threads
-            var workItems = scenes.Select(s =>
+            var workItems = videos.Select(s =>
             {
                 var file = s.Files.OrderBy(f => f.Id).FirstOrDefault();
                 return new
                 {
-                    Scene = s,
+                    Video = s,
                     File = file,
                     Path = file != null ? Path.Combine(file.ParentFolder?.Path ?? "", file.Basename) : "",
-                    HasThumbnail = System.IO.File.Exists(thumbnailService.GetThumbnailPathForScene(s.Id)),
+                    HasThumbnail = System.IO.File.Exists(thumbnailService.GetThumbnailPathForVideo(s.Id)),
                     HasPreview = System.IO.File.Exists(thumbnailService.GetPreviewPath(s.Id)),
                     HasSprite = System.IO.File.Exists(thumbnailService.GetSpritePath(s.Id))
                         && System.IO.File.Exists(thumbnailService.GetSpriteVttPath(s.Id)),
@@ -173,17 +173,17 @@ public class MetadataController(
             }).Where(w => w.File != null).ToList();
 
             var overwrite = opts?.Overwrite == true;
-            var generateSceneFiles = opts?.Thumbnails == true
+            var generateVideoFiles = opts?.Thumbnails == true
                 || opts?.Previews == true
                 || opts?.Sprites == true
                 || opts?.SegmentThumbnails == true
                 || opts?.SegmentPreviews == true
                 || opts?.Markers == true;
-            var generateScenePhashes = opts?.Phashes == true;
-            var generateSceneMd5 = opts?.Md5 == true;
+            var generateVideoPhashes = opts?.Phashes == true;
+            var generateVideoMd5 = opts?.Md5 == true;
 
             workItems = workItems
-                .Where(item => (generateSceneFiles && (
+                .Where(item => (generateVideoFiles && (
                         overwrite
                         || (opts?.Thumbnails == true && !item.HasThumbnail)
                         || (opts?.Previews == true && !item.HasPreview)
@@ -191,24 +191,24 @@ public class MetadataController(
                         || opts?.SegmentThumbnails == true
                         || opts?.SegmentPreviews == true
                         || opts?.Markers == true))
-                    || (generateScenePhashes && (overwrite || !item.HasPhash))
-                    || (generateSceneMd5 && (overwrite || !item.HasMd5)))
+                    || (generateVideoPhashes && (overwrite || !item.HasPhash))
+                    || (generateVideoMd5 && (overwrite || !item.HasMd5)))
                 .ToList();
 
             var total = workItems.Count;
             var processed = 0;
             var maxParallel = config.MaxParallelTasks;
             var parallelism = maxParallel <= 0 ? Environment.ProcessorCount : Math.Max(1, maxParallel);
-            var segmentPreviewsBySceneId = new Dictionary<int, List<(double StartSec, double? EndSec)>>();
+            var segmentPreviewsByVideoId = new Dictionary<int, List<(double StartSec, double? EndSec)>>();
             var generateSegmentThumbnails = opts?.SegmentThumbnails == true || opts?.SegmentPreviews == true || opts?.Markers == true;
             var generateSegmentPreviews = opts?.SegmentPreviews == true || opts?.Markers == true;
 
             if (generateSegmentThumbnails && workItems.Count > 0)
             {
-                var workItemSceneIds = workItems.Select(item => item.Scene.Id).ToList();
-                segmentPreviewsBySceneId = (await dbCtx.Segments
+                var workItemVideoIds = workItems.Select(item => item.Video.Id).ToList();
+                segmentPreviewsByVideoId = (await dbCtx.Segments
                     .AsNoTracking()
-                    .Where(segment => segment.HostType == SegmentHostType.Scene && workItemSceneIds.Contains(segment.HostId))
+                    .Where(segment => segment.HostType == SegmentHostType.Video && workItemVideoIds.Contains(segment.HostId))
                     .Select(segment => new { segment.HostId, segment.StartSec, segment.EndSec })
                     .ToListAsync(ct))
                     .GroupBy(segment => segment.HostId)
@@ -237,38 +237,38 @@ public class MetadataController(
 
                 if (opts?.Thumbnails == true)
                 {
-                    var thumbPath = thumbnailService.GetThumbnailPathForScene(item.Scene.Id);
+                    var thumbPath = thumbnailService.GetThumbnailPathForVideo(item.Video.Id);
                     var thumbExists = System.IO.File.Exists(thumbPath);
                     if (opts?.Overwrite == true && thumbExists) System.IO.File.Delete(thumbPath);
                     if (opts?.Overwrite == true || !thumbExists)
-                        await thumbnailService.GenerateSceneThumbnailAsync(item.Scene.Id, null, token);
+                        await thumbnailService.GenerateVideoThumbnailAsync(item.Video.Id, null, token);
                 }
 
                 if (opts?.Previews == true)
                 {
-                    var previewPath = thumbnailService.GetPreviewPath(item.Scene.Id);
+                    var previewPath = thumbnailService.GetPreviewPath(item.Video.Id);
                     if (opts?.Overwrite == true)
                     {
                         if (System.IO.File.Exists(previewPath)) System.IO.File.Delete(previewPath);
                     }
                     if (opts?.Overwrite == true || !System.IO.File.Exists(previewPath))
-                        await thumbnailService.GenerateScenePreviewAsync(item.Scene.Id, token);
+                        await thumbnailService.GenerateVideoPreviewAsync(item.Video.Id, token);
                 }
 
                 if (opts?.Sprites == true)
                 {
-                    var spritePath = thumbnailService.GetSpritePath(item.Scene.Id);
-                    var vttPath = thumbnailService.GetSpriteVttPath(item.Scene.Id);
+                    var spritePath = thumbnailService.GetSpritePath(item.Video.Id);
+                    var vttPath = thumbnailService.GetSpriteVttPath(item.Video.Id);
                     if (opts?.Overwrite == true)
                     {
                         if (System.IO.File.Exists(spritePath)) System.IO.File.Delete(spritePath);
                         if (System.IO.File.Exists(vttPath)) System.IO.File.Delete(vttPath);
                     }
                     if (opts?.Overwrite == true || !System.IO.File.Exists(spritePath) || !System.IO.File.Exists(vttPath))
-                        await thumbnailService.GenerateSceneSpriteAsync(item.Scene.Id, token);
+                        await thumbnailService.GenerateVideoSpriteAsync(item.Video.Id, token);
                 }
 
-                if (generateSegmentThumbnails && segmentPreviewsBySceneId.TryGetValue(item.Scene.Id, out var segmentPreviews))
+                if (generateSegmentThumbnails && segmentPreviewsByVideoId.TryGetValue(item.Video.Id, out var segmentPreviews))
                 {
                     var duration = item.File!.Duration;
                     var generatedSegmentPreviewClips = new List<SegmentPreviewClip>();
@@ -278,12 +278,12 @@ public class MetadataController(
                         if (duration > 0)
                             screenshotSecond = Math.Min(screenshotSecond, Math.Max(0, duration - 0.1));
 
-                        var segmentThumbnailPath = thumbnailService.GetTimestampedThumbnailPath(item.Scene.Id, screenshotSecond);
+                        var segmentThumbnailPath = thumbnailService.GetTimestampedThumbnailPath(item.Video.Id, screenshotSecond);
                             if (overwrite && System.IO.File.Exists(segmentThumbnailPath))
                             System.IO.File.Delete(segmentThumbnailPath);
 
                         var segmentPreviewPath = generateSegmentPreviews
-                            ? thumbnailService.GetSegmentAnimatedPreviewPath(item.Scene.Id, screenshotSecond)
+                            ? thumbnailService.GetSegmentAnimatedPreviewPath(item.Video.Id, screenshotSecond)
                             : null;
 
                         if (segmentPreviewPath != null && overwrite && System.IO.File.Exists(segmentPreviewPath))
@@ -292,7 +292,7 @@ public class MetadataController(
                         }
 
                         if (!System.IO.File.Exists(segmentThumbnailPath))
-                            await thumbnailService.GenerateSceneThumbnailAsync(item.Scene.Id, screenshotSecond, token);
+                            await thumbnailService.GenerateVideoThumbnailAsync(item.Video.Id, screenshotSecond, token);
 
                         if (generateSegmentPreviews && segmentPreviewPath != null)
                         {
@@ -314,21 +314,21 @@ public class MetadataController(
                                 }
                             }
 
-                            await thumbnailService.GenerateSegmentAnimatedPreviewAsync(item.Scene.Id, screenshotSecond, segmentPreview.EndSec, token);
+                            await thumbnailService.GenerateSegmentAnimatedPreviewAsync(item.Video.Id, screenshotSecond, segmentPreview.EndSec, token);
                             if (System.IO.File.Exists(segmentPreviewPath))
                                 AddSegmentPreviewClip(generatedSegmentPreviewClips, new SegmentPreviewClip(clipStart, clipEnd, segmentPreviewPath));
                         }
                     }
                 }
 
-                if (generateScenePhashes && (overwrite || !item.HasPhash))
+                if (generateVideoPhashes && (overwrite || !item.HasPhash))
                 {
                     var phash = await fingerprintService.ComputeVideoPhashAsync(item.Path, item.File!.Duration, token);
                     if (!string.IsNullOrWhiteSpace(phash))
                         await UpsertFingerprintAsync(item.File!.Id, "phash", phash, token);
                 }
 
-                if (generateSceneMd5 && (overwrite || !item.HasMd5))
+                if (generateVideoMd5 && (overwrite || !item.HasMd5))
                 {
                     var md5 = await fingerprintService.ComputeMd5Async(item.Path, token);
                     if (!string.IsNullOrWhiteSpace(md5))
@@ -336,10 +336,10 @@ public class MetadataController(
                 }
 
                 var current = Interlocked.Increment(ref processed);
-                progress.Report((double)current / total, $"Generating ({current}/{total}) {item.Scene.Title ?? "Untitled"}");
+                progress.Report((double)current / total, $"Generating ({current}/{total}) {item.Video.Title ?? "Untitled"}");
             });
 
-            if (allowNonSceneWork && (opts?.ImagePhashes == true || opts?.ImageThumbnails == true || generateNonSceneMd5))
+            if (allowNonVideoWork && (opts?.ImagePhashes == true || opts?.ImageThumbnails == true || generateNonVideoMd5))
             {
                 var imageFiles = await dbCtx.ImageFiles
                     .Include(f => f.ParentFolder)
@@ -387,7 +387,7 @@ public class MetadataController(
                         }
 
                         var hasMd5 = imageFile.Fingerprints.Any(fp => fp.Type == "md5" && !string.IsNullOrWhiteSpace(fp.Value));
-                        if (generateNonSceneMd5 && (opts?.Overwrite == true || !hasMd5))
+                        if (generateNonVideoMd5 && (opts?.Overwrite == true || !hasMd5))
                         {
                             var md5 = await fingerprintService.ComputeMd5Async(imagePath, token);
                             if (!string.IsNullOrWhiteSpace(md5))
@@ -400,7 +400,7 @@ public class MetadataController(
                 });
             }
 
-            if (allowNonSceneWork && (opts?.GalleryThumbnails == true || generateNonSceneMd5))
+            if (allowNonVideoWork && (opts?.GalleryThumbnails == true || generateNonVideoMd5))
             {
                 var galleries = await dbCtx.Galleries
                     .Include(g => g.Folder)
@@ -449,7 +449,7 @@ public class MetadataController(
                             await thumbnailService.GenerateImageThumbnailAsync(coverImageId.Value, overwrite: opts?.Overwrite == true, ct: token);
                     }
 
-                    if (generateNonSceneMd5)
+                    if (generateNonVideoMd5)
                     {
                         foreach (var galleryFile in gallery.Files)
                         {
@@ -472,7 +472,7 @@ public class MetadataController(
                 });
             }
 
-            if (allowNonSceneWork && (opts?.AudioPhashes == true || generateNonSceneMd5))
+            if (allowNonVideoWork && (opts?.AudioPhashes == true || generateNonVideoMd5))
             {
                 var audioFiles = await dbCtx.AudioFiles
                     .Include(f => f.ParentFolder)
@@ -517,7 +517,7 @@ public class MetadataController(
                         }
 
                         var hasMd5 = audioFile.Fingerprints.Any(fp => fp.Type == "md5" && !string.IsNullOrWhiteSpace(fp.Value));
-                        if (generateNonSceneMd5 && (opts?.Overwrite == true || !hasMd5))
+                        if (generateNonVideoMd5 && (opts?.Overwrite == true || !hasMd5))
                         {
                             var md5 = await fingerprintService.ComputeMd5Async(audioPath, token);
                             if (!string.IsNullOrWhiteSpace(md5))
@@ -530,7 +530,7 @@ public class MetadataController(
                 });
             }
 
-            if (allowNonSceneWork && (opts?.TextPhashes == true || generateNonSceneMd5))
+            if (allowNonVideoWork && (opts?.TextPhashes == true || generateNonVideoMd5))
             {
                 var textFiles = await dbCtx.TextFiles
                     .Include(f => f.ParentFolder)
@@ -575,7 +575,7 @@ public class MetadataController(
                         }
 
                         var hasMd5 = textFile.Fingerprints.Any(fp => fp.Type == "md5" && !string.IsNullOrWhiteSpace(fp.Value));
-                        if (generateNonSceneMd5 && (opts?.Overwrite == true || !hasMd5))
+                        if (generateNonVideoMd5 && (opts?.Overwrite == true || !hasMd5))
                         {
                             var md5 = await fingerprintService.ComputeMd5Async(textPath, token);
                             if (!string.IsNullOrWhiteSpace(md5))
@@ -592,17 +592,17 @@ public class MetadataController(
         return Ok(new { jobId });
     }
 
-    private static (double StartSec, double EndSec) ResolveSegmentPreviewClip(double startSec, double? endSec, double sceneDuration)
+    private static (double StartSec, double EndSec) ResolveSegmentPreviewClip(double startSec, double? endSec, double videoDuration)
     {
-        if (sceneDuration <= 0)
+        if (videoDuration <= 0)
             return (Math.Max(0, startSec), Math.Max(0, startSec) + SegmentPreviewDefaultDuration);
 
-        var clampedStart = Math.Max(0, Math.Min(startSec, Math.Max(0, sceneDuration - 0.1)));
+        var clampedStart = Math.Max(0, Math.Min(startSec, Math.Max(0, videoDuration - 0.1)));
         var requestedDuration = endSec.HasValue && endSec.Value > clampedStart
             ? endSec.Value - clampedStart
             : SegmentPreviewDefaultDuration;
         var previewDuration = Math.Min(SegmentPreviewMaxDuration, Math.Max(0.5, requestedDuration));
-        previewDuration = Math.Min(previewDuration, Math.Max(0.5, sceneDuration - clampedStart));
+        previewDuration = Math.Min(previewDuration, Math.Max(0.5, videoDuration - clampedStart));
         return (clampedStart, clampedStart + previewDuration);
     }
 
@@ -737,12 +737,12 @@ public class MetadataController(
 
             var exportData = new Dictionary<string, object>();
 
-            if (opts?.IncludeScenes != false)
+            if (opts?.IncludeVideos != false)
             {
-                progress.Report(0.1, "Exporting scenes...");
-                exportData["scenes"] = await dbCtx.Scenes
-                    .Include(s => s.SceneTags).ThenInclude(st => st.Tag)
-                    .Include(s => s.ScenePerformers).ThenInclude(sp => sp.Performer)
+                progress.Report(0.1, "Exporting videos...");
+                exportData["videos"] = await dbCtx.Videos
+                    .Include(s => s.VideoTags).ThenInclude(st => st.Tag)
+                    .Include(s => s.VideoPerformers).ThenInclude(sp => sp.Performer)
                     .Include(s => s.Studio)
                     .Include(s => s.Files).ThenInclude(f => f.Fingerprints)
                     .AsNoTracking()
@@ -952,27 +952,27 @@ public class MetadataController(
 
     [HttpPost("identify")]
     [RequiresPermission(Permissions.LibraryAutoTag)]
-    [RequiresEntityAccess(EntityKinds.Scene, Permissions.ScenesWrite, ActionArgumentName = "opts", PropertyName = "SceneIds")]
+    [RequiresEntityAccess(EntityKinds.Video, Permissions.VideosWrite, ActionArgumentName = "opts", PropertyName = "VideoIds")]
     public ActionResult<object> StartIdentify([FromBody] IdentifyOptionsDto? opts)
     {
-        var jobId = jobService.Enqueue("identify", "Identifying scenes", async (progress, ct) =>
+        var jobId = jobService.Enqueue("identify", "Identifying videos", async (progress, ct) =>
         {
             using var scope = scopeFactory.CreateScope();
             var dbCtx = scope.ServiceProvider.GetRequiredService<CoveContext>();
             var metadataServerSvc = scope.ServiceProvider.GetService<MetadataServerService>();
 
-            var scenes = opts?.SceneIds?.Count > 0
-                ? await dbCtx.Scenes
+            var videos = opts?.VideoIds?.Count > 0
+                ? await dbCtx.Videos
                     .Include(s => s.Files).ThenInclude(f => f.Fingerprints)
-                    .Include(s => s.SceneTags)
-                    .Include(s => s.ScenePerformers)
+                    .Include(s => s.VideoTags)
+                    .Include(s => s.VideoPerformers)
                     .Include(s => s.RemoteIds)
                     .Include(s => s.Urls)
-                    .Where(s => opts.SceneIds.Contains(s.Id)).AsSplitQuery().ToListAsync(ct)
-                : await dbCtx.Scenes
+                    .Where(s => opts.VideoIds.Contains(s.Id)).AsSplitQuery().ToListAsync(ct)
+                : await dbCtx.Videos
                     .Include(s => s.Files).ThenInclude(f => f.Fingerprints)
-                    .Include(s => s.SceneTags)
-                    .Include(s => s.ScenePerformers)
+                    .Include(s => s.VideoTags)
+                    .Include(s => s.VideoPerformers)
                     .Include(s => s.RemoteIds)
                     .Include(s => s.Urls)
                     .AsSplitQuery().ToListAsync(ct);
@@ -984,7 +984,7 @@ public class MetadataController(
                 .ToDictionary(item => item.endpoint, item => item.index, StringComparer.OrdinalIgnoreCase);
 
             // Build import config from identify options
-            var importConfig = new MetadataServerSceneImportRequestDto
+            var importConfig = new MetadataServerVideoImportRequestDto
             {
                 SetCoverImage = opts?.SetCoverImage ?? true,
                 SetTags = opts?.SetTags ?? true,
@@ -999,14 +999,14 @@ public class MetadataController(
                 SkipSingleNamePerformers = opts?.SkipSingleNamePerformers ?? true,
             };
 
-            var total = scenes.Count;
+            var total = videos.Count;
             for (var i = 0; i < total; i++)
             {
                 ct.ThrowIfCancellationRequested();
-                progress.Report((double)(i + 1) / total, $"Identifying scene {i + 1}/{total}");
+                progress.Report((double)(i + 1) / total, $"Identifying video {i + 1}/{total}");
 
-                var scene = scenes[i];
-                var fingerprints = scene.Files.SelectMany(f => f.Fingerprints).ToList();
+                var video = videos[i];
+                var fingerprints = video.Files.SelectMany(f => f.Fingerprints).ToList();
                 if (fingerprints.Count == 0) continue;
 
                 // Attempt MetadataServer identification
@@ -1014,17 +1014,17 @@ public class MetadataController(
                 {
                     try
                     {
-                        IReadOnlyList<MetadataServerSceneMatchDto> matches;
+                        IReadOnlyList<MetadataServerVideoMatchDto> matches;
                         if (sourceEndpoints == null)
                         {
-                            matches = await metadataServerSvc.SearchScenesAsync(scene, null, null, ct);
+                            matches = await metadataServerSvc.SearchVideosAsync(video, null, null, ct);
                         }
                         else
                         {
-                            var orderedMatches = new List<MetadataServerSceneMatchDto>();
+                            var orderedMatches = new List<MetadataServerVideoMatchDto>();
                             foreach (var endpoint in sourceEndpoints)
                             {
-                                orderedMatches.AddRange(await metadataServerSvc.SearchScenesAsync(scene, null, endpoint, ct));
+                                orderedMatches.AddRange(await metadataServerSvc.SearchVideosAsync(video, null, endpoint, ct));
                             }
                             matches = orderedMatches;
                         }
@@ -1035,8 +1035,8 @@ public class MetadataController(
                                 .Select(match => new
                                 {
                                     Match = match,
-                                    DurationDifferenceSeconds = GetDurationDifferenceSeconds(scene, match),
-                                    PhashDistance = GetBestPhashDistance(scene, match),
+                                    DurationDifferenceSeconds = GetDurationDifferenceSeconds(video, match),
+                                    PhashDistance = GetBestPhashDistance(video, match),
                                 })
                                 .Where(candidate => MeetsIdentifyAutoApplyThresholds(candidate.DurationDifferenceSeconds, candidate.PhashDistance, identifyDefaults))
                                 .OrderBy(candidate => sourceOrder != null && sourceOrder.TryGetValue(candidate.Match.Endpoint, out var index) ? index : int.MaxValue)
@@ -1054,19 +1054,19 @@ public class MetadataController(
                                 continue;
 
                             var best = rankedMatches[0];
-                            await metadataServerSvc.MergeSceneAsync(scene, best.Endpoint, best.Id, importConfig, ct);
+                            await metadataServerSvc.MergeVideoAsync(video, best.Endpoint, best.Id, importConfig, ct);
                             await dbCtx.SaveChangesAsync(ct);
                         }
                     }
                     catch (Exception ex)
                     {
-                        logger.LogWarning(ex, "MetadataServer identify failed for scene {SceneId}", scene.Id);
+                        logger.LogWarning(ex, "MetadataServer identify failed for video {VideoId}", video.Id);
                     }
                 }
             }
 
             await dbCtx.SaveChangesAsync(ct);
-            logger.LogInformation("Identify completed for {Count} scenes", total);
+            logger.LogInformation("Identify completed for {Count} videos", total);
         }, exclusive: false);
 
         return Ok(new { jobId });
@@ -1111,17 +1111,17 @@ public class MetadataController(
         return true;
     }
 
-    private static double? GetDurationDifferenceSeconds(Scene scene, MetadataServerSceneMatchDto match)
+    private static double? GetDurationDifferenceSeconds(Video video, MetadataServerVideoMatchDto match)
     {
-        var localDuration = scene.Files.Select(file => (double?)file.Duration).Max();
+        var localDuration = video.Files.Select(file => (double?)file.Duration).Max();
         return localDuration.HasValue && match.Duration.HasValue
             ? Math.Abs(localDuration.Value - match.Duration.Value)
             : null;
     }
 
-    private static int? GetBestPhashDistance(Scene scene, MetadataServerSceneMatchDto match)
+    private static int? GetBestPhashDistance(Video video, MetadataServerVideoMatchDto match)
     {
-        var localPhashes = scene.Files
+        var localPhashes = video.Files
             .SelectMany(file => file.Fingerprints)
             .Where(fingerprint => string.Equals(fingerprint.Type, "phash", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(fingerprint.Value))
             .Select(fingerprint => fingerprint.Value)
@@ -1171,7 +1171,7 @@ public class MetadataController(
             var oshashToPhash = new Dictionary<string, string>();
             var page = 1;
             var perPage = 100;
-            var totalScenes = 0;
+            var totalVideos = 0;
             var fetched = 0;
 
             do
@@ -1180,10 +1180,10 @@ public class MetadataController(
 
                 var graphqlQuery = new
                 {
-                    query = @"query FindScenes($filter: FindFilterType!) {
-                        findScenes(filter: $filter) {
+                    query = @"query FindVideos($filter: FindFilterType!) {
+                        findVideos(filter: $filter) {
                             count
-                            scenes {
+                            videos {
                                 files {
                                     fingerprints {
                                         type
@@ -1209,12 +1209,12 @@ public class MetadataController(
                 var responseJson = await response.Content.ReadAsStringAsync(ct);
 
                 using var doc = JsonDocument.Parse(responseJson);
-                var data = doc.RootElement.GetProperty("data").GetProperty("findScenes");
-                totalScenes = data.GetProperty("count").GetInt32();
+                var data = doc.RootElement.GetProperty("data").GetProperty("findVideos");
+                totalVideos = data.GetProperty("count").GetInt32();
 
-                foreach (var scene in data.GetProperty("scenes").EnumerateArray())
+                foreach (var video in data.GetProperty("videos").EnumerateArray())
                 {
-                    foreach (var file in scene.GetProperty("files").EnumerateArray())
+                    foreach (var file in video.GetProperty("files").EnumerateArray())
                     {
                         string? oshash = null;
                         string? phash = null;
@@ -1234,15 +1234,15 @@ public class MetadataController(
 
                 fetched += perPage;
                 page++;
-                progress.Report(Math.Min(0.5, (double)fetched / Math.Max(totalScenes, 1)),
-                    $"Fetched {Math.Min(fetched, totalScenes)}/{totalScenes} scenes from source...");
+                progress.Report(Math.Min(0.5, (double)fetched / Math.Max(totalVideos, 1)),
+                    $"Fetched {Math.Min(fetched, totalVideos)}/{totalVideos} videos from source...");
             }
-            while (fetched < totalScenes);
+            while (fetched < totalVideos);
 
             logger.LogInformation("Fetched {Count} oshashâ†’phash mappings from source instance", oshashToPhash.Count);
 
             // Step 2: Load all files with fingerprints from our DB
-            progress.Report(0.5, "Loading local scene fingerprints...");
+            progress.Report(0.5, "Loading local video fingerprints...");
             var localFiles = await dbCtx.Set<BaseFileEntity>()
                 .Include(f => f.Fingerprints)
                 .ToListAsync(ct);
@@ -1302,3 +1302,4 @@ public class MetadataController(
         return Ok(new { jobId });
     }
 }
+

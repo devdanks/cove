@@ -6,7 +6,7 @@
  */
 
 // ── Entity types ─────────────────────────────────────────────────────────
-export type EntityType = "scene" | "performer" | "studio" | "tag" | "gallery" | "image" | "group" | "audio" | "text" | "face" | "segment";
+export type EntityType = "video" | "performer" | "studio" | "tag" | "gallery" | "image" | "group" | "audio" | "text" | "face" | "segment";
 
 // ── Criterion and custom-field types ─────────────────────────────────────
 export type CriterionModifier =
@@ -20,7 +20,7 @@ export type ListCriterionType = "string" | "number" | "date" | "timestamp" | "du
 export type CustomFieldType =
   | "text" | "longText" | "number" | "boolean" | "date" | "timestamp"
   | "duration" | "percent" | "url" | "enum"
-  | "tag" | "performer" | "studio" | "scene" | "gallery" | "image" | "group";
+  | "tag" | "performer" | "studio" | "video" | "gallery" | "image" | "group";
 
 // ── Common props passed to extension components ──────────────────────────
 /** Props passed to extension components rendered in entity detail tabs. */
@@ -109,3 +109,4 @@ export interface ExtensionModule {
   /** Optional cleanup hook called before unload. */
   onUnload?: () => void;
 }
+

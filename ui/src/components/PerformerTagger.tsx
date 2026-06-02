@@ -4,7 +4,7 @@ import { performers, system, tags } from "../api/client";
 import type { Performer, MetadataServerPerformerMatch, MetadataServerPerformerImportRequest, ScrapedPerformer, ScraperSummary } from "../api/types";
 import { useAppConfig } from "../state/AppConfigContext";
 import { createNestedRouteLinkProps } from "./cardNavigation";
-import { DEFAULT_COLLECTION_MODES, pickBestSourceUrl, type CollectionMode } from "./sceneScrapeUtils";
+import { DEFAULT_COLLECTION_MODES, pickBestSourceUrl, type CollectionMode } from "./videoScrapeUtils";
 import { buildRelationActionMap, relationKey, ScrapeRelationChoices, type ScrapeRelationActionMap } from "./ScrapeRelationChoices";
 import {
   CompactCollectionDecision,
@@ -604,7 +604,7 @@ function PerformerTaggerRow({
   );
 
   return (
-    <div className={`px-3 py-2 ${state?.saved ? "opacity-50" : ""} ${selected ? "bg-accent/5" : ""}`}>
+    <div className={`px-3 py-2 ${selected ? "bg-accent/5" : ""}`}>
       <div className="flex gap-3">
         {onSelect && (
           <button
@@ -784,7 +784,7 @@ function PerformerResultRow({
         </div>
       </div>
 
-      {isSelected && (
+      {isSelected && !saved && (
         <div className="border-t border-border px-3 py-3 space-y-3">
           {scalarRows.map((row) => (
             <CompactScalarDecision
@@ -856,4 +856,5 @@ function PerformerResultRow({
     </div>
   );
 }
+
 

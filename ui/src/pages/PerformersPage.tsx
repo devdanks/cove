@@ -43,7 +43,7 @@ export function PerformersPage({ onNavigate }: Props) {
   const defaultState = useMemo(() => {
     const savedFilter = getDefaultFilter("performers");
     return {
-      filter: savedFilter?.findFilter ?? { page: 1, perPage: 40, sort: "latest_scene_date", direction: "desc" },
+      filter: savedFilter?.findFilter ?? { page: 1, perPage: 40, sort: "latest_video_date", direction: "desc" },
       objectFilter: savedFilter?.objectFilter ?? {},
       displayMode: "grid" as DisplayMode,
     };
@@ -230,7 +230,7 @@ function PerformerListTable({ performers: items, engagementById, onNavigate, sel
           <th className="py-2 px-3">Gender</th>
           <th className="py-2 px-3">Age</th>
           <th className="py-2 px-3">Country</th>
-          <th className="py-2 px-3 text-right">Scenes</th>
+          <th className="py-2 px-3 text-right">Videos</th>
           <th className="py-2 px-3 text-right">Rating</th>
           <th className="py-2 px-3">Favorite</th>
         </tr>
@@ -261,7 +261,7 @@ function PerformerListTable({ performers: items, engagementById, onNavigate, sel
               <td className="py-2 px-3 text-secondary capitalize">{p.gender?.toLowerCase()}</td>
               <td className="py-2 px-3 text-secondary">{age ?? ""}</td>
               <td className="py-2 px-3 text-secondary">{p.country ?? ""}</td>
-              <td className="py-2 px-3 text-secondary text-right">{p.sceneCount}</td>
+              <td className="py-2 px-3 text-secondary text-right">{p.videoCount}</td>
               <td className="py-2 px-3 text-secondary text-right">{rating ?? ""}</td>
               <td className="py-2 px-3">
                 {favorite && <Heart className="w-4 h-4 fill-red-500 text-red-500" />}
@@ -348,3 +348,4 @@ function PerformerCreateModal({ open, onClose, onCreated }: { open: boolean; onC
     </EditModal>
   );
 }
+

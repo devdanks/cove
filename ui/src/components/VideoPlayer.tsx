@@ -15,7 +15,7 @@ import {
   Volume2,
   VolumeX,
 } from "lucide-react";
-import { scenes } from "../api/client";
+import { videos } from "../api/client";
 import type { Detection, Face, Segment } from "../api/types";
 import { createPlaybackTracker, trackInteraction, type PlaybackTrackingTarget } from "../utils/interactionTracking";
 import { useAppConfig } from "../state/AppConfigContext";
@@ -105,7 +105,7 @@ export function VideoPlayer({
   format,
   duration,
   resumeTime,
-  sceneId,
+  videoId,
   detections = [],
   segments = [],
   faces = [],
@@ -129,7 +129,7 @@ export function VideoPlayer({
   format: string;
   duration: number;
   resumeTime?: number;
-  sceneId: number;
+  videoId: number;
   detections?: Detection[];
   segments?: Segment[];
   faces?: FaceOverlayInfo[];
@@ -206,7 +206,7 @@ export function VideoPlayer({
       return null;
     }
 
-    const baseTarget = playbackTracking ?? { hostType: "scene", hostId: sceneId, scopeKey: `scene:${sceneId}`, surface: "detail" };
+    const baseTarget = playbackTracking ?? { hostType: "video", hostId: videoId, scopeKey: `video:${videoId}`, surface: "detail" };
     return {
       ...baseTarget,
       clipStartSec: clip?.start ?? baseTarget.clipStartSec,
@@ -217,7 +217,7 @@ export function VideoPlayer({
       playbackRate: rate,
       route: typeof window === "undefined" ? baseTarget.route : baseTarget.route ?? `${window.location.pathname}${window.location.search}${window.location.hash}`,
     };
-  }, [autostart, clip?.end, clip?.start, fullscreen, muted, playbackTracking, rate, sceneId, trackingEnabled]);
+  }, [autostart, clip?.end, clip?.start, fullscreen, muted, playbackTracking, rate, videoId, trackingEnabled]);
   const playbackTrackingSignature = useMemo(() => JSON.stringify(playbackTrackingTarget), [playbackTrackingTarget]);
 
   useEffect(() => {
@@ -228,7 +228,7 @@ export function VideoPlayer({
     playTriggered.current = false;
     pendingAutostartRef.current = false;
     setTranscodeStartSec(0);
-  }, [sceneId]);
+  }, [videoId]);
 
   useEffect(() => {
     void playbackTracker.current.setTarget(playbackTrackingTarget);
@@ -267,7 +267,7 @@ export function VideoPlayer({
     if (clip) {
       setLoop(!!clip.loop);
     }
-  }, [clip?.end, clip?.loop, clip?.start, sceneId, streamUrl]);
+  }, [clip?.end, clip?.loop, clip?.start, videoId, streamUrl]);
 
   useEffect(() => {
     const v = videoRef.current;
@@ -365,7 +365,7 @@ export function VideoPlayer({
       resizeObserver.disconnect();
       window.removeEventListener("resize", updateVideoBox);
     };
-  }, [sceneId, selectedQuality, streamUrl, updateVideoBox]);
+  }, [videoId, selectedQuality, streamUrl, updateVideoBox]);
 
   const faceLabelsById = useMemo(() => {
     const labels = new Map<number, FaceOverlayInfo>();
@@ -489,7 +489,7 @@ export function VideoPlayer({
     [detections, segments],
   );
 
-  const effectiveStreamUrl = selectedQuality === "Direct" ? streamUrl : scenes.transcodeUrl(sceneId, selectedQuality, transcodeStartSec > 0 ? transcodeStartSec : undefined);
+  const effectiveStreamUrl = selectedQuality === "Direct" ? streamUrl : videos.transcodeUrl(videoId, selectedQuality, transcodeStartSec > 0 ? transcodeStartSec : undefined);
   const effectiveSourceType = selectedQuality === "Direct" ? getVideoSourceMimeType(format) : "video/mp4";
 
   useEffect(() => {
@@ -511,7 +511,7 @@ export function VideoPlayer({
     } else if (clip) {
       setAbLoop({ a: null, b: null });
     }
-  }, [clip?.end, clip?.loop, clip?.start, defaultPlaybackStartTime, duration, effectiveResumeTime, sceneId, selectedQuality, streamUrl]);
+  }, [clip?.end, clip?.loop, clip?.start, defaultPlaybackStartTime, duration, effectiveResumeTime, videoId, selectedQuality, streamUrl]);
 
   useEffect(() => {
     if (!autostart) {
@@ -570,7 +570,7 @@ export function VideoPlayer({
     }
 
     journalFlushed.current = true;
-    window.localStorage.removeItem("cove-scene-activity-journal");
+    window.localStorage.removeItem("cove-video-activity-journal");
   }, []);
 
   const flushInterval = useCallback((state: string, mode: "default" | "keepalive" = "default") => {
@@ -700,8 +700,8 @@ export function VideoPlayer({
   }, [showCaptions]);
 
   useEffect(() => {
-    scenes.getResolutions(sceneId).then((res) => setAvailableQualities(res ?? [])).catch(() => {});
-  }, [sceneId]);
+    videos.getResolutions(videoId).then((res) => setAvailableQualities(res ?? [])).catch(() => {});
+  }, [videoId]);
 
   const prepareClipForPlayback = useCallback(() => {
     const video = videoRef.current;
@@ -1021,7 +1021,7 @@ export function VideoPlayer({
           <track
             key={cap.id}
             kind="captions"
-            src={scenes.captionUrl(sceneId, cap.id)}
+            src={videos.captionUrl(videoId, cap.id)}
             srcLang={cap.languageCode === "00" ? "en" : cap.languageCode}
             label={cap.languageCode === "00" ? cap.filename : cap.languageCode.toUpperCase()}
             default={idx === 0 && showCaptions}
@@ -1094,7 +1094,7 @@ export function VideoPlayer({
 
         <div className="flex items-center gap-2 px-3 py-2 text-white">
           {onPrev && (
-            <button onClick={onPrev} className="hover:text-accent p-1" title="Previous scene">
+            <button onClick={onPrev} className="hover:text-accent p-1" title="Previous video">
               <SkipBack className="w-4 h-4 fill-current" />
             </button>
           )}
@@ -1104,7 +1104,7 @@ export function VideoPlayer({
           </button>
 
           {onNext && (
-            <button onClick={onNext} className="hover:text-accent p-1" title="Next scene">
+            <button onClick={onNext} className="hover:text-accent p-1" title="Next video">
               <SkipForward className="w-4 h-4 fill-current" />
             </button>
           )}
@@ -1394,7 +1394,7 @@ function createSegmentFaceDetection(segment: Segment, index: number, observedAtS
 
   return {
     id: -(segment.id * 1000 + index + 1),
-    hostType: "scene",
+    hostType: "video",
     hostId: segment.hostId,
     observedAtSec,
     frameWidth: 1,

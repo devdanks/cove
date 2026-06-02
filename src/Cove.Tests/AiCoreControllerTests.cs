@@ -106,10 +106,10 @@ public class AiCoreControllerTests
         var context = scope.Context;
         var face = new Face { Label = "Lead", PrimarySourceKey = "ext:ai.faces" };
         var image = new Image { Title = "Still" };
-        var scene = new Scene { Title = "Clip" };
+        var video = new Video { Title = "Clip" };
         context.Faces.Add(face);
         context.Images.Add(image);
-        context.Scenes.Add(scene);
+        context.Videos.Add(video);
         await context.SaveChangesAsync();
 
         context.Detections.AddRange(
@@ -131,8 +131,8 @@ public class AiCoreControllerTests
             },
             new Detection
             {
-                HostType = DetectionHostType.Scene,
-                HostId = scene.Id,
+                HostType = DetectionHostType.Video,
+                HostId = video.Id,
                 ObservedAtSec = 33.5,
                 FrameWidth = 1920,
                 FrameHeight = 1080,
@@ -162,7 +162,7 @@ public class AiCoreControllerTests
         var detections = Assert.IsAssignableFrom<IReadOnlyList<DetectionDto>>(ok.Value);
         Assert.Equal(2, detections.Count);
         Assert.Contains(detections, detection => detection.HostType == DetectionHostType.Image && detection.HostId == image.Id);
-        Assert.Contains(detections, detection => detection.HostType == DetectionHostType.Scene && detection.HostId == scene.Id);
+        Assert.Contains(detections, detection => detection.HostType == DetectionHostType.Video && detection.HostId == video.Id);
     }
 
     [Fact]
@@ -172,16 +172,16 @@ public class AiCoreControllerTests
         var context = scope.Context;
 
         var performer = new Performer { Name = "Alex" };
-        var scene = new Scene { Title = "Clip" };
+        var video = new Video { Title = "Clip" };
         var face = new Face { Label = "Alex Face", PrimarySourceKey = "ext:ai.faces" };
-        context.AddRange(performer, scene, face);
+        context.AddRange(performer, video, face);
         await context.SaveChangesAsync();
 
         context.FaceAppearances.Add(new FaceAppearance
         {
             FaceId = face.Id,
-            HostType = FaceAppearanceHostType.Scene,
-            HostId = scene.Id,
+            HostType = FaceAppearanceHostType.Video,
+            HostId = video.Id,
             SourceKey = "ext:ai.faces",
             SourceRunId = "run-1",
             TopConfidence = 0.92f,
@@ -194,9 +194,9 @@ public class AiCoreControllerTests
         await propagation.ApplyLinkChangeAsync(face.Id, null, performer.Id, CancellationToken.None);
         await context.SaveChangesAsync();
 
-        Assert.True(await context.Set<ScenePerformer>().AnyAsync(item => item.SceneId == scene.Id && item.PerformerId == performer.Id));
+        Assert.True(await context.Set<VideoPerformer>().AnyAsync(item => item.VideoId == video.Id && item.PerformerId == performer.Id));
 
-        var rows = await fieldProvenance.GetForHostAsync(AffinityHostType.Scene, scene.Id);
+        var rows = await fieldProvenance.GetForHostAsync(AffinityHostType.Video, video.Id);
         var performers = Assert.Single(rows, row => row.FieldKey == "performers");
         Assert.Equal("ext:ai.faces", performers.SourceKey);
         Assert.Equal("run-1", performers.SourceRunId);
@@ -321,14 +321,14 @@ public class AiCoreControllerTests
 
 
     [Fact]
-    public async Task EntityImageController_GetSceneImage_ReturnsStreamScreenshotWhenNoStoredBlob()
+    public async Task EntityImageController_GetVideoImage_ReturnsStreamScreenshotWhenNoStoredBlob()
     {
         await using var scope = await CreateContextAsync();
         var context = scope.Context;
         var bytes = new byte[] { 9, 8, 7, 6 };
 
-        var scene = new Scene { Title = "Scene without custom cover" };
-        context.Scenes.Add(scene);
+        var video = new Video { Title = "Video without custom cover" };
+        context.Videos.Add(video);
         await context.SaveChangesAsync();
 
         var controller = new EntityImageController(
@@ -343,7 +343,7 @@ public class AiCoreControllerTests
             },
         };
 
-        var result = await controller.GetSceneImage(scene.Id, null, null, CancellationToken.None);
+        var result = await controller.GetVideoImage(video.Id, null, null, CancellationToken.None);
         var file = Assert.IsType<FileStreamResult>(result);
 
         Assert.Equal("image/webp", file.ContentType);
@@ -389,10 +389,10 @@ public class AiCoreControllerTests
         context.Embeddings.AddRange(
             new Embedding
             {
-                HostType = EmbeddingHostType.Scene,
+                HostType = EmbeddingHostType.Video,
                 HostId = 11,
-                Kind = "scene.clip",
-                KindFamily = "scene.clip",
+                Kind = "video.clip",
+                KindFamily = "video.clip",
                 Modality = EmbeddingModality.Visual,
                 IsSemantic = true,
                 Dim = 2,
@@ -402,10 +402,10 @@ public class AiCoreControllerTests
             },
             new Embedding
             {
-                HostType = EmbeddingHostType.Scene,
+                HostType = EmbeddingHostType.Video,
                 HostId = 12,
-                Kind = "scene.clip",
-                KindFamily = "scene.clip",
+                Kind = "video.clip",
+                KindFamily = "video.clip",
                 Modality = EmbeddingModality.Visual,
                 IsSemantic = true,
                 Dim = 2,
@@ -418,7 +418,7 @@ public class AiCoreControllerTests
         var embeddingService = new EmbeddingService(context, []);
         var controller = new EmbeddingsController(context, embeddingService, embeddingService);
 
-        var listResult = await controller.List(EmbeddingHostType.Scene, null, null, "scene.clip", null, null, 1, 20, CancellationToken.None);
+        var listResult = await controller.List(EmbeddingHostType.Video, null, null, "video.clip", null, null, 1, 20, CancellationToken.None);
         var listOk = Assert.IsType<OkObjectResult>(listResult.Result);
         var list = Assert.IsType<PaginatedResponse<EmbeddingDto>>(listOk.Value);
         Assert.Equal(2, list.TotalCount);
@@ -428,8 +428,8 @@ public class AiCoreControllerTests
                 QueryText: null,
                 QueryVector: [0.9f, 0.1f],
                 Kind: null,
-                KindFamily: "scene.clip",
-                HostType: EmbeddingHostType.Scene,
+                KindFamily: "video.clip",
+                HostType: EmbeddingHostType.Video,
                 HostId: null,
                 Modality: EmbeddingModality.Visual,
                 IsSemantic: true,
@@ -455,7 +455,7 @@ public class AiCoreControllerTests
             {
                 RunKey = "run-a",
                 SourceKey = "ext:ai.faces",
-                TargetType = AiRunTargetType.Scene,
+                TargetType = AiRunTargetType.Video,
                 TargetId = 10,
                 Trigger = "manual",
                 JobId = "job-1",
@@ -478,7 +478,7 @@ public class AiCoreControllerTests
 
         var controller = new AiRunsController(context);
 
-        var listResult = await controller.List(AiRunTargetType.Scene, 10, "ext:ai.faces", null, AiRunStatus.Completed, 1, 20, CancellationToken.None);
+        var listResult = await controller.List(AiRunTargetType.Video, 10, "ext:ai.faces", null, AiRunStatus.Completed, 1, 20, CancellationToken.None);
         var listOk = Assert.IsType<OkObjectResult>(listResult.Result);
         var list = Assert.IsType<PaginatedResponse<AiRunDto>>(listOk.Value);
         var run = Assert.Single(list.Items);
@@ -546,7 +546,7 @@ public class AiCoreControllerTests
 
     private sealed class StubThumbnailService : IThumbnailService
     {
-        public Task<string?> GetSceneThumbnailPathAsync(int sceneId, CancellationToken ct = default)
+        public Task<string?> GetVideoThumbnailPathAsync(int videoId, CancellationToken ct = default)
             => throw new NotSupportedException();
 
         public Task<string?> GetImageFilePathAsync(int imageId, CancellationToken ct = default)
@@ -561,7 +561,7 @@ public class AiCoreControllerTests
         public Task<(Stream stream, string contentType, bool supportsRangeRequests)?> GetBlobImageThumbnailStreamAsync(string blobId, int maxDimension, CancellationToken ct = default)
             => throw new NotSupportedException();
 
-        public Task DeleteSceneGeneratedFilesAsync(int sceneId, CancellationToken ct = default)
+        public Task DeleteVideoGeneratedFilesAsync(int videoId, CancellationToken ct = default)
             => Task.CompletedTask;
 
         public Task DeleteImageGeneratedFilesAsync(int imageId, CancellationToken ct = default)
@@ -570,37 +570,37 @@ public class AiCoreControllerTests
         public Task DeleteBlobGeneratedFilesAsync(string blobId, CancellationToken ct = default)
             => Task.CompletedTask;
 
-        public Task GenerateSceneThumbnailAsync(int sceneId, double? atSeconds = null, CancellationToken ct = default)
+        public Task GenerateVideoThumbnailAsync(int videoId, double? atSeconds = null, CancellationToken ct = default)
             => throw new NotSupportedException();
 
         public Task GenerateImageThumbnailAsync(int imageId, int maxDimension = 640, bool overwrite = false, CancellationToken ct = default)
             => throw new NotSupportedException();
 
-        public Task GenerateScenePreviewAsync(int sceneId, CancellationToken ct = default)
+        public Task GenerateVideoPreviewAsync(int videoId, CancellationToken ct = default)
             => throw new NotSupportedException();
 
-        public Task GenerateSegmentAnimatedPreviewAsync(int sceneId, double startSec, double? endSec = null, CancellationToken ct = default)
+        public Task GenerateSegmentAnimatedPreviewAsync(int videoId, double startSec, double? endSec = null, CancellationToken ct = default)
             => throw new NotSupportedException();
 
-        public Task GenerateSceneSpriteAsync(int sceneId, CancellationToken ct = default)
+        public Task GenerateVideoSpriteAsync(int videoId, CancellationToken ct = default)
             => throw new NotSupportedException();
 
-        public string GetThumbnailPathForScene(int sceneId)
+        public string GetThumbnailPathForVideo(int videoId)
             => throw new NotSupportedException();
 
-        public string GetTimestampedThumbnailPath(int sceneId, double seconds)
+        public string GetTimestampedThumbnailPath(int videoId, double seconds)
             => throw new NotSupportedException();
 
-        public string GetSegmentAnimatedPreviewPath(int sceneId, double seconds)
+        public string GetSegmentAnimatedPreviewPath(int videoId, double seconds)
             => throw new NotSupportedException();
 
-        public string GetPreviewPath(int sceneId)
+        public string GetPreviewPath(int videoId)
             => throw new NotSupportedException();
 
-        public string GetSpritePath(int sceneId)
+        public string GetSpritePath(int videoId)
             => throw new NotSupportedException();
 
-        public string GetSpriteVttPath(int sceneId)
+        public string GetSpriteVttPath(int videoId)
             => throw new NotSupportedException();
 
         public string StartGenerateAllThumbnails()
@@ -609,10 +609,10 @@ public class AiCoreControllerTests
 
     private sealed class StubStreamService(byte[]? screenshotBytes = null, string screenshotContentType = "image/jpeg", bool useLongCache = false) : IStreamService
     {
-        public Task<(Stream stream, string contentType, long? fileSize)?> GetSceneStream(int sceneId, CancellationToken ct = default)
+        public Task<(Stream stream, string contentType, long? fileSize)?> GetVideoStream(int videoId, CancellationToken ct = default)
             => throw new NotSupportedException();
 
-        public Task<(Stream stream, string contentType, bool useLongCache)?> GetSceneScreenshot(int sceneId, double? seconds, CancellationToken ct = default)
+        public Task<(Stream stream, string contentType, bool useLongCache)?> GetVideoScreenshot(int videoId, double? seconds, CancellationToken ct = default)
         {
             if (screenshotBytes == null)
                 throw new NotSupportedException();
@@ -621,7 +621,8 @@ public class AiCoreControllerTests
                 (new MemoryStream(screenshotBytes, writable: false), screenshotContentType, useLongCache));
         }
 
-        public Task<(Stream stream, string contentType, bool useLongCache)?> GetSegmentAnimatedPreview(int sceneId, double seconds, CancellationToken ct = default)
+        public Task<(Stream stream, string contentType, bool useLongCache)?> GetSegmentAnimatedPreview(int videoId, double seconds, CancellationToken ct = default)
             => throw new NotSupportedException();
     }
 }
+

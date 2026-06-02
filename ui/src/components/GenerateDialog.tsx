@@ -8,8 +8,8 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onOpenJobDrawer?: () => void;
-  /** If provided, generate only for these scene IDs. */
-  sceneIds?: number[];
+  /** If provided, generate only for these video IDs. */
+  videoIds?: number[];
   /** If provided, generate only for these image IDs. */
   imageIds?: number[];
   /** If provided, generate only for these audio IDs. */
@@ -19,20 +19,20 @@ interface Props {
   title?: string;
 }
 
-export function GenerateDialog({ open, onClose, onOpenJobDrawer, sceneIds, imageIds, audioIds, textIds, title }: Props) {
-  const isSceneScoped = (sceneIds?.length ?? 0) > 0;
+export function GenerateDialog({ open, onClose, onOpenJobDrawer, videoIds, imageIds, audioIds, textIds, title }: Props) {
+  const isVideoScoped = (videoIds?.length ?? 0) > 0;
   const isImageScoped = (imageIds?.length ?? 0) > 0;
   const isAudioScoped = (audioIds?.length ?? 0) > 0;
   const isTextScoped = (textIds?.length ?? 0) > 0;
-  const isScoped = isSceneScoped || isImageScoped || isAudioScoped || isTextScoped;
+  const isScoped = isVideoScoped || isImageScoped || isAudioScoped || isTextScoped;
 
-  const showScene = isSceneScoped || !isScoped;
+  const showVideo = isVideoScoped || !isScoped;
   const showImage = isImageScoped;
   const showAudio = isAudioScoped || !isScoped;
   const showText = isTextScoped || !isScoped;
 
   const [opts, setOpts] = useState<GenerateOptions>({
-    thumbnails: showScene,
+    thumbnails: showVideo,
     previews: false,
     sprites: false,
     markers: false,
@@ -49,7 +49,7 @@ export function GenerateDialog({ open, onClose, onOpenJobDrawer, sceneIds, image
   const [submitted, setSubmitted] = useState(false);
 
   const generateMut = useMutation({
-    mutationFn: () => metadata.generate({ ...opts, sceneIds, imageIds, audioIds, textIds }),
+    mutationFn: () => metadata.generate({ ...opts, videoIds, imageIds, audioIds, textIds }),
     onSuccess: () => {
       setSubmitted(true);
     },
@@ -69,8 +69,8 @@ export function GenerateDialog({ open, onClose, onOpenJobDrawer, sceneIds, image
       return { ...o, [key]: nextValue };
     });
 
-  const scopedCount = sceneIds?.length ?? imageIds?.length ?? audioIds?.length ?? textIds?.length ?? 0;
-  const scopedNoun = isSceneScoped ? "scene" : isImageScoped ? "image" : isAudioScoped ? "audio" : isTextScoped ? "text" : "item";
+  const scopedCount = videoIds?.length ?? imageIds?.length ?? audioIds?.length ?? textIds?.length ?? 0;
+  const scopedNoun = isVideoScoped ? "video" : isImageScoped ? "image" : isAudioScoped ? "audio" : isTextScoped ? "text" : "item";
   const label = isScoped
     ? `Generate for ${scopedCount} ${scopedNoun}${scopedCount !== 1 ? "s" : ""}`
     : "Generate All";
@@ -99,28 +99,28 @@ export function GenerateDialog({ open, onClose, onOpenJobDrawer, sceneIds, image
         <div className="space-y-3">
           <p className="text-sm text-secondary mb-4">Select what to generate:</p>
 
-          {showScene && renderGroup("Scene Content", [
+          {showVideo && renderGroup("Video Content", [
             ["thumbnails", "Thumbnails / Screenshots"],
             ["previews", "Video Previews"],
             ["sprites", "Sprite Sheets"],
             ["segmentThumbnails", "Segment Thumbnails"],
             ["segmentPreviews", "Animated Segment Previews"],
-            ["phashes", "Scene perceptual hashes"],
+            ["phashes", "Video perceptual hashes"],
             ["md5", "MD5 Checksums"],
           ], false)}
 
           {showImage && renderGroup("Image Content", [
             ["imageThumbnails", "Image Thumbnails"],
             ["imagePhashes", "Image perceptual hashes"],
-          ], showScene)}
+          ], showVideo)}
 
           {showAudio && renderGroup("Audio", [
             ["audioPhashes", "Audio perceptual hashes"],
-          ], showScene || showImage)}
+          ], showVideo || showImage)}
 
           {showText && renderGroup("Text", [
             ["textPhashes", "Text perceptual hashes"],
-          ], showScene || showImage || showAudio)}
+          ], showVideo || showImage || showAudio)}
 
           <div className="border-t border-border my-3" />
 
@@ -180,3 +180,4 @@ export function GenerateDialog({ open, onClose, onOpenJobDrawer, sceneIds, image
     </EditModal>
   );
 }
+

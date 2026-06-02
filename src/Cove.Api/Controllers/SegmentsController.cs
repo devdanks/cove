@@ -8,22 +8,21 @@ using Cove.Data;
 using Cove.Data.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Cove.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
 [RequiresPermission(Permissions.SegmentsRead)]
-public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver, IServiceScopeFactory scopeFactory, IFieldProvenanceService? fieldProvenanceService = null) : ControllerBase
+public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver, IFieldProvenanceService? fieldProvenanceService = null) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<PaginatedResponse<SegmentRecordDto>>> List(
         [FromQuery] string? q,
         [FromQuery] string? ids,
-        [FromQuery] int? sceneId,
-        [FromQuery] string? sceneIds,
-        [FromQuery] string? sceneTitle,
+        [FromQuery] int? videoId,
+        [FromQuery] string? videoIds,
+        [FromQuery] string? videoTitle,
         [FromQuery] int? tagId,
         [FromQuery] string? tagIds,
         [FromQuery] string? kind,
@@ -42,7 +41,7 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
         [FromQuery] string? durationModifier,
         [FromQuery] string? sort,
         [FromQuery] string? direction,
-        [FromQuery] string? excludeSceneIds = null,
+        [FromQuery] string? excludeVideoIds = null,
         [FromQuery] string? title = null,
         [FromQuery] string? titleModifier = null,
         [FromQuery] string? hostType = null,
@@ -75,7 +74,7 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
 
         var query =
             from segment in db.Segments.AsNoTracking()
-            join scene in db.Scenes.AsNoTracking() on segment.HostId equals scene.Id
+            join video in db.Videos.AsNoTracking() on segment.HostId equals video.Id
             join tag in db.Tags.AsNoTracking() on segment.TagId equals tag.Id into tagJoin
             from tag in tagJoin.DefaultIfEmpty()
             join face in db.Faces.AsNoTracking() on segment.RefId equals (long?)face.Id into faceJoin
@@ -84,11 +83,11 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
             from facePerformer in facePerformerJoin.DefaultIfEmpty()
             join directPerformer in db.Performers.AsNoTracking() on segment.RefId equals (long?)directPerformer.Id into directPerformerJoin
             from directPerformer in directPerformerJoin.DefaultIfEmpty()
-            where segment.HostType == SegmentHostType.Scene
+            where segment.HostType == SegmentHostType.Video
             select new SegmentLibraryRow
             {
                 Segment = segment,
-                SceneTitle = scene.Title,
+                VideoTitle = video.Title,
                 TagName = tag != null ? tag.Name : null,
                 RefLabel = face != null ? face.Label : segment.Kind != null && segment.Kind!.ToLower() == "performer" && directPerformer != null ? directPerformer!.Name : null,
                 FaceId = face != null ? face!.Id : null,
@@ -102,20 +101,20 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
         if (parsedIds.Count > 0)
             query = query.Where(item => parsedIds.Contains(item.Segment.Id));
 
-        var parsedSceneIds = ParseIdList(sceneIds);
-        var parsedExcludeSceneIds = ParseIdList(excludeSceneIds);
-        if (sceneId.HasValue)
-            query = query.Where(item => item.Segment.HostId == sceneId.Value);
-        else if (parsedSceneIds.Count > 0)
-            query = query.Where(item => parsedSceneIds.Contains(item.Segment.HostId));
+        var parsedVideoIds = ParseIdList(videoIds);
+        var parsedExcludeVideoIds = ParseIdList(excludeVideoIds);
+        if (videoId.HasValue)
+            query = query.Where(item => item.Segment.HostId == videoId.Value);
+        else if (parsedVideoIds.Count > 0)
+            query = query.Where(item => parsedVideoIds.Contains(item.Segment.HostId));
 
-        if (parsedExcludeSceneIds.Count > 0)
-            query = query.Where(item => !parsedExcludeSceneIds.Contains(item.Segment.HostId));
+        if (parsedExcludeVideoIds.Count > 0)
+            query = query.Where(item => !parsedExcludeVideoIds.Contains(item.Segment.HostId));
 
-        if (!string.IsNullOrWhiteSpace(sceneTitle))
+        if (!string.IsNullOrWhiteSpace(videoTitle))
         {
-            var normalizedSceneTitle = sceneTitle.Trim().ToLowerInvariant();
-            query = query.Where(item => item.SceneTitle != null && item.SceneTitle.ToLower().Contains(normalizedSceneTitle));
+            var normalizedVideoTitle = videoTitle.Trim().ToLowerInvariant();
+            query = query.Where(item => item.VideoTitle != null && item.VideoTitle.ToLower().Contains(normalizedVideoTitle));
         }
 
         var parsedTagIds = ParseIdList(tagIds);
@@ -219,7 +218,7 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
                 (item.PerformerName != null && item.PerformerName.ToLower().Contains(normalizedTerm)) ||
                 (item.FacePerformerId.HasValue && db.Set<PerformerAlias>().Any(alias => alias.PerformerId == item.FacePerformerId.Value && alias.Alias.ToLower().Contains(normalizedTerm))) ||
                 (item.DirectPerformerId.HasValue && db.Set<PerformerAlias>().Any(alias => alias.PerformerId == item.DirectPerformerId.Value && alias.Alias.ToLower().Contains(normalizedTerm))) ||
-                (item.SceneTitle != null && item.SceneTitle.ToLower().Contains(normalizedTerm)) ||
+                (item.VideoTitle != null && item.VideoTitle.ToLower().Contains(normalizedTerm)) ||
                 item.Segment.SourceKey.ToLower().Contains(normalizedTerm));
         }
 
@@ -238,7 +237,7 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
     {
         var item = await (
             from segment in db.Segments.AsNoTracking()
-            join scene in db.Scenes.AsNoTracking() on segment.HostId equals scene.Id
+            join video in db.Videos.AsNoTracking() on segment.HostId equals video.Id
             join tag in db.Tags.AsNoTracking() on segment.TagId equals tag.Id into tagJoin
             from tag in tagJoin.DefaultIfEmpty()
             join face in db.Faces.AsNoTracking() on segment.RefId equals (long?)face.Id into faceJoin
@@ -247,11 +246,11 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
             from facePerformer in facePerformerJoin.DefaultIfEmpty()
             join directPerformer in db.Performers.AsNoTracking() on segment.RefId equals (long?)directPerformer.Id into directPerformerJoin
             from directPerformer in directPerformerJoin.DefaultIfEmpty()
-            where segment.HostType == SegmentHostType.Scene && segment.Id == id
+            where segment.HostType == SegmentHostType.Video && segment.Id == id
             select new SegmentLibraryRow
             {
                 Segment = segment,
-                SceneTitle = scene.Title,
+                VideoTitle = video.Title,
                 TagName = tag != null ? tag.Name : null,
                 RefLabel = face != null ? face.Label : segment.Kind != null && segment.Kind!.ToLower() == "performer" && directPerformer != null ? directPerformer!.Name : null,
                 FaceId = face != null ? face!.Id : null,
@@ -287,8 +286,8 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
             .Where(segment => ids.Contains(segment.Id) && segment.TagId == request.TagId)
             .ToListAsync(cancellationToken);
 
-        var sceneIds = segments
-            .Where(segment => segment.HostType == SegmentHostType.Scene)
+        var videoIds = segments
+            .Where(segment => segment.HostType == SegmentHostType.Video)
             .Select(segment => segment.HostId)
             .Distinct()
             .ToArray();
@@ -302,8 +301,8 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
 
         await db.SaveChangesAsync(cancellationToken);
 
-        foreach (var sceneId in sceneIds)
-            spanResolver.EvictScene(sceneId);
+        foreach (var videoId in videoIds)
+            spanResolver.EvictVideo(videoId);
 
         return Ok(new { count = segments.Count });
     }
@@ -312,7 +311,7 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
     public async Task<ActionResult<IReadOnlyList<SegmentDistinctValueDto>>> DistinctSourceKeys(CancellationToken cancellationToken)
     {
         var values = await db.VisibleSegments().AsNoTracking()
-            .Where(segment => segment.HostType == SegmentHostType.Scene && !string.IsNullOrWhiteSpace(segment.SourceKey))
+            .Where(segment => segment.HostType == SegmentHostType.Video && !string.IsNullOrWhiteSpace(segment.SourceKey))
             .GroupBy(segment => segment.SourceKey)
             .Select(group => new
             {
@@ -335,7 +334,7 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
     public async Task<ActionResult<IReadOnlyList<SegmentDistinctValueDto>>> DistinctKinds(CancellationToken cancellationToken)
     {
         var values = await db.VisibleSegments().AsNoTracking()
-            .Where(segment => segment.HostType == SegmentHostType.Scene && segment.Kind != null && segment.Kind != string.Empty)
+            .Where(segment => segment.HostType == SegmentHostType.Video && segment.Kind != null && segment.Kind != string.Empty)
             .GroupBy(segment => segment.Kind!)
             .Select(group => new
             {
@@ -358,7 +357,7 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
         item.Segment.Id,
         item.Segment.HostType,
         item.Segment.HostId,
-        item.SceneTitle,
+        item.VideoTitle,
         item.Segment.StartSec,
         item.Segment.EndSec,
         item.Segment.TagId,
@@ -568,7 +567,7 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
             "duration" => OrderBy(query, item => (item.Segment.EndSec ?? item.Segment.StartSec) - item.Segment.StartSec, descending),
             "confidence" => OrderBy(query, item => item.Segment.Confidence ?? -1f, descending),
             "title" => OrderBy(query, item => item.Segment.Title ?? item.Segment.Kind ?? item.TagName ?? string.Empty, descending),
-            "scene_title" => OrderBy(query, item => item.SceneTitle ?? string.Empty, descending),
+            "video_title" => OrderBy(query, item => item.VideoTitle ?? string.Empty, descending),
             "kind" => OrderBy(query, item => item.Segment.Kind ?? string.Empty, descending),
             "source_key" => OrderBy(query, item => item.Segment.SourceKey, descending),
             "tag_name" => OrderBy(query, item => item.TagName ?? string.Empty, descending),
@@ -591,7 +590,7 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
     private sealed class SegmentLibraryRow
     {
         public required Segment Segment { get; init; }
-        public string? SceneTitle { get; init; }
+        public string? VideoTitle { get; init; }
         public string? TagName { get; init; }
         public string? RefLabel { get; init; }
         public int? FaceId { get; init; }
@@ -615,13 +614,13 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
         var sort = (request.Sort ?? "updated_at").Trim().ToLowerInvariant();
         var descending = !string.Equals(request.Direction, "asc", StringComparison.OrdinalIgnoreCase);
 
-        // 1. Gather scene IDs matching the scope filters.
-        List<(int Id, string? Title, DateTimeOffset UpdatedAt)> sceneList;
-        if (request.SceneIds is { Length: > 0 })
+        // 1. Gather video IDs matching the scope filters.
+        List<(int Id, string? Title, DateTimeOffset UpdatedAt)> videoList;
+        if (request.VideoIds is { Length: > 0 })
         {
-            var idSet = request.SceneIds.ToHashSet();
-            var excludeSet = request.ExcludeSceneIds?.ToHashSet() ?? [];
-            sceneList = await db.Scenes.AsNoTracking()
+            var idSet = request.VideoIds.ToHashSet();
+            var excludeSet = request.ExcludeVideoIds?.ToHashSet() ?? [];
+            videoList = await db.Videos.AsNoTracking()
                 .Where(s => idSet.Contains(s.Id) && !excludeSet.Contains(s.Id))
                 .OrderBy(s => s.Id)
                 .Select(s => new { s.Id, s.Title, s.UpdatedAt })
@@ -630,27 +629,27 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
         }
         else
         {
-            var excludeSet = request.ExcludeSceneIds?.ToHashSet() ?? [];
-            var sceneQuery = db.Scenes.AsNoTracking()
+            var excludeSet = request.ExcludeVideoIds?.ToHashSet() ?? [];
+            var videoQuery = db.Videos.AsNoTracking()
                 .Where(s => !excludeSet.Contains(s.Id));
 
-            if (!string.IsNullOrWhiteSpace(request.SceneTitle))
+            if (!string.IsNullOrWhiteSpace(request.VideoTitle))
             {
-                var titleTerm = request.SceneTitle.Trim();
-                sceneQuery = sceneQuery.Where(s => s.Title != null && s.Title.Contains(titleTerm));
+                var titleTerm = request.VideoTitle.Trim();
+                videoQuery = videoQuery.Where(s => s.Title != null && s.Title.Contains(titleTerm));
             }
 
-            sceneQuery = (sort, descending) switch
+            videoQuery = (sort, descending) switch
             {
-                ("title", false) => sceneQuery.OrderBy(s => s.Title),
-                ("title", true) => sceneQuery.OrderByDescending(s => s.Title),
-                ("created_at", false) => sceneQuery.OrderBy(s => s.CreatedAt),
-                ("created_at", true) => sceneQuery.OrderByDescending(s => s.CreatedAt),
-                (_, false) => sceneQuery.OrderBy(s => s.UpdatedAt),
-                _ => sceneQuery.OrderByDescending(s => s.UpdatedAt),
+                ("title", false) => videoQuery.OrderBy(s => s.Title),
+                ("title", true) => videoQuery.OrderByDescending(s => s.Title),
+                ("created_at", false) => videoQuery.OrderBy(s => s.CreatedAt),
+                ("created_at", true) => videoQuery.OrderByDescending(s => s.CreatedAt),
+                (_, false) => videoQuery.OrderBy(s => s.UpdatedAt),
+                _ => videoQuery.OrderByDescending(s => s.UpdatedAt),
             };
 
-            sceneList = await sceneQuery
+            videoList = await videoQuery
                 .Select(s => new { s.Id, s.Title, s.UpdatedAt })
                 .ToListAsync(ct)
                 .ContinueWith(t => t.Result.Select(s => (s.Id, (string?)s.Title, (DateTimeOffset)s.UpdatedAt)).ToList(), TaskContinuationOptions.ExecuteSynchronously);
@@ -659,11 +658,7 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
         // 2. Resolve the active profile ID once.
         var profileId = await spanResolver.ResolveProfileIdAsync(request.Profile, ct);
 
-        // 3. For each scene, resolve spans in parallel using fresh scopes so each task
-        // gets its own DbContext/connection. The request-scoped resolver cannot be shared
-        // across Task.WhenAll without tripping EF/Npgsql concurrent-command failures.
-        var allItems = new List<SegmentSpanSearchResultItemDto>(sceneList.Count * 2);
-        const int batchSize = 16;
+        // 3. Build the derived query request if applicable.
         var derivedQueryRequest = request.DerivedQuery is { } dq
             ? new SegmentSpanQueryRequestDto(
                 profileId,
@@ -673,35 +668,52 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
                 dq.MinDurationSec)
             : null;
 
-        for (var i = 0; i < sceneList.Count; i += batchSize)
+        // 4. Determine whether we can terminate early — only when sort is video-level and
+        //    no segment-row-dependent filtering is needed. Video-level sorts mean the
+        //    video query already produces rows in the correct final order.
+        var canTerminateEarly = IsVideoLevelSort(sort) && !NeedsSegmentRows(request);
+        var neededCount = page * perPage;
+
+        var allItems = new List<SegmentSpanSearchResultItemDto>(videoList.Count * 2);
+        const int batchSize = 16;
+        var videoMap = videoList.ToDictionary(v => v.Id);
+
+        for (var i = 0; i < videoList.Count; i += batchSize)
         {
-            var batch = sceneList.Skip(i).Take(batchSize).ToList();
-            var batchResults = await Task.WhenAll(batch.Select(async scene =>
+            var batch = videoList.Skip(i).Take(batchSize).ToList();
+            var batchVideoIds = batch.Select(v => v.Id).ToList();
+
+            IReadOnlyList<(int VideoId, IReadOnlyList<ResolvedSpan> Spans)> batchResults;
+            if (derivedQueryRequest is not null)
             {
-                await using var scope = scopeFactory.CreateAsyncScope();
-                var scopedResolver = scope.ServiceProvider.GetRequiredService<SegmentSpanResolver>();
-
-                IReadOnlyList<ResolvedSpan> spans;
-                if (derivedQueryRequest is not null)
-                {
-                    spans = await scopedResolver.QuerySceneAsync(scene.Id, derivedQueryRequest, ct);
-                }
-                else
-                {
-                    var resolved = await scopedResolver.ResolveSceneAsync(scene.Id, profileId, ct);
-                    spans = resolved.Spans;
-                }
-
-                return (scene, spans);
-            }));
-
-            foreach (var (scene, spans) in batchResults)
+                batchResults = await spanResolver.QueryVideosBatchAsync(batchVideoIds, derivedQueryRequest, ct);
+            }
+            else
             {
+                batchResults = await spanResolver.ResolveVideosBatchAsync(batchVideoIds, profileId, ct);
+            }
+
+            foreach (var (videoId, spans) in batchResults)
+            {
+                if (!videoMap.TryGetValue(videoId, out var video))
+                    continue;
+
                 foreach (var span in spans)
-                    allItems.Add(new SegmentSpanSearchResultItemDto(span, scene.Id, scene.Title, scene.UpdatedAt.ToString("o"), profileId));
+                    allItems.Add(new SegmentSpanSearchResultItemDto(span, video.Id, video.Title, video.UpdatedAt.ToString("o"), profileId));
+            }
+
+            if (canTerminateEarly && allItems.Count >= neededCount && (i + batch.Count) < videoList.Count)
+            {
+                // We have enough items for the requested page. Return a conservative
+                // totalCount so the frontend shows at least one more page when relevant.
+                var conservativeTotal = Math.Max(allItems.Count, neededCount + 1);
+                var offset = (page - 1) * perPage;
+                var pageItems = allItems.Skip(offset).Take(perPage).ToList();
+                return Ok(new SegmentSpanSearchResponseDto(pageItems, conservativeTotal, page, perPage));
             }
         }
 
+        // 5. Full path: apply segment-level filtering and sorting.
         IReadOnlyDictionary<int, SegmentSearchRow> segmentRows = new Dictionary<int, SegmentSearchRow>();
         if (allItems.Count > 0 && NeedsSegmentRows(request))
         {
@@ -715,11 +727,14 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
             allItems = ApplySpanOrdering(allItems, sort, descending, segmentRows).ToList();
 
         var totalCount = allItems.Count;
-        var offset = (page - 1) * perPage;
-        var pageItems = allItems.Skip(offset).Take(perPage).ToList();
+        var finalOffset = (page - 1) * perPage;
+        var finalPageItems = allItems.Skip(finalOffset).Take(perPage).ToList();
 
-        return Ok(new SegmentSpanSearchResponseDto(pageItems, totalCount, page, perPage));
+        return Ok(new SegmentSpanSearchResponseDto(finalPageItems, totalCount, page, perPage));
     }
+
+    private static bool IsVideoLevelSort(string? sort)
+        => (sort ?? string.Empty).Trim().ToLowerInvariant() is "updated_at" or "created_at" or "title";
 
     private static bool NeedsSegmentRows(SegmentSpanSearchRequestDto request)
         => !string.IsNullOrWhiteSpace(request.Q)
@@ -770,10 +785,10 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
             "source_run_id" or "segment_source_run_id" => OrderSpanBy(items, item => SpanTextKey(item, segmentRows, row => row.SourceRunId), descending),
             "performer" or "segment_performer" => OrderSpanBy(items, item => SpanTextKey(item, segmentRows, row => row.PerformerName), descending),
             "ref" or "segment_ref" => OrderSpanBy(items, item => SpanTextKey(item, segmentRows, row => row.RefLabel ?? row.PerformerName), descending),
-            "host_title" => OrderSpanBy(items, item => item.SceneTitle ?? string.Empty, descending),
+            "host_title" => OrderSpanBy(items, item => item.VideoTitle ?? string.Empty, descending),
             "host_type" => OrderSpanBy(items, item => item.Span.HostType.ToString(), descending),
             "host_id" => OrderSpanBy(items, item => item.Span.HostId, descending),
-            _ => OrderSpanBy(items, item => item.SceneUpdatedAt ?? string.Empty, descending),
+            _ => OrderSpanBy(items, item => item.VideoUpdatedAt ?? string.Empty, descending),
         };
     }
 
@@ -782,8 +797,8 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
         Func<SegmentSpanSearchResultItemDto, TKey> keySelector,
         bool descending)
         => descending
-            ? items.OrderByDescending(keySelector).ThenByDescending(item => item.SceneId).ThenByDescending(item => item.Span.StartSec)
-            : items.OrderBy(keySelector).ThenBy(item => item.SceneId).ThenBy(item => item.Span.StartSec);
+            ? items.OrderByDescending(keySelector).ThenByDescending(item => item.VideoId).ThenByDescending(item => item.Span.StartSec)
+            : items.OrderBy(keySelector).ThenBy(item => item.VideoId).ThenBy(item => item.Span.StartSec);
 
     private static float MaxSpanConfidence(SegmentSpanSearchResultItemDto item, IReadOnlyDictionary<int, SegmentSearchRow> segmentRows)
         => item.Span.SegmentIds
@@ -956,7 +971,7 @@ public class SegmentsController(CoveContext db, SegmentSpanResolver spanResolver
         if (!string.IsNullOrWhiteSpace(request.Q))
         {
             var term = request.Q.Trim();
-            if (!ContainsIgnoreCase(item.SceneTitle, term)
+            if (!ContainsIgnoreCase(item.VideoTitle, term)
                 && !ContainsIgnoreCase(item.Span.SpanKey, term)
                 && !ContainsIgnoreCase(item.Span.SourceKey, term)
                 && !ContainsIgnoreCase(item.Span.Kind, term)

@@ -1,5 +1,5 @@
 import { useQueries, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { faces, scenes, segmentDisplayProfiles, tagApplications, entityImages, metadata, fileOps, galleries } from "../api/client";
+import { faces, videos, segmentDisplayProfiles, tagApplications, entityImages, metadata, fileOps, galleries } from "../api/client";
 import { formatDuration, formatFileSize, formatDate, TagBadge, getResolutionLabel, CustomFieldsDisplay, CustomFieldsEditor, FieldProvenanceHover, resolveTagProvenance } from "../components/shared";
 import { 
   Pencil, Plus, Trash2, Search, Eye, EyeOff, ArrowLeft, ThumbsUp,
@@ -9,12 +9,12 @@ import {
 } from "lucide-react";
 import { useState, useRef, useEffect, useCallback, Fragment, useMemo, lazy, Suspense } from "react";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import type { Detection, Face, PerformerSummary, ResolvedSpan, Scene, SceneUpdate, Segment, TagApplication, TagProvenance } from "../api/types";
+import type { Detection, Face, PerformerSummary, ResolvedSpan, Video, VideoUpdate, Segment, TagApplication, TagProvenance } from "../api/types";
 import { ExtensionSlot } from "../router/RouteRegistry";
 import { AspectRatingsPanel } from "../components/AspectRatingsPanel";
 import { InteractiveRating } from "../components/Rating";
 import { ResolvedSpansPanel } from "../components/ResolvedSpansPanel";
-import { useSceneQueue, type SceneQueueItem } from "../state/SceneQueueContext";
+import { useVideoQueue, type VideoQueueItem } from "../state/VideoQueueContext";
 import { useAppConfig } from "../state/AppConfigContext";
 import { useExtensions } from "../extensions/ExtensionLoader";
 import { createRouteLinkProps } from "../components/cardNavigation";
@@ -35,16 +35,16 @@ import { CoverImageDialog } from "../components/CoverImageDialog";
 import { PerformerTile, EntityRefBadge } from "../components/EntityCards";
 import { trackInteraction } from "../utils/interactionTracking";
 import { getEditableTagIds, getLockedTagIds, mergeTagIds } from "../utils/tags";
-import { SceneVisualSimilarityPanel, useSceneVisualSimilarityAvailable } from "../components/VisualSimilarityPanel";
-import { SceneAudioSimilarityPanel, useSceneAudioSimilarityAvailable } from "../components/AudioSimilarityPanel";
+import { VideoVisualSimilarityPanel, useVideoVisualSimilarityAvailable } from "../components/VisualSimilarityPanel";
+import { VideoAudioSimilarityPanel, useVideoAudioSimilarityAvailable } from "../components/AudioSimilarityPanel";
 import { EntityReferenceMultiSelector, EntityReferenceSelector, EntityReferenceValue } from "../components/EntityReferenceSelector";
 import { useDocumentTitle } from "../hooks/useDocumentTitle";
 
 const GenerateDialog = lazy(() => import("../components/GenerateDialog").then((module) => ({ default: module.GenerateDialog })));
 const DetailMergeDialog = lazy(() => import("../components/DetailMergeDialog").then((module) => ({ default: module.DetailMergeDialog })));
 const IdentifyDialog = lazy(() => import("../components/IdentifyDialog").then((module) => ({ default: module.IdentifyDialog })));
-const SceneDownloadDialog = lazy(() => import("../components/SceneDownloadDialog").then((module) => ({ default: module.SceneDownloadDialog })));
-const SceneMetadataTaggerDialog = lazy(() => import("../components/MetadataTaggerDialog").then((module) => ({ default: module.SceneMetadataTaggerDialog })));
+const VideoDownloadDialog = lazy(() => import("../components/VideoDownloadDialog").then((module) => ({ default: module.VideoDownloadDialog })));
+const VideoMetadataTaggerDialog = lazy(() => import("../components/MetadataTaggerDialog").then((module) => ({ default: module.VideoMetadataTaggerDialog })));
 
 interface Props {
   id: number;
@@ -73,7 +73,7 @@ function usePersistedFlag(key: string, defaultValue: boolean): [boolean, (next: 
   return [value, set];
 }
 
-function SceneQueuePanel({
+function VideoQueuePanel({
   items,
   currentId,
   autoplay,
@@ -82,10 +82,10 @@ function SceneQueuePanel({
   onClear,
   onToggleAutoplay,
 }: {
-  items: SceneQueueItem[];
+  items: VideoQueueItem[];
   currentId: number;
   autoplay: boolean;
-  onNavigate: (sceneId: number, index: number) => void;
+  onNavigate: (videoId: number, index: number) => void;
   onClose: () => void;
   onClear: () => void;
   onToggleAutoplay: () => void;
@@ -95,7 +95,7 @@ function SceneQueuePanel({
       <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
         <div>
           <div className="text-sm font-semibold">Play Selected Queue</div>
-          <div className="text-xs text-white/50">{items.length} scene{items.length === 1 ? "" : "s"}</div>
+          <div className="text-xs text-white/50">{items.length} video{items.length === 1 ? "" : "s"}</div>
         </div>
         <div className="flex items-center gap-1">
           <button
@@ -132,7 +132,7 @@ function SceneQueuePanel({
                   </div>
                 )}
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-xs font-medium text-white">{item.title || `Scene ${item.id}`}</div>
+                  <div className="truncate text-xs font-medium text-white">{item.title || `Video ${item.id}`}</div>
                   <div className="mt-0.5 truncate text-[10px] text-white/45">
                     {index + 1}{active ? " · Now playing" : item.subtitle ? ` · ${item.subtitle}` : ""}
                   </div>
@@ -148,14 +148,14 @@ function SceneQueuePanel({
 
 type TabKey = "details" | "segments" | "filters" | "file-info" | "edit" | "history" | string;
 
-export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
-  const { data: scene, isLoading } = useQuery({
-    queryKey: ["scene", id],
-    queryFn: () => scenes.get(id),
+export function VideoDetailPage({ id, initialSeekTo, onNavigate }: Props) {
+  const { data: video, isLoading } = useQuery({
+    queryKey: ["video", id],
+    queryFn: () => videos.get(id),
   });
   const { hasPermission, user } = useAuth();
   const { config } = useAppConfig();
-  const { queue, currentId: queueCurrentId, hasPrev, hasNext, prevId, nextId, currentPosition, queueLength, queueItems, goToIndex, clearQueue, autoplay: queueAutoplay, toggleAutoplay } = useSceneQueue();
+  const { queue, currentId: queueCurrentId, hasPrev, hasNext, prevId, nextId, currentPosition, queueLength, queueItems, goToIndex, clearQueue, autoplay: queueAutoplay, toggleAutoplay } = useVideoQueue();
   const { getTabsForPage, resolveComponent: resolveExtComponent, getFeature } = useExtensions();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showGenerate, setShowGenerate] = useState(false);
@@ -168,10 +168,10 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
   const [activeTab, setActiveTab] = useState<TabKey>("details");
   const [selectedProfileId, setSelectedProfileId] = useState<number | undefined>(undefined);
   const queryClient = useQueryClient();
-  const { backLabel, goBack } = useBackNavigation({ page: "scenes" }, onNavigate);
-  const canWriteScene = canWriteEntity("scene", hasPermission);
-  const canReadScene = canReadEntity("scene", hasPermission);
-  const canDeleteScene = canDeleteEntity("scene", hasPermission);
+  const { backLabel, goBack } = useBackNavigation({ page: "videos" }, onNavigate);
+  const canWriteVideo = canWriteEntity("video", hasPermission);
+  const canReadVideo = canReadEntity("video", hasPermission);
+  const canDeleteVideo = canDeleteEntity("video", hasPermission);
   const canReadGroups = canReadEntity("group", hasPermission);
   const canReadGalleries = canReadEntity("gallery", hasPermission);
   const canReadFaces = canReadEntity("face", hasPermission);
@@ -181,59 +181,59 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
   const canRunJobs = hasPermission("jobs.run");
   const canLibraryScan = hasPermission("library.scan");
   const canLibraryAutoTag = hasPermission("library.autotag");
-  const canScrapeScene = hasAnyPermission(hasPermission, ["scenes.scrape", "scenes.write"]);
-  const canEngageScene = canReadScene && (user?.kind === "user" || user?.kind === "system");
+  const canScrapeVideo = hasAnyPermission(hasPermission, ["videos.scrape", "videos.write"]);
+  const canEngageVideo = canReadVideo && (user?.kind === "user" || user?.kind === "system");
   const trackingEnabled = user?.uiPreferences?.tracking?.enabled ?? true;
-  const trackPlaybackActivity = canEngageScene && trackingEnabled;
-  const canGenerateScene = canRunJobs && canWriteScene;
-  const canIdentifyScene = canLibraryAutoTag && canWriteScene;
-  const canDownloadScene = canRunJobs && canWriteScene;
+  const trackPlaybackActivity = canEngageVideo && trackingEnabled;
+  const canGenerateVideo = canRunJobs && canWriteVideo;
+  const canIdentifyVideo = canLibraryAutoTag && canWriteVideo;
+  const canDownloadVideo = canRunJobs && canWriteVideo;
   const seekRef = useRef<((time: number) => void) | null>(null);
-  const trackedPageVisitSceneIdRef = useRef<number | null>(null);
+  const trackedPageVisitVideoIdRef = useRef<number | null>(null);
   const opsMenuRef = useRef<HTMLDivElement>(null);
   const [videoTime, setVideoTime] = useState(0);
   const [coverOpen, setCoverOpen] = useState(false);
   const [videoFilters, setVideoFilters] = useState({ brightness: 100, contrast: 100, gamma: 100, saturation: 100, hue: 0 });
   const {
-    engagement: sceneEngagement,
-    favorite: sceneFavorite,
-    rating: sceneRating,
-    setFavorite: setSceneFavorite,
-    setRating: setSceneRating,
-    favoritePending: sceneFavoritePending,
-  } = useEntityEngagement("scene", id, {
-    enabled: !!scene && canReadScene,
+    engagement: videoEngagement,
+    favorite: videoFavorite,
+    rating: videoRating,
+    setFavorite: setVideoFavorite,
+    setRating: setVideoRating,
+    favoritePending: videoFavoritePending,
+  } = useEntityEngagement("video", id, {
+    enabled: !!video && canReadVideo,
     fallbackFavorite: false,
     fallbackRating: undefined,
   });
-  const scenePlayCount = sceneEngagement?.playCount ?? 0;
-  const scenePlayDuration = sceneEngagement?.playDuration ?? 0;
-  const sceneResumeTime = sceneEngagement?.resumeTime;
-  const sceneLikeCount = sceneEngagement?.likeCount ?? 0;
-  const sceneDerivedLikeCount = sceneEngagement?.derivedLikeCount ?? 0;
-  const scenePageVisitCount = sceneEngagement?.pageVisitCount ?? 0;
-  const effectiveSceneResumeTime = typeof sceneResumeTime === "number" && Number.isFinite(sceneResumeTime) && sceneResumeTime > 0
-    ? sceneResumeTime
+  const videoPlayCount = videoEngagement?.playCount ?? 0;
+  const videoPlayDuration = videoEngagement?.playDuration ?? 0;
+  const videoResumeTime = videoEngagement?.resumeTime;
+  const videoLikeCount = videoEngagement?.likeCount ?? 0;
+  const videoDerivedLikeCount = videoEngagement?.derivedLikeCount ?? 0;
+  const videoPageVisitCount = videoEngagement?.pageVisitCount ?? 0;
+  const effectiveVideoResumeTime = typeof videoResumeTime === "number" && Number.isFinite(videoResumeTime) && videoResumeTime > 0
+    ? videoResumeTime
     : undefined;
-  const effectiveResumeTime = initialSeekTo ?? effectiveSceneResumeTime;
+  const effectiveResumeTime = initialSeekTo ?? effectiveVideoResumeTime;
 
   useEffect(() => {
-    const sceneId = scene?.id;
-    if (!sceneId || !trackPlaybackActivity) return;
-    if (trackedPageVisitSceneIdRef.current === sceneId) return;
-    trackedPageVisitSceneIdRef.current = sceneId;
-    trackInteraction({ hostType: "scene", hostId: sceneId, kind: "pageVisit" });
-    queryClient.invalidateQueries({ queryKey: ["engagement", "scene", sceneId] });
-  }, [queryClient, scene?.id, trackPlaybackActivity]);
+    const videoId = video?.id;
+    if (!videoId || !trackPlaybackActivity) return;
+    if (trackedPageVisitVideoIdRef.current === videoId) return;
+    trackedPageVisitVideoIdRef.current = videoId;
+    trackInteraction({ hostType: "video", hostId: videoId, kind: "pageVisit" });
+    queryClient.invalidateQueries({ queryKey: ["engagement", "video", videoId] });
+  }, [queryClient, video?.id, trackPlaybackActivity]);
 
-  useDocumentTitle(scene ? scene.title || scene.files?.[0]?.basename || `Scene ${id}` : null);
+  useDocumentTitle(video ? video.title || video.files?.[0]?.basename || `Video ${id}` : null);
 
   // Disable background animations on video player pages for GPU performance
-  // Controlled by gradient > "Pause on Scene Player" setting (default: on)
+  // Controlled by gradient > "Pause on Video Player" setting (default: on)
   useEffect(() => {
     try {
       const opts = JSON.parse(localStorage.getItem("cove-style-options") ?? "{}");
-      if (opts.gradient?.scenepause === "off") return;
+      if (opts.gradient?.videopause === "off") return;
     } catch { /* default to pausing */ }
     document.body.classList.add("has-video-player");
     return () => document.body.classList.remove("has-video-player");
@@ -256,36 +256,36 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
   }, [videoFilters]);
 
   const deleteMut = useMutation({
-    mutationFn: (deleteFile?: boolean) => scenes.delete(id, deleteFile),
+    mutationFn: (deleteFile?: boolean) => videos.delete(id, deleteFile),
     onSuccess: () => { 
-      queryClient.invalidateQueries({ queryKey: ["scenes"] }); 
+      queryClient.invalidateQueries({ queryKey: ["videos"] }); 
       goBack(); 
     },
   });
 
   const incrementLikeMut = useMutation({
-    mutationFn: () => scenes.incrementLike(id),
+    mutationFn: () => videos.incrementLike(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["scene", id] });
-      queryClient.invalidateQueries({ queryKey: ["engagement", "scene", id] });
+      queryClient.invalidateQueries({ queryKey: ["video", id] });
+      queryClient.invalidateQueries({ queryKey: ["engagement", "video", id] });
     },
   });
 
   const updateMut = useMutation({
-    mutationFn: (data: { organized?: boolean; rating?: number }) => scenes.update(id, data),
-    onSuccess: (updatedScene) => {
-      queryClient.setQueryData<Scene>(["scene", id], updatedScene);
+    mutationFn: (data: { organized?: boolean; rating?: number }) => videos.update(id, data),
+    onSuccess: (updatedVideo) => {
+      queryClient.setQueryData<Video>(["video", id], updatedVideo);
     },
   });
 
-  const invalidateSceneCover = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ["scene", id] });
-    queryClient.invalidateQueries({ queryKey: ["scenes"] });
+  const invalidateVideoCover = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["video", id] });
+    queryClient.invalidateQueries({ queryKey: ["videos"] });
   }, [id, queryClient]);
 
   const setCoverFromCurrentFrameMut = useMutation({
-    mutationFn: (atSeconds?: number) => scenes.setCoverFromFrame(id, atSeconds),
-    onSuccess: invalidateSceneCover,
+    mutationFn: (atSeconds?: number) => videos.setCoverFromFrame(id, atSeconds),
+    onSuccess: invalidateVideoCover,
   });
 
   const coverActionPending = setCoverFromCurrentFrameMut.isPending;
@@ -295,8 +295,8 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
   };
 
   const { data: segments = [], isLoading: segmentsLoading } = useQuery({
-    queryKey: ["scene", id, "segments"],
-    queryFn: () => scenes.segments.list(id),
+    queryKey: ["video", id, "segments"],
+    queryFn: () => videos.segments.list(id),
     enabled: canReadSegments,
   });
 
@@ -307,18 +307,18 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
   });
 
   const { data: resolvedSpansResponse, isLoading: resolvedSpansLoading } = useQuery({
-    queryKey: ["scene", id, "resolved-spans", selectedProfileId],
-    queryFn: () => scenes.segments.spans(id, selectedProfileId),
+    queryKey: ["video", id, "resolved-spans", selectedProfileId],
+    queryFn: () => videos.segments.spans(id, selectedProfileId),
     enabled: canReadSegments,
   });
 
   const { data: detections = [], isLoading: detectionsLoading } = useQuery({
-    queryKey: ["scene", id, "detections"],
-    queryFn: () => scenes.detections.list(id),
+    queryKey: ["video", id, "detections"],
+    queryFn: () => videos.detections.list(id),
     enabled: canReadSegments,
   });
 
-  const sceneFaceIds = useMemo(() => {
+  const videoFaceIds = useMemo(() => {
     const ids = new Set<number>();
     for (const detection of detections) {
       if (detection.refId != null && detection.refKind?.toLowerCase() === "face") {
@@ -335,15 +335,15 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
     return Array.from(ids);
   }, [detections, segments]);
 
-  const sceneFaceQueries = useQueries({
-    queries: sceneFaceIds.map((faceId) => ({
+  const videoFaceQueries = useQueries({
+    queries: videoFaceIds.map((faceId) => ({
       queryKey: ["face", faceId],
       queryFn: () => faces.get(faceId),
       enabled: canReadFaces && canReadSegments,
     })),
   });
 
-  const sceneFaces = useMemo(() => {
+  const videoFaces = useMemo(() => {
     const countsByFaceId = new Map<number, number>();
     for (const detection of detections) {
       if (detection.refId != null && detection.refKind?.toLowerCase() === "face") {
@@ -351,23 +351,23 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
       }
     }
 
-    return sceneFaceQueries
+    return videoFaceQueries
       .map((query) => query.data)
       .filter((face): face is Face => face != null)
       .map((face) => ({ face, detectionCount: countsByFaceId.get(face.id) ?? 0 }))
       .sort((left, right) => right.detectionCount - left.detectionCount || left.face.id - right.face.id);
-  }, [detections, sceneFaceQueries]);
+  }, [detections, videoFaceQueries]);
 
   const rescanMut = useMutation({
-    mutationFn: () => scenes.rescan(id),
+    mutationFn: () => videos.rescan(id),
   });
 
   const resolvedSpans = resolvedSpansResponse?.spans ?? [];
   const activeProfileId = selectedProfileId ?? resolvedSpansResponse?.profileId;
   const activeProfileName = displayProfiles.find((profile) => profile.id === activeProfileId)?.name ?? "Resolved";
-  const hasVisualSimilarity = useSceneVisualSimilarityAvailable(id);
-  const hasAudioSimilarity = useSceneAudioSimilarityAvailable(id);
-  const sceneExtTabs = useMemo(() => getTabsForPage("scene"), [getTabsForPage]);
+  const hasVisualSimilarity = useVideoVisualSimilarityAvailable(id);
+  const hasAudioSimilarity = useVideoAudioSimilarityAvailable(id);
+  const videoExtTabs = useMemo(() => getTabsForPage("video"), [getTabsForPage]);
 
   const tabs = filterItemsByPermission([
     { key: "details", label: "Details" },
@@ -375,14 +375,14 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
     ...(hasVisualSimilarity ? [{ key: "similar", label: "Similar", icon: <Sparkles className="h-4 w-4" /> }] : []),
     ...(hasAudioSimilarity ? [{ key: "audio-similar", label: "Audio Similar", icon: <Volume2 className="h-4 w-4" /> }] : []),
     { key: "filters", label: "Filters" },
-    { key: "file-info", label: `File Info${scene?.files.length && scene.files.length > 1 ? ` (${scene.files.length})` : ""}` },
+    { key: "file-info", label: `File Info${video?.files.length && video.files.length > 1 ? ` (${video.files.length})` : ""}` },
     { key: "history", label: "History" },
-    ...sceneExtTabs.map((t) => ({ key: `ext:${t.key}` as TabKey, label: t.label, manualContexts: t.manualContexts })),
+    ...videoExtTabs.map((t) => ({ key: `ext:${t.key}` as TabKey, label: t.label, manualContexts: t.manualContexts })),
     { key: "edit", label: "Edit" },
   ], {
     segments: "segments.read",
     "file-info": "files.read",
-    edit: "scenes.write",
+    edit: "videos.write",
   }, hasPermission);
 
   useEffect(() => {
@@ -396,24 +396,24 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
       return;
     }
 
-    const nextIndex = queue.sceneIds.indexOf(id);
+    const nextIndex = queue.videoIds.indexOf(id);
     if (nextIndex >= 0) {
       goToIndex(nextIndex);
     }
   }, [goToIndex, id, queue, queueCurrentId]);
 
-  const queueSyncedToScene = queueCurrentId === id;
+  const queueSyncedToVideo = queueCurrentId === id;
 
-  const sceneKeyboardShortcuts = useMemo(() => [
+  const videoKeyboardShortcuts = useMemo(() => [
     { key: "a", description: "Open details tab", handler: () => setActiveTab("details") },
-    { key: "e", description: "Open edit tab", handler: () => canWriteScene && setActiveTab("edit") },
+    { key: "e", description: "Open edit tab", handler: () => canWriteVideo && setActiveTab("edit") },
     { key: "s", description: "Open segments tab", handler: () => canReadSegments && setActiveTab("segments") },
     { key: "i", description: "Open file info tab", handler: () => canReadFiles && setActiveTab("file-info") },
     { key: "h", description: "Open history tab", handler: () => setActiveTab("history") },
-    { key: "o", description: "Toggle favorite", handler: () => scene && canEngageScene && setSceneFavorite(!sceneFavorite) },
-    { key: "[", description: "Open previous scene", handler: () => queueSyncedToScene && hasPrev && prevId != null && onNavigate({ page: "scene", id: prevId }) },
-    { key: "]", description: "Open next scene", handler: () => queueSyncedToScene && hasNext && nextId != null && onNavigate({ page: "scene", id: nextId }) },
-  ], [canEngageScene, canReadFiles, canReadSegments, canWriteScene, hasNext, hasPrev, nextId, onNavigate, prevId, queueSyncedToScene, scene, sceneFavorite, setSceneFavorite]);
+    { key: "o", description: "Toggle favorite", handler: () => video && canEngageVideo && setVideoFavorite(!videoFavorite) },
+    { key: "[", description: "Open previous video", handler: () => queueSyncedToVideo && hasPrev && prevId != null && onNavigate({ page: "video", id: prevId }) },
+    { key: "]", description: "Open next video", handler: () => queueSyncedToVideo && hasNext && nextId != null && onNavigate({ page: "video", id: nextId }) },
+  ], [canEngageVideo, canReadFiles, canReadSegments, canWriteVideo, hasNext, hasPrev, nextId, onNavigate, prevId, queueSyncedToVideo, video, videoFavorite, setVideoFavorite]);
 
   if (isLoading) {
     return (
@@ -423,38 +423,38 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
     );
   }
 
-  if (!scene) return <div className="text-center text-secondary py-16">Scene not found</div>;
+  if (!video) return <div className="text-center text-secondary py-16">Video not found</div>;
 
-  const file = scene.files[0];
-  const streamUrl = scenes.streamUrl(id);
+  const file = video.files[0];
+  const streamUrl = videos.streamUrl(id);
   const resLabel = file ? getResolutionLabel(file.width, file.height) : null;
 
-  const studioImageUrl = scene.studioId ? entityImages.studioImageUrl(scene.studioId) : null;
-  const sceneTitle = scene.title || file?.basename || `Scene ${scene.id}`;
+  const studioImageUrl = video.studioId ? entityImages.studioImageUrl(video.studioId) : null;
+  const videoTitle = video.title || file?.basename || `Video ${video.id}`;
 
-  const sceneHeaderImage = studioImageUrl && scene.studioId ? (
+  const videoHeaderImage = studioImageUrl && video.studioId ? (
     <button
       type="button"
-      onClick={() => onNavigate({ page: "studio", id: scene.studioId })}
+      onClick={() => onNavigate({ page: "studio", id: video.studioId })}
       className="block"
-      title={scene.studioName || "Studio"}
+      title={video.studioName || "Studio"}
     >
       <img
         src={studioImageUrl}
-        alt={scene.studioName || "Studio"}
+        alt={video.studioName || "Studio"}
         className="h-20 w-auto max-w-full object-contain"
         onError={(event) => { (event.target as HTMLImageElement).style.display = "none"; }}
       />
     </button>
   ) : null;
 
-  const sceneSubtitle = (
+  const videoSubtitle = (
     <div className="flex flex-wrap items-start gap-4 text-sm text-secondary">
       <div className="flex min-w-0 flex-1 flex-col gap-1">
-        {scene.date ? (
-          <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="date">
+        {video.date ? (
+          <FieldProvenanceHover fieldProvenance={video.fieldProvenance} fieldKey="date">
             <span>
-              {new Date(`${scene.date}T00:00:00`).toLocaleDateString(undefined, {
+              {new Date(`${video.date}T00:00:00`).toLocaleDateString(undefined, {
                 year: "numeric",
                 month: "long",
                 day: "numeric",
@@ -464,28 +464,28 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
         ) : null}
 
         <div className="flex flex-wrap items-center gap-2">
-          {scene.studioName && scene.studioId ? (
-            <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="studio">
+          {video.studioName && video.studioId ? (
+            <FieldProvenanceHover fieldProvenance={video.fieldProvenance} fieldKey="studio">
               <button
                 type="button"
-                onClick={() => onNavigate({ page: "studio", id: scene.studioId })}
+                onClick={() => onNavigate({ page: "studio", id: video.studioId })}
                 className="font-medium text-accent hover:underline"
               >
-                {scene.studioName}
+                {video.studioName}
               </button>
             </FieldProvenanceHover>
           ) : null}
           {file && file.frameRate > 0 ? <span>{file.frameRate.toFixed(0)} fps</span> : null}
           {file && resLabel ? <span className="font-semibold text-accent">{resLabel}</span> : null}
-          {scene.code ? <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="code"><span>Code {scene.code}</span></FieldProvenanceHover> : null}
-          {scene.director ? (
-            <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="director">
+          {video.code ? <FieldProvenanceHover fieldProvenance={video.fieldProvenance} fieldKey="code"><span>Code {video.code}</span></FieldProvenanceHover> : null}
+          {video.director ? (
+            <FieldProvenanceHover fieldProvenance={video.fieldProvenance} fieldKey="director">
               <button
                 type="button"
-                onClick={() => onNavigate({ page: "scenes", query: scene.director })}
+                onClick={() => onNavigate({ page: "videos", query: video.director })}
                 className="hover:text-foreground"
               >
-                Director {scene.director}
+                Director {video.director}
               </button>
             </FieldProvenanceHover>
           ) : null}
@@ -494,19 +494,19 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
     </div>
   );
 
-  const sceneActions = (
+  const videoActions = (
     <>
-      {canWriteScene ? (
+      {canWriteVideo ? (
         <button
           type="button"
-          onClick={() => { if (!updateMut.isPending) updateMut.mutate({ organized: !scene.organized }); }}
+          onClick={() => { if (!updateMut.isPending) updateMut.mutate({ organized: !video.organized }); }}
           disabled={updateMut.isPending}
-          className={`inline-flex items-center justify-center rounded p-1 transition ${scene.organized ? "bg-green-600 text-white" : "bg-card text-muted hover:text-foreground"} ${updateMut.isPending ? "cursor-not-allowed opacity-60" : ""}`}
-          title={scene.organized ? "Organized" : "Mark organized"}
+          className={`inline-flex items-center justify-center rounded p-1 transition ${video.organized ? "bg-green-600 text-white" : "bg-card text-muted hover:text-foreground"} ${updateMut.isPending ? "cursor-not-allowed opacity-60" : ""}`}
+          title={video.organized ? "Organized" : "Mark organized"}
         >
           <Check className="h-4 w-4" />
         </button>
-      ) : scene.organized ? (
+      ) : video.organized ? (
         <span className="inline-flex items-center justify-center rounded bg-green-600 p-1 text-white" title="Organized">
           <Check className="h-4 w-4" />
         </span>
@@ -547,35 +547,35 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
           <MoreVertical className="h-4 w-4" />
         </button>
         <FloatingActionMenu open={showOpsMenu} anchorRef={opsMenuRef} onClose={() => setShowOpsMenu(false)} className="min-w-[220px] py-1">
-            {!file && canDownloadScene ? (
+            {!file && canDownloadVideo ? (
               <button onClick={() => { setShowDownloadDialog(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Download className="h-3.5 w-3.5" /> Download Media…</button>
             ) : null}
             {file && canLibraryScan ? (
               <button onClick={() => { rescanMut.mutate(); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><RefreshCw className="h-3.5 w-3.5" /> Rescan</button>
             ) : null}
-            {canScrapeScene ? <button onClick={() => { setShowScrapeDialog(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Search className="h-3.5 w-3.5" /> Scrape / Metadata…</button> : null}
-            {canIdentifyScene ? <button onClick={() => { setShowIdentify(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Search className="h-3.5 w-3.5" /> Identify…</button> : null}
-            {canGenerateScene || canWriteScene ? <div className="my-1 border-t border-border" /> : null}
-            <ExtensionEntityActions entityType="scene" entityId={scene.id} renderMode="menu" onInvoked={() => setShowOpsMenu(false)} />
-            {canGenerateScene ? <button onClick={() => { setShowGenerate(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Clapperboard className="h-3.5 w-3.5" /> Generate…</button> : null}
-            {canWriteScene ? <button onClick={() => { setCoverOpen(true); setShowOpsMenu(false); }} disabled={coverActionPending} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface disabled:opacity-60"><Image className="h-3.5 w-3.5" /> Set Cover…</button> : null}
-            {canWriteScene ? <div className="my-1 border-t border-border" /> : null}
-            {canWriteScene ? <button onClick={() => { setShowMerge(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Merge className="h-3.5 w-3.5" /> Merge…</button> : null}
-            {canDeleteScene ? <div className="my-1 border-t border-border" /> : null}
-            {canDeleteScene ? <button onClick={() => { setConfirmDelete(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-red-400 hover:bg-surface"><Trash2 className="h-3.5 w-3.5" /> Delete</button> : null}
+            {canScrapeVideo ? <button onClick={() => { setShowScrapeDialog(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Search className="h-3.5 w-3.5" /> Scrape / Metadata…</button> : null}
+            {canIdentifyVideo ? <button onClick={() => { setShowIdentify(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Search className="h-3.5 w-3.5" /> Identify…</button> : null}
+            {canGenerateVideo || canWriteVideo ? <div className="my-1 border-t border-border" /> : null}
+            <ExtensionEntityActions entityType="video" entityId={video.id} renderMode="menu" onInvoked={() => setShowOpsMenu(false)} />
+            {canGenerateVideo ? <button onClick={() => { setShowGenerate(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Clapperboard className="h-3.5 w-3.5" /> Generate…</button> : null}
+            {canWriteVideo ? <button onClick={() => { setCoverOpen(true); setShowOpsMenu(false); }} disabled={coverActionPending} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface disabled:opacity-60"><Image className="h-3.5 w-3.5" /> Set Cover…</button> : null}
+            {canWriteVideo ? <div className="my-1 border-t border-border" /> : null}
+            {canWriteVideo ? <button onClick={() => { setShowMerge(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-foreground hover:bg-surface"><Merge className="h-3.5 w-3.5" /> Merge…</button> : null}
+            {canDeleteVideo ? <div className="my-1 border-t border-border" /> : null}
+            {canDeleteVideo ? <button onClick={() => { setConfirmDelete(true); setShowOpsMenu(false); }} className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-red-400 hover:bg-surface"><Trash2 className="h-3.5 w-3.5" /> Delete</button> : null}
         </FloatingActionMenu>
       </div>
 
-      <ExtensionSlot slot="scene-detail-actions" context={{ scene, onNavigate }} />
+      <ExtensionSlot slot="video-detail-actions" context={{ video, onNavigate }} />
     </>
   );
 
   const activeTabContent = activeTab === "details" ? (
-    <DetailsTab scene={scene} onNavigate={onNavigate} sceneFaces={sceneFaces} />
+    <DetailsTab video={video} onNavigate={onNavigate} videoFaces={videoFaces} />
   ) : activeTab === "segments" ? (
     <div className="space-y-4">
       <ResolvedSpansPanel
-        sceneId={scene.id}
+        videoId={video.id}
         spans={resolvedSpans}
         loading={resolvedSpansLoading}
         profiles={displayProfiles}
@@ -585,7 +585,7 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
         onNavigate={onNavigate}
       />
       <SegmentsPanel
-        sceneId={scene.id}
+        videoId={video.id}
         segments={segments}
         loading={segmentsLoading}
         canEdit={canWriteSegments}
@@ -594,24 +594,24 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
       />
     </div>
   ) : activeTab === "similar" ? (
-    <SceneVisualSimilarityPanel sceneId={scene.id} onNavigate={onNavigate} />
+    <VideoVisualSimilarityPanel videoId={video.id} onNavigate={onNavigate} />
   ) : activeTab === "audio-similar" ? (
-    <SceneAudioSimilarityPanel sceneId={scene.id} onNavigate={onNavigate} />
+    <VideoAudioSimilarityPanel videoId={video.id} onNavigate={onNavigate} />
   ) : activeTab === "filters" ? (
     <VideoFiltersTab filters={videoFilters} onChange={setVideoFilters} />
-  ) : activeTab === "file-info" && scene.files.length > 0 ? (
-    <FileInfoTab files={scene.files} />
+  ) : activeTab === "file-info" && video.files.length > 0 ? (
+    <FileInfoTab files={video.files} />
   ) : activeTab === "history" ? (
     <HistoryTab
-      scene={scene}
-      playCount={scenePlayCount}
-      playDuration={scenePlayDuration}
+      video={video}
+      playCount={videoPlayCount}
+      playDuration={videoPlayDuration}
     />
   ) : activeTab === "edit" ? (
-    <SceneEditPanel scene={scene} onSaved={() => setActiveTab("details")} />
+    <VideoEditPanel video={video} onSaved={() => setActiveTab("details")} />
   ) : activeTab.startsWith("ext:") ? (() => {
     const extTabKey = activeTab.replace("ext:", "");
-    const extTab = sceneExtTabs.find((tab) => tab.key === extTabKey);
+    const extTab = videoExtTabs.find((tab) => tab.key === extTabKey);
     if (!extTab) return null;
     const Component = resolveExtComponent(extTab.componentName);
     if (!Component) return <div className="p-4 text-muted">Extension component not found: {extTab.componentName}</div>;
@@ -622,20 +622,20 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
     );
   })() : null;
 
-  const sceneMedia = (
+  const videoMedia = (
     <div className="flex min-h-0 min-w-0 max-w-full flex-1 flex-col overflow-hidden bg-black">
       <div className="flex min-h-0 min-w-0 max-w-full flex-1 overflow-hidden bg-black">
         {file ? (
           <VideoPlayer
             streamUrl={streamUrl}
-            posterUrl={scenes.screenshotUrl(id, scene.updatedAt)}
+            posterUrl={videos.screenshotUrl(id, video.updatedAt)}
             format={file.format}
             duration={file.duration}
             resumeTime={effectiveResumeTime}
-            sceneId={id}
+            videoId={id}
             detections={detections}
             segments={segments}
-            faces={sceneFaces.map(({ face }) => face)}
+            faces={videoFaces.map(({ face }) => face)}
             captions={file.captions}
             videoStyle={videoStyle}
             onSeekRegister={(fn) => { seekRef.current = fn; }}
@@ -643,39 +643,39 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
             autostart={config?.ui.autostartVideo}
             showAbLoop={config?.ui.showAbLoopControls}
             trackingEnabled={trackPlaybackActivity}
-            onEnded={() => { if (queueAutoplay && queueSyncedToScene && hasNext && nextId != null) onNavigate({ page: "scene", id: nextId }); }}
-            onPrev={queueSyncedToScene && hasPrev && prevId != null ? () => onNavigate({ page: "scene", id: prevId }) : undefined}
-            onNext={queueSyncedToScene && hasNext && nextId != null ? () => onNavigate({ page: "scene", id: nextId }) : undefined}
+            onEnded={() => { if (queueAutoplay && queueSyncedToVideo && hasNext && nextId != null) onNavigate({ page: "video", id: nextId }); }}
+            onPrev={queueSyncedToVideo && hasPrev && prevId != null ? () => onNavigate({ page: "video", id: prevId }) : undefined}
+            onNext={queueSyncedToVideo && hasNext && nextId != null ? () => onNavigate({ page: "video", id: nextId }) : undefined}
           />
         ) : (
           <div className="flex h-48 items-center justify-center text-muted">No video file available</div>
         )}
       </div>
       {file ? (
-        <SceneScrubber
-          sceneId={scene.id}
+        <VideoScrubber
+          videoId={video.id}
           duration={file.duration}
           spans={resolvedSpans}
           rawSegments={segments}
           detections={detections}
-          faces={sceneFaces.map(({ face }) => face)}
-          performers={scene.performers}
+          faces={videoFaces.map(({ face }) => face)}
+          performers={video.performers}
           onSeek={(time) => seekRef.current?.(time)}
           currentTime={videoTime}
           profileName={activeProfileName}
         />
       ) : null}
       {showQueuePanel && queueLength > 0 ? (
-        <SceneQueuePanel
+        <VideoQueuePanel
           items={queueItems}
           currentId={id}
           autoplay={queueAutoplay}
           onClose={() => setShowQueuePanel(false)}
           onClear={() => { clearQueue(); setShowQueuePanel(false); }}
           onToggleAutoplay={toggleAutoplay}
-          onNavigate={(sceneId, index) => {
+          onNavigate={(videoId, index) => {
             goToIndex(index);
-            onNavigate({ page: "scene", id: sceneId });
+            onNavigate({ page: "video", id: videoId });
           }}
         />
       ) : null}
@@ -686,12 +686,12 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
     <>
       <CoverImageDialog
         open={coverOpen}
-        title="Set Scene Cover"
-        currentImageUrl={scenes.screenshotUrl(scene.id, scene.updatedAt)}
-        onUpload={(file) => entityImages.uploadSceneCoverImage(scene.id, file)}
-        onDelete={() => entityImages.deleteSceneCoverImage(scene.id)}
+        title="Set Video Cover"
+        currentImageUrl={videos.screenshotUrl(video.id, video.updatedAt)}
+        onUpload={(file) => entityImages.uploadVideoCoverImage(video.id, file)}
+        onDelete={() => entityImages.deleteVideoCoverImage(video.id)}
         onClose={() => setCoverOpen(false)}
-        onSuccess={invalidateSceneCover}
+        onSuccess={invalidateVideoCover}
         aspectRatio="16/9"
         extraActions={file ? (
           <button
@@ -710,22 +710,22 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
           <GenerateDialog
             open={showGenerate}
             onClose={() => setShowGenerate(false)}
-            sceneIds={[id]}
-            title={`Generate for "${scene.title || "Untitled"}"`}
+            videoIds={[id]}
+            title={`Generate for "${video.title || "Untitled"}"`}
           />
         ) : null}
         {showDownloadDialog ? (
-          <SceneDownloadDialog
+          <VideoDownloadDialog
             open={showDownloadDialog}
-            scene={scene}
+            video={video}
             onClose={() => setShowDownloadDialog(false)}
             onNavigate={onNavigate}
           />
         ) : null}
         {showScrapeDialog ? (
-          <SceneMetadataTaggerDialog
+          <VideoMetadataTaggerDialog
             open={showScrapeDialog}
-            scene={scene}
+            video={video}
             onClose={() => setShowScrapeDialog(false)}
             onNavigate={onNavigate}
           />
@@ -734,44 +734,44 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
           <DetailMergeDialog
             open={showMerge}
             onClose={() => setShowMerge(false)}
-            entityType="scene"
-            targetItem={{ id: scene.id, name: scene.title || file?.basename || `Scene ${scene.id}`, imagePath: scenes.screenshotUrl(scene.id, scene.updatedAt), subtitle: scene.studioName }}
+            entityType="video"
+            targetItem={{ id: video.id, name: video.title || file?.basename || `Video ${video.id}`, imagePath: videos.screenshotUrl(video.id, video.updatedAt), subtitle: video.studioName }}
             searchItems={async (term) => {
-              const response = await scenes.find({ page: 1, perPage: 20, direction: "desc", q: term || undefined });
+              const response = await videos.find({ page: 1, perPage: 20, direction: "desc", q: term || undefined });
               return response.items.map((item) => ({
                 id: item.id,
-                name: item.title || item.files[0]?.basename || `Scene ${item.id}`,
-                imagePath: scenes.screenshotUrl(item.id, item.updatedAt),
+                name: item.title || item.files[0]?.basename || `Video ${item.id}`,
+                imagePath: videos.screenshotUrl(item.id, item.updatedAt),
                 subtitle: item.studioName,
               }));
             }}
-            onMerge={(targetId, sourceIds) => scenes.merge(targetId, sourceIds)}
-            invalidateQueryKeys={[["scene", id], ["scenes"]]}
+            onMerge={(targetId, sourceIds) => videos.merge(targetId, sourceIds)}
+            invalidateQueryKeys={[["video", id], ["videos"]]}
           />
         ) : null}
         {showIdentify ? (
           <IdentifyDialog
             open={showIdentify}
             onClose={() => setShowIdentify(false)}
-            sceneIds={[id]}
+            videoIds={[id]}
           />
         ) : null}
       </Suspense>
       <ConfirmDialog
         open={confirmDelete}
-        title="Delete Scene"
-        message={`Are you sure you want to delete "${scene.title || "Untitled"}"? This cannot be undone.`}
+        title="Delete Video"
+        message={`Are you sure you want to delete "${video.title || "Untitled"}"? This cannot be undone.`}
         onConfirm={(opts) => deleteMut.mutate(opts?.deleteFile)}
         onCancel={() => setConfirmDelete(false)}
         showDeleteFile
       />
       <MediaDetailLayout
-        title={<FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="title">{sceneTitle}</FieldProvenanceHover>}
-        headerImage={sceneHeaderImage}
-        subtitle={sceneSubtitle}
+        title={<FieldProvenanceHover fieldProvenance={video.fieldProvenance} fieldKey="title">{videoTitle}</FieldProvenanceHover>}
+        headerImage={videoHeaderImage}
+        subtitle={videoSubtitle}
         backLabel={backLabel}
         onGoBack={goBack}
-        media={sceneMedia}
+        media={videoMedia}
         mediaAspectRatio="auto"
         mediaFullBleed
         mediaSticky={false}
@@ -779,47 +779,47 @@ export function SceneDetailPage({ id, initialSeekTo, onNavigate }: Props) {
         activeTab={activeTab}
         onTabChange={(key) => setActiveTab(key as TabKey)}
         engagement={{
-          primaryContent: <InteractiveRating value={sceneRating} onChange={(value) => setSceneRating(value)} readOnly={!canEngageScene} />,
-          favorite: sceneFavorite,
-          favoritePending: sceneFavoritePending,
-          onFavoriteChange: canEngageScene ? setSceneFavorite : undefined,
+          primaryContent: <InteractiveRating value={videoRating} onChange={(value) => setVideoRating(value)} readOnly={!canEngageVideo} />,
+          favorite: videoFavorite,
+          favoritePending: videoFavoritePending,
+          onFavoriteChange: canEngageVideo ? setVideoFavorite : undefined,
           additionalMetrics: [
             {
               label: "Likes",
-              value: sceneLikeCount,
-              icon: <ThumbsUp className={["h-4 w-4", sceneLikeCount > 0 ? "fill-accent text-accent" : ""].join(" ")} />,
+              value: videoLikeCount,
+              icon: <ThumbsUp className={["h-4 w-4", videoLikeCount > 0 ? "fill-accent text-accent" : ""].join(" ")} />,
               title: "Likes",
-              onClick: canEngageScene ? () => incrementLikeMut.mutate() : undefined,
-              active: sceneLikeCount > 0,
+              onClick: canEngageVideo ? () => incrementLikeMut.mutate() : undefined,
+              active: videoLikeCount > 0,
             },
             {
               label: "Page Visits",
-              value: scenePageVisitCount,
+              value: videoPageVisitCount,
               icon: <Eye className="h-4 w-4" />,
               title: "Page visits",
             },
           ],
         }}
-        keyboardShortcuts={sceneKeyboardShortcuts}
-        actions={sceneActions}
+        keyboardShortcuts={videoKeyboardShortcuts}
+        actions={videoActions}
       >
         <MediaDetailLayout.Content>
           {activeTab === "details" ? (
             <div className="mb-4">
-              <AspectRatingsPanel hostType="scene" hostId={id} canRate={canEngageScene} />
+              <AspectRatingsPanel hostType="video" hostId={id} canRate={canEngageVideo} />
             </div>
           ) : null}
           {activeTabContent}
         </MediaDetailLayout.Content>
-        <ExtensionSlot slot="scene-detail-main-bottom" context={{ scene, onNavigate }} />
+        <ExtensionSlot slot="video-detail-main-bottom" context={{ video, onNavigate }} />
       </MediaDetailLayout>
     </>
   );
 }
 
-function buildSceneEditPerformerContextTagIds(scene: Scene): Record<number, number[]> {
+function buildVideoEditPerformerContextTagIds(video: Video): Record<number, number[]> {
   const result: Record<number, number[]> = {};
-  for (const application of scene.contextTagApplications ?? []) {
+  for (const application of video.contextTagApplications ?? []) {
     if (application.contextType !== "performer" || application.contextId == null) {
       continue;
     }
@@ -830,7 +830,7 @@ function buildSceneEditPerformerContextTagIds(scene: Scene): Record<number, numb
   return result;
 }
 
-async function syncSceneEditPerformerContextTags(sceneId: number, existingApplications: TagApplication[], desiredByPerformer: Record<number, number[]>, selectedPerformerIds: number[]) {
+async function syncVideoEditPerformerContextTags(videoId: number, existingApplications: TagApplication[], desiredByPerformer: Record<number, number[]>, selectedPerformerIds: number[]) {
   const selectedPerformers = new Set(selectedPerformerIds);
   const desiredKeys = new Set<string>();
 
@@ -868,8 +868,8 @@ async function syncSceneEditPerformerContextTags(sceneId: number, existingApplic
       }
 
       await tagApplications.create({
-        hostType: "scene",
-        hostId: sceneId,
+        hostType: "video",
+        hostId: videoId,
         contextType: "performer",
         contextId: performerId,
         tagId,
@@ -880,28 +880,28 @@ async function syncSceneEditPerformerContextTags(sceneId: number, existingApplic
 }
 
 // Details Tab Content
-export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scene; onNavigate: (r: any) => void; sceneFaces?: Array<{ face: Face; detectionCount: number }> }) {
+export function DetailsTab({ video, onNavigate, videoFaces = [] }: { video: Video; onNavigate: (r: any) => void; videoFaces?: Array<{ face: Face; detectionCount: number }> }) {
   return (
     <div className="space-y-4">
       {/* Created/Updated + Code/Director at top like original */}
       <dl className="grid gap-y-1.5 text-sm" style={{ gridTemplateColumns: "auto 1fr" }}>
         <dt className="text-muted pr-3">Created</dt>
-        <dd className="text-foreground">{formatDate(scene.createdAt)}</dd>
+        <dd className="text-foreground">{formatDate(video.createdAt)}</dd>
         <dt className="text-muted pr-3">Updated</dt>
-        <dd className="text-foreground">{formatDate(scene.updatedAt)}</dd>
-        {scene.code && (
+        <dd className="text-foreground">{formatDate(video.updatedAt)}</dd>
+        {video.code && (
           <>
             <dt className="text-muted pr-3">Studio Code</dt>
-            <dd className="text-foreground"><FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="code">{scene.code}</FieldProvenanceHover></dd>
+            <dd className="text-foreground"><FieldProvenanceHover fieldProvenance={video.fieldProvenance} fieldKey="code">{video.code}</FieldProvenanceHover></dd>
           </>
         )}
-        {scene.director && (
+        {video.director && (
           <>
             <dt className="text-muted pr-3">Director</dt>
             <dd>
-              <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="director">
-                <button onClick={() => onNavigate({ page: "scenes", query: scene.director })} className="text-accent hover:underline">
-                  {scene.director}
+              <FieldProvenanceHover fieldProvenance={video.fieldProvenance} fieldKey="director">
+                <button onClick={() => onNavigate({ page: "videos", query: video.director })} className="text-accent hover:underline">
+                  {video.director}
                 </button>
               </FieldProvenanceHover>
             </dd>
@@ -910,25 +910,25 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
       </dl>
 
       {/* Details / Description */}
-      {scene.details && (
+      {video.details && (
         <div>
-          <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="details" block>
-            <p className="text-sm text-foreground whitespace-pre-wrap">{scene.details}</p>
+          <FieldProvenanceHover fieldProvenance={video.fieldProvenance} fieldKey="details" block>
+            <p className="text-sm text-foreground whitespace-pre-wrap">{video.details}</p>
           </FieldProvenanceHover>
         </div>
       )}
 
       {/* Tags */}
-      {scene.tags.length > 0 && (
+      {video.tags.length > 0 && (
         <div>
           <h6 className="text-sm text-muted mb-2">Tags</h6>
           <div className="flex flex-wrap gap-1.5">
-            {scene.tags.map((tag: any) => (
+            {video.tags.map((tag: any) => (
               <TagBadge 
                 key={tag.id} 
                 name={tag.name} 
                 tag={tag}
-                provenance={resolveTagProvenance(tag, scene.fieldProvenance)}
+                provenance={resolveTagProvenance(tag, video.fieldProvenance)}
                 onClick={() => onNavigate({ page: "tag", id: tag.id })} 
               />
             ))}
@@ -937,16 +937,16 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
       )}
 
       {/* Performers */}
-      {scene.performers.length > 0 && (
+      {video.performers.length > 0 && (
         <div>
-          <h6 className="text-sm text-muted mb-2">Performer{scene.performers.length > 1 ? "s" : ""}</h6>
-          <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="performers" block>
-            <div className={scene.performers.length > 1 ? "grid grid-cols-2 gap-3" : "grid max-w-[220px] gap-3"}>
-              {scene.performers.map((performer: any) => {
-                const contextTags = (scene.contextTagApplications ?? []).filter((application) => application.contextType === "performer" && application.contextId === performer.id);
-                const ageAtScene = getAgeAtDate(scene.date, performer.birthdate);
-                const footer = ageAtScene || contextTags.length > 0
-                  ? <ScenePerformerTileFooter ageAtScene={ageAtScene} contextTags={contextTags} />
+          <h6 className="text-sm text-muted mb-2">Performer{video.performers.length > 1 ? "s" : ""}</h6>
+          <FieldProvenanceHover fieldProvenance={video.fieldProvenance} fieldKey="performers" block>
+            <div className={video.performers.length > 1 ? "grid grid-cols-2 gap-3" : "grid max-w-[220px] gap-3"}>
+              {video.performers.map((performer: any) => {
+                const contextTags = (video.contextTagApplications ?? []).filter((application) => application.contextType === "performer" && application.contextId === performer.id);
+                const ageAtVideo = getAgeAtDate(video.date, performer.birthdate);
+                const footer = ageAtVideo || contextTags.length > 0
+                  ? <VideoPerformerTileFooter ageAtVideo={ageAtVideo} contextTags={contextTags} />
                   : null;
 
                 return (
@@ -965,11 +965,11 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
         </div>
       )}
 
-      {scene.groups.length > 0 && (
+      {video.groups.length > 0 && (
         <div>
           <h6 className="mb-2 text-sm text-muted">Groups</h6>
           <div className="flex flex-wrap gap-2">
-            {scene.groups.map((group) => (
+            {video.groups.map((group) => (
               <EntityRefBadge
                 key={group.id}
                 route={{ page: "group", id: group.id }}
@@ -983,11 +983,11 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
         </div>
       )}
 
-      {scene.galleries.length > 0 && (
+      {video.galleries.length > 0 && (
         <div>
           <h6 className="mb-2 text-sm text-muted">Galleries</h6>
           <div className="flex flex-wrap gap-2">
-            {scene.galleries.map((gallery) => (
+            {video.galleries.map((gallery) => (
               <EntityRefBadge
                 key={gallery.id}
                 route={{ page: "gallery", id: gallery.id }}
@@ -1002,11 +1002,11 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
       )}
 
       {/* Faces */}
-      {sceneFaces.length > 0 && (
+      {videoFaces.length > 0 && (
         <div>
-          <h6 className="mb-2 text-sm text-muted">Faces in this scene</h6>
+          <h6 className="mb-2 text-sm text-muted">Faces in this video</h6>
           <div className="flex flex-wrap gap-2">
-            {sceneFaces.map(({ face, detectionCount }) => {
+            {videoFaces.map(({ face, detectionCount }) => {
               const title = face.label?.trim() || face.performerName || `Face #${face.id}`;
               return (
                 <button
@@ -1038,12 +1038,12 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
       )}
 
       {/* URLs */}
-      {scene.urls && scene.urls.length > 0 && (
+      {video.urls && video.urls.length > 0 && (
         <div>
           <h6 className="text-sm text-muted mb-2">URLs</h6>
-          <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="urls" block>
+          <FieldProvenanceHover fieldProvenance={video.fieldProvenance} fieldKey="urls" block>
             <div className="space-y-1">
-              {scene.urls.map((url: string, i: number) => (
+              {video.urls.map((url: string, i: number) => (
                 <a
                   key={i}
                   href={url}
@@ -1059,26 +1059,26 @@ export function DetailsTab({ scene, onNavigate, sceneFaces = [] }: { scene: Scen
         </div>
       )}
 
-      <CustomFieldsDisplay customFields={scene.customFields} entityType="scene" />
+      <CustomFieldsDisplay customFields={video.customFields} entityType="video" />
     </div>
   );
 }
 
-function ScenePerformerTileFooter({ ageAtScene, contextTags = [] }: { ageAtScene: number | null; contextTags?: TagApplication[] }) {
+function VideoPerformerTileFooter({ ageAtVideo, contextTags = [] }: { ageAtVideo: number | null; contextTags?: TagApplication[] }) {
   return <div className="space-y-2 text-xs text-secondary">
-    {ageAtScene ? <div className="text-center">{ageAtScene} yrs old</div> : null}
+    {ageAtVideo ? <div className="text-center">{ageAtVideo} yrs old</div> : null}
     <PerformerContextTagList contextTags={contextTags} />
   </div>;
 }
 
-function getAgeAtDate(sceneDate?: string, birthdate?: string) {
-  if (!sceneDate || !birthdate) return null;
+function getAgeAtDate(videoDate?: string, birthdate?: string) {
+  if (!videoDate || !birthdate) return null;
 
-  const scene = new Date(sceneDate);
+  const video = new Date(videoDate);
   const birth = new Date(birthdate);
-  let age = scene.getFullYear() - birth.getFullYear();
-  const monthDelta = scene.getMonth() - birth.getMonth();
-  if (monthDelta < 0 || (monthDelta === 0 && scene.getDate() < birth.getDate())) age--;
+  let age = video.getFullYear() - birth.getFullYear();
+  const monthDelta = video.getMonth() - birth.getMonth();
+  if (monthDelta < 0 || (monthDelta === 0 && video.getDate() < birth.getDate())) age--;
   return age > 0 ? age : null;
 }
 
@@ -1106,8 +1106,8 @@ function toTagProvenance(application: TagApplication) {
   };
 }
 
-// File Info Tab — show every underlying scene file rather than only the first one.
-export function FileInfoTab({ files }: { files: Scene["files"] }) {
+// File Info Tab — show every underlying video file rather than only the first one.
+export function FileInfoTab({ files }: { files: Video["files"] }) {
   const revealMutation = useMutation({ mutationFn: (fileId: number) => fileOps.reveal(fileId) });
   const canReveal = typeof window !== "undefined" && ["localhost", "127.0.0.1", "::1"].includes(window.location.hostname);
 
@@ -1198,33 +1198,33 @@ export function FileInfoTab({ files }: { files: Scene["files"] }) {
 
 // History Tab
 function HistoryTab({
-  scene,
+  video,
   playCount,
   playDuration,
 }: {
-  scene: Scene;
+  video: Video;
   playCount: number;
   playDuration: number;
 }) {
   const queryClient = useQueryClient();
   const { data: history } = useQuery({
-    queryKey: ["scene-history", scene.id],
-    queryFn: () => scenes.getHistory(scene.id),
+    queryKey: ["video-history", video.id],
+    queryFn: () => videos.getHistory(video.id),
   });
   const resetPlayMut = useMutation({
-    mutationFn: () => scenes.resetPlay(scene.id),
+    mutationFn: () => videos.resetPlay(video.id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["scene", scene.id] });
-      queryClient.invalidateQueries({ queryKey: ["engagement", "scene", scene.id] });
-      queryClient.invalidateQueries({ queryKey: ["scene-history", scene.id] });
+      queryClient.invalidateQueries({ queryKey: ["video", video.id] });
+      queryClient.invalidateQueries({ queryKey: ["engagement", "video", video.id] });
+      queryClient.invalidateQueries({ queryKey: ["video-history", video.id] });
     },
   });
   const deletePlayMut = useMutation({
-    mutationFn: () => scenes.deletePlay(scene.id),
+    mutationFn: () => videos.deletePlay(video.id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["scene", scene.id] });
-      queryClient.invalidateQueries({ queryKey: ["engagement", "scene", scene.id] });
-      queryClient.invalidateQueries({ queryKey: ["scene-history", scene.id] });
+      queryClient.invalidateQueries({ queryKey: ["video", video.id] });
+      queryClient.invalidateQueries({ queryKey: ["engagement", "video", video.id] });
+      queryClient.invalidateQueries({ queryKey: ["video-history", video.id] });
     },
   });
 
@@ -1294,8 +1294,8 @@ function HistoryTab({
 
       {/* Timestamps */}
       <div className="grid grid-cols-2 gap-2">
-        <div><span className="text-muted">Created:</span> <span className="text-foreground">{formatDate(scene.createdAt)}</span></div>
-        <div><span className="text-muted">Updated:</span> <span className="text-foreground">{formatDate(scene.updatedAt)}</span></div>
+        <div><span className="text-muted">Created:</span> <span className="text-foreground">{formatDate(video.createdAt)}</span></div>
+        <div><span className="text-muted">Updated:</span> <span className="text-foreground">{formatDate(video.updatedAt)}</span></div>
       </div>
     </div>
   );
@@ -1407,9 +1407,9 @@ function getSegmentTimelineLabel(
   return span.kind?.trim() || span.sourceKey?.trim() || "Segment";
 }
 
-// Scene Scrubber / Timeline Component
-function SceneScrubber({ 
-  sceneId, 
+// Video Scrubber / Timeline Component
+function VideoScrubber({ 
+  videoId, 
   duration, 
   spans,
   rawSegments,
@@ -1420,7 +1420,7 @@ function SceneScrubber({
   currentTime,
   profileName,
 }: { 
-  sceneId: number; 
+  videoId: number; 
   duration: number; 
   spans: Pick<ResolvedSpan, "spanKey" | "startSec" | "endSec" | "tagName" | "kind" | "colorHint" | "sourceKey" | "lane" | "segmentIds">[];
   rawSegments: Pick<Segment, "id" | "startSec" | "endSec" | "title" | "kind" | "sourceKey" | "refId">[];
@@ -1437,8 +1437,8 @@ function SceneScrubber({
   const [spriteError, setSpriteError] = useState(false);
   const [spriteLoadSettled, setSpriteLoadSettled] = useState(false);
   
-  const spriteVttUrl = `/api/stream/scene/${sceneId}/vtt/thumbs`;
-  const spriteImageUrl = `/api/stream/scene/${sceneId}/sprite`;
+  const spriteVttUrl = `/api/stream/video/${videoId}/vtt/thumbs`;
+  const spriteImageUrl = `/api/stream/video/${videoId}/sprite`;
   const [showAllResolvedLanes, setShowAllResolvedLanes] = useState(false);
   const [showAllFaceLanes, setShowAllFaceLanes] = useState(false);
   const [overlaysCollapsed, setOverlaysCollapsed] = usePersistedFlag("cove.timeline.overlaysCollapsed", false);
@@ -1499,7 +1499,7 @@ function SceneScrubber({
     return () => {
       cancelled = true;
     };
-  }, [sceneId, spriteVttUrl, spriteImageUrl]);
+  }, [videoId, spriteVttUrl, spriteImageUrl]);
 
   const thumbCount = spriteData ? spriteData.entries.length : 0;
   const thumbWidth = 160;
@@ -1900,14 +1900,14 @@ function formatSegmentTimeInput(seconds: number) {
 }
 
 function SegmentsPanel({
-  sceneId,
+  videoId,
   segments,
   loading,
   canEdit,
   onSeek,
   currentTime = 0,
 }: {
-  sceneId: number;
+  videoId: number;
   segments: Segment[];
   loading: boolean;
   canEdit: boolean;
@@ -1933,7 +1933,7 @@ function SegmentsPanel({
 
   const createMutation = useMutation({
     mutationFn: (data: { title?: string; kind?: string; startSec: number; endSec?: number; tagId?: number; refId?: number }) =>
-      scenes.segments.create(sceneId, {
+      videos.segments.create(videoId, {
         startSec: data.startSec,
         endSec: data.endSec,
         tagId: data.tagId,
@@ -1942,14 +1942,14 @@ function SegmentsPanel({
         title: data.title,
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["scene", sceneId, "segments"] });
+      queryClient.invalidateQueries({ queryKey: ["video", videoId, "segments"] });
       resetForm();
     },
   });
 
   const updateMutation = useMutation({
     mutationFn: (data: { segment: Segment; startSec: number; endSec?: number; tagId?: number; refId?: number; kind?: string; title?: string }) =>
-      scenes.segments.update(sceneId, data.segment.id, {
+      videos.segments.update(videoId, data.segment.id, {
         startSec: data.startSec,
         endSec: data.endSec,
         tagId: data.tagId,
@@ -1963,15 +1963,15 @@ function SegmentsPanel({
         colorHint: data.segment.colorHint,
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["scene", sceneId, "segments"] });
+      queryClient.invalidateQueries({ queryKey: ["video", videoId, "segments"] });
       resetForm();
     },
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (segmentId: number) => scenes.segments.delete(sceneId, segmentId),
+    mutationFn: (segmentId: number) => videos.segments.delete(videoId, segmentId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["scene", sceneId, "segments"] });
+      queryClient.invalidateQueries({ queryKey: ["video", videoId, "segments"] });
     },
   });
 
@@ -2229,7 +2229,7 @@ function DetectionsPanel({
   }
 
   if (detections.length === 0) {
-    return <div className="text-sm text-muted">No detections recorded for this scene.</div>;
+    return <div className="text-sm text-muted">No detections recorded for this video.</div>;
   }
 
   return (
@@ -2270,48 +2270,48 @@ function DetectionsPanel({
   );
 }
 
-// ===== Inline Scene Edit Panel =====
-function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void }) {
+// ===== Inline Video Edit Panel =====
+function VideoEditPanel({ video, onSaved }: { video: Video; onSaved: () => void }) {
   const queryClient = useQueryClient();
   const { config } = useAppConfig();
-  const [title, setTitle] = useState(scene.title || "");
-  const [code, setCode] = useState(scene.code || "");
-  const [details, setDetails] = useState(scene.details || "");
-  const [director, setDirector] = useState(scene.director || "");
-  const [date, setDate] = useState(scene.date || "");
-  const [isVr, setIsVr] = useState(scene.isVr ?? false);
+  const [title, setTitle] = useState(video.title || "");
+  const [code, setCode] = useState(video.code || "");
+  const [details, setDetails] = useState(video.details || "");
+  const [director, setDirector] = useState(video.director || "");
+  const [date, setDate] = useState(video.date || "");
+  const [isVr, setIsVr] = useState(video.isVr ?? false);
   const [rating, setRating] = useState<number | undefined>(undefined);
-  const [urls, setUrls] = useState(scene.urls.length > 0 ? scene.urls : [""]);
-  const [remoteIds, setRemoteIds] = useState<RemoteIdValue[]>(scene.remoteIds?.length ? scene.remoteIds : []);
-  const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(scene.customFields ?? {}) });
-  const [studioId, setStudioId] = useState<number | undefined>(scene.studioId ?? undefined);
-  const [selectedTagIds, setSelectedTagIds] = useState<number[]>(getEditableTagIds(scene.tags));
-  const [selectedPerformerIds, setSelectedPerformerIds] = useState<number[]>(scene.performers.map((p) => p.id));
-  const [selectedGalleryIds, setSelectedGalleryIds] = useState<number[]>(scene.galleries.map((g) => g.id));
-  const [selectedGroups, setSelectedGroups] = useState<{ groupId: number; sceneIndex: number }[]>(
-    scene.groups.map((g) => ({ groupId: g.id, sceneIndex: g.sceneIndex }))
+  const [urls, setUrls] = useState(video.urls.length > 0 ? video.urls : [""]);
+  const [remoteIds, setRemoteIds] = useState<RemoteIdValue[]>(video.remoteIds?.length ? video.remoteIds : []);
+  const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(video.customFields ?? {}) });
+  const [studioId, setStudioId] = useState<number | undefined>(video.studioId ?? undefined);
+  const [selectedTagIds, setSelectedTagIds] = useState<number[]>(getEditableTagIds(video.tags));
+  const [selectedPerformerIds, setSelectedPerformerIds] = useState<number[]>(video.performers.map((p) => p.id));
+  const [selectedGalleryIds, setSelectedGalleryIds] = useState<number[]>(video.galleries.map((g) => g.id));
+  const [selectedGroups, setSelectedGroups] = useState<{ groupId: number; videoIndex: number }[]>(
+    video.groups.map((g) => ({ groupId: g.id, videoIndex: g.videoIndex }))
   );
-  const [contextTagIdsByPerformer, setContextTagIdsByPerformer] = useState<Record<number, number[]>>(() => buildSceneEditPerformerContextTagIds(scene));
+  const [contextTagIdsByPerformer, setContextTagIdsByPerformer] = useState<Record<number, number[]>>(() => buildVideoEditPerformerContextTagIds(video));
   const [performerOccurrenceTagsOpen, setPerformerOccurrenceTagsOpen] = useState(false);
   useEffect(() => {
-    setTitle(scene.title || ""); setCode(scene.code || ""); setDetails(scene.details || "");
-    setDirector(scene.director || ""); setDate(scene.date || ""); setIsVr(scene.isVr ?? false); setRating(undefined);
-    setUrls(scene.urls.length > 0 ? scene.urls : [""]); setStudioId(scene.studioId ?? undefined);
-    setRemoteIds(scene.remoteIds?.length ? scene.remoteIds : []);
-    setCustomFields({ ...(scene.customFields ?? {}) });
-    setSelectedTagIds(getEditableTagIds(scene.tags)); setSelectedPerformerIds(scene.performers.map((p) => p.id));
-    setSelectedGalleryIds(scene.galleries.map((g) => g.id));
-    setSelectedGroups(scene.groups.map((g) => ({ groupId: g.id, sceneIndex: g.sceneIndex })));
-    setContextTagIdsByPerformer(buildSceneEditPerformerContextTagIds(scene));
-  }, [scene]);
+    setTitle(video.title || ""); setCode(video.code || ""); setDetails(video.details || "");
+    setDirector(video.director || ""); setDate(video.date || ""); setIsVr(video.isVr ?? false); setRating(undefined);
+    setUrls(video.urls.length > 0 ? video.urls : [""]); setStudioId(video.studioId ?? undefined);
+    setRemoteIds(video.remoteIds?.length ? video.remoteIds : []);
+    setCustomFields({ ...(video.customFields ?? {}) });
+    setSelectedTagIds(getEditableTagIds(video.tags)); setSelectedPerformerIds(video.performers.map((p) => p.id));
+    setSelectedGalleryIds(video.galleries.map((g) => g.id));
+    setSelectedGroups(video.groups.map((g) => ({ groupId: g.id, videoIndex: g.videoIndex })));
+    setContextTagIdsByPerformer(buildVideoEditPerformerContextTagIds(video));
+  }, [video]);
 
   const mutation = useMutation({
-    mutationFn: async (data: SceneUpdate) => {
-      const updated = await scenes.update(scene.id, data);
-      await syncSceneEditPerformerContextTags(scene.id, scene.contextTagApplications ?? [], contextTagIdsByPerformer, selectedPerformerIds);
+    mutationFn: async (data: VideoUpdate) => {
+      const updated = await videos.update(video.id, data);
+      await syncVideoEditPerformerContextTags(video.id, video.contextTagApplications ?? [], contextTagIdsByPerformer, selectedPerformerIds);
       return updated;
     },
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["scene", scene.id] }); queryClient.invalidateQueries({ queryKey: ["tagapplications"] }); queryClient.invalidateQueries({ queryKey: ["scenes"] }); onSaved(); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["video", video.id] }); queryClient.invalidateQueries({ queryKey: ["tagapplications"] }); queryClient.invalidateQueries({ queryKey: ["videos"] }); onSaved(); },
   });
 
   const handleSave = () => {
@@ -2326,18 +2326,18 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
     setContextTagIdsByPerformer((current) => ({ ...current, [performerId]: Array.from(new Set(tagIds)) }));
   };
   const setSelectedGroupIds = (groupIds: number[]) => {
-    setSelectedGroups(groupIds.map((groupId) => selectedGroups.find((group) => group.groupId === groupId) ?? { groupId, sceneIndex: 0 }));
+    setSelectedGroups(groupIds.map((groupId) => selectedGroups.find((group) => group.groupId === groupId) ?? { groupId, videoIndex: 0 }));
   };
 
-  const lockedTagIds = getLockedTagIds(scene.tags);
+  const lockedTagIds = getLockedTagIds(video.tags);
   const displayedTagIds = mergeTagIds(lockedTagIds, selectedTagIds);
   const tagProvenanceById = useMemo(() => {
     const lookup: Record<number, TagProvenance[] | undefined> = {};
-    for (const tag of scene.tags) {
-      lookup[tag.id] = resolveTagProvenance(tag, scene.fieldProvenance);
+    for (const tag of video.tags) {
+      lookup[tag.id] = resolveTagProvenance(tag, video.fieldProvenance);
     }
     return lookup;
-  }, [scene.fieldProvenance, scene.tags]);
+  }, [video.fieldProvenance, video.tags]);
   const updateSelectedTagIds = (tagIds: number[]) => {
     const locked = new Set(lockedTagIds);
     setSelectedTagIds(tagIds.filter((tagId) => !locked.has(tagId)));
@@ -2348,35 +2348,35 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-3">
-        <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="title" block>
+        <FieldProvenanceHover fieldProvenance={video.fieldProvenance} fieldKey="title" block>
           <label className="space-y-1"><span className="text-xs text-secondary">Title</span><input value={title} onChange={(e) => setTitle(e.target.value)} className={inputCls} /></label>
         </FieldProvenanceHover>
-        <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="date" block>
+        <FieldProvenanceHover fieldProvenance={video.fieldProvenance} fieldKey="date" block>
           <label className="space-y-1"><span className="text-xs text-secondary">Date</span><input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={inputCls} /></label>
         </FieldProvenanceHover>
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="code" block>
+        <FieldProvenanceHover fieldProvenance={video.fieldProvenance} fieldKey="code" block>
           <label className="space-y-1"><span className="text-xs text-secondary">Studio Code</span><input value={code} onChange={(e) => setCode(e.target.value)} className={inputCls} /></label>
         </FieldProvenanceHover>
-        <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="director" block>
+        <FieldProvenanceHover fieldProvenance={video.fieldProvenance} fieldKey="director" block>
           <label className="space-y-1"><span className="text-xs text-secondary">Director</span><input value={director} onChange={(e) => setDirector(e.target.value)} className={inputCls} /></label>
         </FieldProvenanceHover>
       </div>
-      <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="details" block>
+      <FieldProvenanceHover fieldProvenance={video.fieldProvenance} fieldKey="details" block>
         <label className="block space-y-1"><span className="text-xs text-secondary">Details</span><textarea value={details} onChange={(e) => setDetails(e.target.value)} rows={3} className={inputCls} /></label>
       </FieldProvenanceHover>
       <label className="inline-flex items-center gap-2 text-sm text-secondary">
         <input type="checkbox" checked={isVr} onChange={(e) => setIsVr(e.target.checked)} className="rounded border-border bg-card" />
         VR
       </label>
-      <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="studio" block>
+      <FieldProvenanceHover fieldProvenance={video.fieldProvenance} fieldKey="studio" block>
         <div className="space-y-1">
           <span className="text-xs text-secondary">Studio</span>
           <StudioSelector value={studioId} onChange={setStudioId} placeholder="Search studios..." />
         </div>
       </FieldProvenanceHover>
-      <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="urls" block>
+      <FieldProvenanceHover fieldProvenance={video.fieldProvenance} fieldKey="urls" block>
         <div className="space-y-1"><span className="text-xs text-secondary">URLs</span><StringListEditor values={urls} onChange={setUrls} placeholder="https://..." addLabel="Add URL" inputType="url" /></div>
       </FieldProvenanceHover>
       {/* Tags */}
@@ -2386,7 +2386,7 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
       </div>
 
       {/* Performers */}
-      <FieldProvenanceHover fieldProvenance={scene.fieldProvenance} fieldKey="performers" block>
+      <FieldProvenanceHover fieldProvenance={video.fieldProvenance} fieldKey="performers" block>
         <div className="space-y-1">
           <span className="text-xs text-secondary">Performers</span>
           <EntityReferenceMultiSelector entityType="performer" values={selectedPerformerIds} onChange={setSelectedPerformerIds} placeholder="Search performers..." inputClassName={inputCls} />
@@ -2447,9 +2447,9 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
                   <button onClick={() => setSelectedGroups(selectedGroups.filter((g) => g.groupId !== sg.groupId))} className="hover:text-white">×</button>
                 </span>
                 <label className="flex items-center gap-1 text-xs text-muted">
-                  Scene #
-                  <input type="number" min={0} value={sg.sceneIndex}
-                    onChange={(e) => setSelectedGroups(selectedGroups.map((g) => g.groupId === sg.groupId ? { ...g, sceneIndex: Number(e.target.value) || 0 } : g))}
+                  Video #
+                  <input type="number" min={0} value={sg.videoIndex}
+                    onChange={(e) => setSelectedGroups(selectedGroups.map((g) => g.groupId === sg.groupId ? { ...g, videoIndex: Number(e.target.value) || 0 } : g))}
                     className="w-16 bg-surface border border-border rounded px-2 py-0.5 text-xs text-foreground focus:outline-none focus:border-accent" />
                 </label>
               </div>
@@ -2460,7 +2460,7 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
       </div>
 
       <div className="space-y-1"><span className="text-xs text-secondary">Remote IDs</span><RemoteIdsEditor value={remoteIds} onChange={setRemoteIds} metadataServers={config?.scraping?.metadataServers} /></div>
-      <div className="space-y-1"><span className="text-xs text-secondary">Custom Fields</span><CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="scene" /></div>
+      <div className="space-y-1"><span className="text-xs text-secondary">Custom Fields</span><CustomFieldsEditor value={customFields} onChange={setCustomFields} entityType="video" /></div>
 
       {mutation.error && <div className="bg-red-900/50 border border-red-700 text-red-300 rounded p-2 text-sm">{(mutation.error as Error).message}</div>}
 
@@ -2473,3 +2473,4 @@ function SceneEditPanel({ scene, onSaved }: { scene: Scene; onSaved: () => void 
     </div>
   );
 }
+

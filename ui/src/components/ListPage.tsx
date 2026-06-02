@@ -81,7 +81,7 @@ const DEFAULT_ZOOM_LEVEL = 1;
 const LIST_SEARCH_DEBOUNCE_MS = 350;
 
 const CUSTOM_FIELD_ENTITY_BY_FILTER_MODE: Record<string, CustomFieldEntityType> = {
-  scenes: "scene",
+  videos: "video",
   audios: "audio",
   texts: "text",
   performers: "performer",
@@ -94,7 +94,7 @@ const CUSTOM_FIELD_ENTITY_BY_FILTER_MODE: Record<string, CustomFieldEntityType> 
 };
 
 const LIST_ENTITY_BY_FILTER_MODE: Record<string, string> = {
-  scenes: "scene",
+  videos: "video",
   audios: "audio",
   texts: "text",
   performers: "performer",
@@ -121,8 +121,8 @@ const REFERENCE_ENTITY_TYPE_BY_EXTENSION_VALUE: Record<string, EntityType> = {
   groups: "groups",
   gallery: "galleries",
   galleries: "galleries",
-  scene: "scenes",
-  scenes: "scenes",
+  video: "videos",
+  videos: "videos",
   face: "faces",
   faces: "faces",
 };
@@ -180,7 +180,7 @@ function getCustomFieldModifiers(type: CustomFieldType) {
     case "tag":
     case "performer":
     case "studio":
-    case "scene":
+    case "video":
     case "gallery":
     case "image":
     case "group":
@@ -1582,3 +1582,4 @@ function getPageNumbers(current: number, total: number): number[] {
   pages.push(total);
   return pages;
 }
+

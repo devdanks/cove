@@ -9,19 +9,19 @@ namespace Cove.Tests;
 public class HierarchicalTagFilterTests
 {
     [Fact]
-    public async Task SceneTagsCriterion_IncludesAll_WithSubTags_MatchesPerSelectedRoot()
+    public async Task VideoTagsCriterion_IncludesAll_WithSubTags_MatchesPerSelectedRoot()
     {
         await using var context = CreateContext();
         var (parentA, childA, parentB, childB) = await SeedTagHierarchyAsync(context);
 
-        context.Scenes.AddRange(
-            CreateScene("children-only-match", childA.Id, childB.Id),
-            CreateScene("missing-second-root", childA.Id),
-            CreateScene("root-and-child-match", parentA.Id, childB.Id));
+        context.Videos.AddRange(
+            CreateVideo("children-only-match", childA.Id, childB.Id),
+            CreateVideo("missing-second-root", childA.Id),
+            CreateVideo("root-and-child-match", parentA.Id, childB.Id));
         await context.SaveChangesAsync();
 
-        var repository = new SceneRepository(context);
-        var filter = new SceneFilter
+        var repository = new VideoRepository(context);
+        var filter = new VideoFilter
         {
             TagsCriterion = new MultiIdCriterion
             {
@@ -32,7 +32,7 @@ public class HierarchicalTagFilterTests
         };
 
         var (items, totalCount) = await repository.FindAsync(filter, new FindFilter { Page = 1, PerPage = 50 });
-        var titles = items.Select(scene => scene.Title ?? string.Empty).OrderBy(title => title).ToArray();
+        var titles = items.Select(video => video.Title ?? string.Empty).OrderBy(title => title).ToArray();
 
         Assert.Equal(2, totalCount);
         Assert.Equal(["children-only-match", "root-and-child-match"], titles);
@@ -86,11 +86,11 @@ public class HierarchicalTagFilterTests
         return (parentA, childA, parentB, childB);
     }
 
-    private static Scene CreateScene(string title, params int[] tagIds)
+    private static Video CreateVideo(string title, params int[] tagIds)
         => new()
         {
             Title = title,
-            SceneTags = tagIds.Select(tagId => new SceneTag { TagId = tagId }).ToList(),
+            VideoTags = tagIds.Select(tagId => new VideoTag { TagId = tagId }).ToList(),
         };
 
     private static Image CreateImage(string title, params int[] tagIds)
@@ -118,3 +118,4 @@ public class HierarchicalTagFilterTests
         }
     }
 }
+

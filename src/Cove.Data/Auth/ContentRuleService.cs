@@ -8,7 +8,7 @@ public sealed class ContentRuleService : IContentRuleService
 {
     private static readonly HashSet<string> ValidEntityKinds = new(StringComparer.OrdinalIgnoreCase)
     {
-        "scene", "performer", "tag", "studio", "gallery", "image", "group", "segment", "marker", "file",
+        "video", "performer", "tag", "studio", "gallery", "image", "group", "segment", "marker", "file",
     };
 
     private static readonly HashSet<string> ValidEffects = new(StringComparer.OrdinalIgnoreCase) { "allow", "deny" };

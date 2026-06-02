@@ -13,38 +13,38 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using GalleriesController = Cove.Api.Controllers.GalleriesController;
-using ScenesController = Cove.Api.Controllers.ScenesController;
+using VideosController = Cove.Api.Controllers.VideosController;
 
 namespace Cove.Tests;
 
 public sealed class Phase10TagProvenanceTests
 {
     [Fact]
-    public async Task ScenesController_GetById_IncludesProvenance()
+    public async Task VideosController_GetById_IncludesProvenance()
     {
         await using var context = CreateContext();
 
         var tag = new Tag { Name = "Detected" };
-        var scene = new Scene { Title = "Scene with provenance" };
-        scene.SceneTags.Add(new SceneTag { Scene = scene, Tag = tag });
+        var video = new Video { Title = "Video with provenance" };
+        video.VideoTags.Add(new VideoTag { Video = video, Tag = tag });
 
-        context.AddRange(tag, scene);
+        context.AddRange(tag, video);
         await context.SaveChangesAsync();
 
         context.TagApplications.Add(new TagApplication
         {
-            HostType = AffinityHostType.Scene,
-            HostId = scene.Id,
+            HostType = AffinityHostType.Video,
+            HostId = video.Id,
             TagId = tag.Id,
             SourceKey = "ext:ai.tagging",
-            SourceRunId = "run-scene",
-            ModelKey = "model-scene",
+            SourceRunId = "run-video",
+            ModelKey = "model-video",
             Confidence = 0.82f,
         });
         await context.SaveChangesAsync();
 
-        var controller = new ScenesController(
-            new SceneRepository(context),
+        var controller = new VideosController(
+            new VideoRepository(context),
             context,
             null!,
             null!,
@@ -57,15 +57,15 @@ public sealed class Phase10TagProvenanceTests
             new CustomFieldService(context),
             new TagProvenanceService(context));
 
-        var result = await controller.GetById(scene.Id, CancellationToken.None);
+        var result = await controller.GetById(video.Id, CancellationToken.None);
         var ok = Assert.IsType<OkObjectResult>(result.Result);
-        var dto = Assert.IsType<SceneDto>(ok.Value);
+        var dto = Assert.IsType<VideoDto>(ok.Value);
         var dtoTag = Assert.Single(dto.Tags);
         var provenance = Assert.Single(dtoTag.Provenance!);
 
         Assert.Equal("ext:ai.tagging", provenance.SourceKey);
-        Assert.Equal("run-scene", provenance.SourceRunId);
-        Assert.Equal("model-scene", provenance.ModelKey);
+        Assert.Equal("run-video", provenance.SourceRunId);
+        Assert.Equal("model-video", provenance.ModelKey);
         Assert.Equal(0.82f, provenance.Confidence);
     }
 
@@ -173,12 +173,12 @@ public sealed class Phase10TagProvenanceTests
         var studio = new Studio { Name = "Acme" };
         var tag = new Tag { Name = "Summer" };
 
-        var sceneFolder = new Folder { Path = Path.Combine("C:\\library", "Acme Alice Summer"), ModTime = DateTime.UtcNow };
+        var videoFolder = new Folder { Path = Path.Combine("C:\\library", "Acme Alice Summer"), ModTime = DateTime.UtcNow };
         var imageFolder = new Folder { Path = Path.Combine("C:\\library", "Acme Alice Summer", "images"), ModTime = DateTime.UtcNow };
         var galleryFolder = new Folder { Path = Path.Combine("C:\\library", "Acme Alice Summer", "gallery"), ModTime = DateTime.UtcNow };
 
-        var scene = new Scene { Title = "Alice showcase" };
-        scene.Files.Add(new VideoFile { Basename = "alice-summer-scene.mp4", ParentFolder = sceneFolder, ModTime = DateTime.UtcNow });
+        var video = new Video { Title = "Alice showcase" };
+        video.Files.Add(new VideoFile { Basename = "alice-summer-video.mp4", ParentFolder = videoFolder, ModTime = DateTime.UtcNow });
 
         var image = new Image { Title = "Alice still" };
         image.Files.Add(new ImageFile { Basename = "alice-summer-image.jpg", ParentFolder = imageFolder, ModTime = DateTime.UtcNow });
@@ -186,7 +186,7 @@ public sealed class Phase10TagProvenanceTests
         var gallery = new Gallery { Title = "Alice gallery" };
         gallery.Files.Add(new GalleryFile { Basename = "alice-summer-gallery.zip", ParentFolder = galleryFolder, ModTime = DateTime.UtcNow });
 
-        context.AddRange(performer, studio, tag, sceneFolder, imageFolder, galleryFolder, scene, image, gallery);
+        context.AddRange(performer, studio, tag, videoFolder, imageFolder, galleryFolder, video, image, gallery);
         await context.SaveChangesAsync();
     }
 
@@ -271,3 +271,4 @@ public sealed class Phase10TagProvenanceTests
             => Task.FromResult<IReadOnlyDictionary<int, List<TagProvenanceDto>>>(new Dictionary<int, List<TagProvenanceDto>>());
     }
 }
+

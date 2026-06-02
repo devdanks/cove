@@ -13,19 +13,19 @@ using Microsoft.Extensions.Caching.Memory;
 
 namespace Cove.Tests;
 
-public class SceneFilterBehaviorTests
+public class VideoFilterBehaviorTests
 {
     [Fact]
     public async Task PathCriterion_Equals_UsesFullNormalizedPath()
     {
         await using var context = CreateContext();
-        context.Scenes.AddRange(
-            CreateSceneWithFile("match", folderPath: @"C:\library\matching", basename: "clip.mp4"),
-            CreateSceneWithFile("same-name-other-folder", folderPath: @"C:\library\other", basename: "clip.mp4"));
+        context.Videos.AddRange(
+            CreateVideoWithFile("match", folderPath: @"C:\library\matching", basename: "clip.mp4"),
+            CreateVideoWithFile("same-name-other-folder", folderPath: @"C:\library\other", basename: "clip.mp4"));
         await context.SaveChangesAsync();
 
-        var repository = new SceneRepository(context);
-        var filter = new SceneFilter
+        var repository = new VideoRepository(context);
+        var filter = new VideoFilter
         {
             PathCriterion = new StringCriterion
             {
@@ -37,23 +37,23 @@ public class SceneFilterBehaviorTests
         var (items, totalCount) = await repository.FindAsync(filter, new FindFilter { Page = 1, PerPage = 50 });
 
         Assert.Equal(1, totalCount);
-        Assert.Equal(["match"], items.Select(scene => scene.Title ?? string.Empty).ToArray());
+        Assert.Equal(["match"], items.Select(video => video.Title ?? string.Empty).ToArray());
     }
 
     [Fact]
     public async Task AudioCodecCriterion_HandlesRegexAndNullModifiers()
     {
         await using var context = CreateContext();
-        context.Scenes.AddRange(
-            CreateSceneWithFile("aac-scene", audioCodec: "AAC"),
-            CreateSceneWithFile("mp3-scene", audioCodec: "MP3"),
-            CreateSceneWithFile("missing-audio", audioCodec: ""));
+        context.Videos.AddRange(
+            CreateVideoWithFile("aac-video", audioCodec: "AAC"),
+            CreateVideoWithFile("mp3-video", audioCodec: "MP3"),
+            CreateVideoWithFile("missing-audio", audioCodec: ""));
         await context.SaveChangesAsync();
 
-        var repository = new SceneRepository(context);
+        var repository = new VideoRepository(context);
 
         var (notRegexItems, notRegexCount) = await repository.FindAsync(
-            new SceneFilter
+            new VideoFilter
             {
                 AudioCodecCriterion = new StringCriterion
                 {
@@ -64,7 +64,7 @@ public class SceneFilterBehaviorTests
             new FindFilter { Page = 1, PerPage = 50 });
 
         var (nullItems, nullCount) = await repository.FindAsync(
-            new SceneFilter
+            new VideoFilter
             {
                 AudioCodecCriterion = new StringCriterion
                 {
@@ -75,7 +75,7 @@ public class SceneFilterBehaviorTests
             new FindFilter { Page = 1, PerPage = 50 });
 
         var (notNullItems, notNullCount) = await repository.FindAsync(
-            new SceneFilter
+            new VideoFilter
             {
                 AudioCodecCriterion = new StringCriterion
                 {
@@ -86,29 +86,29 @@ public class SceneFilterBehaviorTests
             new FindFilter { Page = 1, PerPage = 50 });
 
         Assert.Equal(2, notRegexCount);
-        Assert.Equal(["missing-audio", "mp3-scene"], notRegexItems.Select(scene => scene.Title ?? string.Empty).OrderBy(title => title).ToArray());
+        Assert.Equal(["missing-audio", "mp3-video"], notRegexItems.Select(video => video.Title ?? string.Empty).OrderBy(title => title).ToArray());
         Assert.Equal(1, nullCount);
-        Assert.Equal(["missing-audio"], nullItems.Select(scene => scene.Title ?? string.Empty).ToArray());
+        Assert.Equal(["missing-audio"], nullItems.Select(video => video.Title ?? string.Empty).ToArray());
         Assert.Equal(2, notNullCount);
-        Assert.Equal(["aac-scene", "mp3-scene"], notNullItems.Select(scene => scene.Title ?? string.Empty).OrderBy(title => title).ToArray());
+        Assert.Equal(["aac-video", "mp3-video"], notNullItems.Select(video => video.Title ?? string.Empty).OrderBy(title => title).ToArray());
     }
 
     [Fact]
-    public async Task BitrateInterval_GreaterThan_UsesSceneFileBitrate()
+    public async Task BitrateInterval_GreaterThan_UsesVideoFileBitrate()
     {
         await using var context = CreateContext();
-        context.Scenes.AddRange(
-            CreateSceneWithFile("high-bitrate", bitRate: 2_500_000),
-            CreateSceneWithFile("low-bitrate", bitRate: 500_000),
-            new Scene { Title = "no-file" });
+        context.Videos.AddRange(
+            CreateVideoWithFile("high-bitrate", bitRate: 2_500_000),
+            CreateVideoWithFile("low-bitrate", bitRate: 500_000),
+            new Video { Title = "no-file" });
         await context.SaveChangesAsync();
 
-        var scenesByTitle = context.Scenes.ToDictionary(scene => scene.Title ?? string.Empty);
-        scenesByTitle["high-bitrate"].MaxBitRate = 0;
-        scenesByTitle["low-bitrate"].MaxBitRate = 9_000_000;
+        var videosByTitle = context.Videos.ToDictionary(video => video.Title ?? string.Empty);
+        videosByTitle["high-bitrate"].MaxBitRate = 0;
+        videosByTitle["low-bitrate"].MaxBitRate = 9_000_000;
 
-        var repository = new SceneRepository(context);
-        var filter = new SceneFilter
+        var repository = new VideoRepository(context);
+        var filter = new VideoFilter
         {
             BitrateInterval = new IntCriterion
             {
@@ -120,25 +120,25 @@ public class SceneFilterBehaviorTests
         var (items, totalCount) = await repository.FindAsync(filter, new FindFilter { Page = 1, PerPage = 50 });
 
         Assert.Equal(1, totalCount);
-        Assert.Equal(["high-bitrate"], items.Select(scene => scene.Title ?? string.Empty).ToArray());
+        Assert.Equal(["high-bitrate"], items.Select(video => video.Title ?? string.Empty).ToArray());
     }
 
     [Fact]
-    public async Task BitrateSort_UsesSceneFileBitrateWhenSummaryIsStale()
+    public async Task BitrateSort_UsesVideoFileBitrateWhenSummaryIsStale()
     {
         await using var context = CreateContext();
-        context.Scenes.AddRange(
-            CreateSceneWithFile("high-bitrate", bitRate: 2_500_000),
-            CreateSceneWithFile("low-bitrate", bitRate: 500_000),
-            CreateSceneWithFile("mid-bitrate", bitRate: 1_500_000));
+        context.Videos.AddRange(
+            CreateVideoWithFile("high-bitrate", bitRate: 2_500_000),
+            CreateVideoWithFile("low-bitrate", bitRate: 500_000),
+            CreateVideoWithFile("mid-bitrate", bitRate: 1_500_000));
         await context.SaveChangesAsync();
 
-        var scenesByTitle = context.Scenes.ToDictionary(scene => scene.Title ?? string.Empty);
-        scenesByTitle["high-bitrate"].MaxBitRate = 0;
-        scenesByTitle["low-bitrate"].MaxBitRate = 9_000_000;
-        scenesByTitle["mid-bitrate"].MaxBitRate = 1;
+        var videosByTitle = context.Videos.ToDictionary(video => video.Title ?? string.Empty);
+        videosByTitle["high-bitrate"].MaxBitRate = 0;
+        videosByTitle["low-bitrate"].MaxBitRate = 9_000_000;
+        videosByTitle["mid-bitrate"].MaxBitRate = 1;
 
-        var repository = new SceneRepository(context);
+        var repository = new VideoRepository(context);
         var (items, totalCount) = await repository.FindAsync(null, new FindFilter
         {
             Page = 1,
@@ -148,20 +148,20 @@ public class SceneFilterBehaviorTests
         });
 
         Assert.Equal(3, totalCount);
-        Assert.Equal(["low-bitrate", "mid-bitrate", "high-bitrate"], items.Select(scene => scene.Title ?? string.Empty).ToArray());
+        Assert.Equal(["low-bitrate", "mid-bitrate", "high-bitrate"], items.Select(video => video.Title ?? string.Empty).ToArray());
     }
 
     [Fact]
     public async Task DirectorCriterion_NotMatchesRegex_UsesRegexSemantics()
     {
         await using var context = CreateContext();
-        context.Scenes.AddRange(
-            CreateSceneWithFile("jane-scene", director: "Jane Smith"),
-            CreateSceneWithFile("john-scene", director: "John Doe"));
+        context.Videos.AddRange(
+            CreateVideoWithFile("jane-video", director: "Jane Smith"),
+            CreateVideoWithFile("john-video", director: "John Doe"));
         await context.SaveChangesAsync();
 
-        var repository = new SceneRepository(context);
-        var filter = new SceneFilter
+        var repository = new VideoRepository(context);
+        var filter = new VideoFilter
         {
             DirectorCriterion = new StringCriterion
             {
@@ -173,22 +173,22 @@ public class SceneFilterBehaviorTests
         var (items, totalCount) = await repository.FindAsync(filter, new FindFilter { Page = 1, PerPage = 50 });
 
         Assert.Equal(1, totalCount);
-        Assert.Equal(["john-scene"], items.Select(scene => scene.Title ?? string.Empty).ToArray());
+        Assert.Equal(["john-video"], items.Select(video => video.Title ?? string.Empty).ToArray());
     }
 
     [Fact]
-    public async Task PerformerAgeCriterion_Equals_UsesAgeAtSceneDate()
+    public async Task PerformerAgeCriterion_Equals_UsesAgeAtVideoDate()
     {
         await using var context = CreateContext();
         var performer = CreatePerformer("Boundary Performer", new DateOnly(2006, 1, 15));
 
-        context.Scenes.AddRange(
-            CreateSceneWithFile("before-birthday", sceneDate: new DateOnly(2024, 1, 10), performer: performer),
-            CreateSceneWithFile("after-birthday", sceneDate: new DateOnly(2024, 1, 20), performer: performer));
+        context.Videos.AddRange(
+            CreateVideoWithFile("before-birthday", videoDate: new DateOnly(2024, 1, 10), performer: performer),
+            CreateVideoWithFile("after-birthday", videoDate: new DateOnly(2024, 1, 20), performer: performer));
         await context.SaveChangesAsync();
 
-        var repository = new SceneRepository(context);
-        var filter = new SceneFilter
+        var repository = new VideoRepository(context);
+        var filter = new VideoFilter
         {
             PerformerAgeCriterion = new IntCriterion
             {
@@ -200,34 +200,34 @@ public class SceneFilterBehaviorTests
         var (items, totalCount) = await repository.FindAsync(filter, new FindFilter { Page = 1, PerPage = 50 });
 
         Assert.Equal(1, totalCount);
-        Assert.Equal(["after-birthday"], items.Select(scene => scene.Title ?? string.Empty).ToArray());
+        Assert.Equal(["after-birthday"], items.Select(video => video.Title ?? string.Empty).ToArray());
     }
 
     [Fact]
-    public async Task PerformerTagsCriterion_Includes_MatchesScenesByPerformerOccurrenceTag()
+    public async Task PerformerTagsCriterion_Includes_MatchesVideosByPerformerOccurrenceTag()
     {
         await using var context = CreateContext();
         var tag = new Tag { Name = "Featured" };
-        var taggedScene = CreateSceneWithFile("tagged-performer-scene", performer: CreatePerformer("Tagged", new DateOnly(2000, 1, 1)));
-        var untaggedScene = CreateSceneWithFile("untagged-performer-scene", performer: CreatePerformer("Untagged", new DateOnly(2000, 1, 1)));
+        var taggedVideo = CreateVideoWithFile("tagged-performer-video", performer: CreatePerformer("Tagged", new DateOnly(2000, 1, 1)));
+        var untaggedVideo = CreateVideoWithFile("untagged-performer-video", performer: CreatePerformer("Untagged", new DateOnly(2000, 1, 1)));
 
         context.Tags.Add(tag);
-        context.Scenes.AddRange(taggedScene, untaggedScene);
+        context.Videos.AddRange(taggedVideo, untaggedVideo);
         await context.SaveChangesAsync();
 
         context.TagApplications.Add(new TagApplication
         {
-            HostType = AffinityHostType.Scene,
-            HostId = taggedScene.Id,
+            HostType = AffinityHostType.Video,
+            HostId = taggedVideo.Id,
             ContextType = "performer",
-            ContextId = taggedScene.ScenePerformers.Single().Performer!.Id,
+            ContextId = taggedVideo.VideoPerformers.Single().Performer!.Id,
             TagId = tag.Id,
             SourceKey = "test",
         });
         await context.SaveChangesAsync();
 
-        var repository = new SceneRepository(context);
-        var filter = new SceneFilter
+        var repository = new VideoRepository(context);
+        var filter = new VideoFilter
         {
             PerformerTagsCriterion = new MultiIdCriterion
             {
@@ -239,7 +239,7 @@ public class SceneFilterBehaviorTests
         var (items, totalCount) = await repository.FindAsync(filter, new FindFilter { Page = 1, PerPage = 50 });
 
         Assert.Equal(1, totalCount);
-        Assert.Equal(["tagged-performer-scene"], items.Select(scene => scene.Title ?? string.Empty).ToArray());
+        Assert.Equal(["tagged-performer-video"], items.Select(video => video.Title ?? string.Empty).ToArray());
     }
 
     [Fact]
@@ -249,19 +249,19 @@ public class SceneFilterBehaviorTests
         var tag = new Tag { Name = "Occurrence Tag" };
         var targetPerformer = CreatePerformer("Target", new DateOnly(2000, 1, 1));
         var otherPerformer = CreatePerformer("Other", new DateOnly(2000, 1, 1));
-        var targetTaggedScene = CreateSceneWithFile("target-tagged", performer: targetPerformer);
-        var wrongPerformerTaggedScene = CreateSceneWithFile("wrong-performer-tagged", performer: targetPerformer);
-        wrongPerformerTaggedScene.ScenePerformers.Add(new ScenePerformer { Performer = otherPerformer });
+        var targetTaggedVideo = CreateVideoWithFile("target-tagged", performer: targetPerformer);
+        var wrongPerformerTaggedVideo = CreateVideoWithFile("wrong-performer-tagged", performer: targetPerformer);
+        wrongPerformerTaggedVideo.VideoPerformers.Add(new VideoPerformer { Performer = otherPerformer });
 
         context.Tags.Add(tag);
-        context.Scenes.AddRange(targetTaggedScene, wrongPerformerTaggedScene);
+        context.Videos.AddRange(targetTaggedVideo, wrongPerformerTaggedVideo);
         await context.SaveChangesAsync();
 
         context.TagApplications.AddRange(
             new TagApplication
             {
-                HostType = AffinityHostType.Scene,
-                HostId = targetTaggedScene.Id,
+                HostType = AffinityHostType.Video,
+                HostId = targetTaggedVideo.Id,
                 ContextType = "performer",
                 ContextId = targetPerformer.Id,
                 TagId = tag.Id,
@@ -269,8 +269,8 @@ public class SceneFilterBehaviorTests
             },
             new TagApplication
             {
-                HostType = AffinityHostType.Scene,
-                HostId = wrongPerformerTaggedScene.Id,
+                HostType = AffinityHostType.Video,
+                HostId = wrongPerformerTaggedVideo.Id,
                 ContextType = "performer",
                 ContextId = otherPerformer.Id,
                 TagId = tag.Id,
@@ -278,8 +278,8 @@ public class SceneFilterBehaviorTests
             });
         await context.SaveChangesAsync();
 
-        var repository = new SceneRepository(context);
-        var filter = new SceneFilter
+        var repository = new VideoRepository(context);
+        var filter = new VideoFilter
         {
             PerformersCriterion = new MultiIdCriterion
             {
@@ -296,7 +296,7 @@ public class SceneFilterBehaviorTests
         var (items, totalCount) = await repository.FindAsync(filter, new FindFilter { Page = 1, PerPage = 50 });
 
         Assert.Equal(1, totalCount);
-        Assert.Equal(["target-tagged"], items.Select(scene => scene.Title ?? string.Empty).ToArray());
+        Assert.Equal(["target-tagged"], items.Select(video => video.Title ?? string.Empty).ToArray());
     }
 
     [Theory]
@@ -454,25 +454,25 @@ public class SceneFilterBehaviorTests
         await using var context = CreateContext();
         var shortTag = new Tag { Name = "Short" };
         var percentTag = new Tag { Name = "Percent" };
-        var matchingScene = CreateSceneWithFile("matching-duration");
-        var longScene = CreateSceneWithFile("too-long");
-        var lowPercentScene = CreateSceneWithFile("low-percent");
+        var matchingVideo = CreateVideoWithFile("matching-duration");
+        var longVideo = CreateVideoWithFile("too-long");
+        var lowPercentVideo = CreateVideoWithFile("low-percent");
 
         context.Tags.AddRange(shortTag, percentTag);
-        context.Scenes.AddRange(matchingScene, longScene, lowPercentScene);
+        context.Videos.AddRange(matchingVideo, longVideo, lowPercentVideo);
         await context.SaveChangesAsync();
 
         context.TagApplications.AddRange(
-            CreateDurationApplication(matchingScene.Id, shortTag.Id, totalDurationSec: 20, hostDurationSec: 100),
-            CreateDurationApplication(matchingScene.Id, percentTag.Id, totalDurationSec: 20, hostDurationSec: 100),
-            CreateDurationApplication(longScene.Id, shortTag.Id, totalDurationSec: 40, hostDurationSec: 100),
-            CreateDurationApplication(longScene.Id, percentTag.Id, totalDurationSec: 20, hostDurationSec: 100),
-            CreateDurationApplication(lowPercentScene.Id, shortTag.Id, totalDurationSec: 20, hostDurationSec: 100),
-            CreateDurationApplication(lowPercentScene.Id, percentTag.Id, totalDurationSec: 5, hostDurationSec: 100));
+            CreateDurationApplication(matchingVideo.Id, shortTag.Id, totalDurationSec: 20, hostDurationSec: 100),
+            CreateDurationApplication(matchingVideo.Id, percentTag.Id, totalDurationSec: 20, hostDurationSec: 100),
+            CreateDurationApplication(longVideo.Id, shortTag.Id, totalDurationSec: 40, hostDurationSec: 100),
+            CreateDurationApplication(longVideo.Id, percentTag.Id, totalDurationSec: 20, hostDurationSec: 100),
+            CreateDurationApplication(lowPercentVideo.Id, shortTag.Id, totalDurationSec: 20, hostDurationSec: 100),
+            CreateDurationApplication(lowPercentVideo.Id, percentTag.Id, totalDurationSec: 5, hostDurationSec: 100));
         await context.SaveChangesAsync();
 
-        var repository = new SceneRepository(context);
-        var filter = new SceneFilter
+        var repository = new VideoRepository(context);
+        var filter = new VideoFilter
         {
             TagDurationCriterion = new TagDurationCriterion
             {
@@ -487,7 +487,7 @@ public class SceneFilterBehaviorTests
         var (items, totalCount) = await repository.FindAsync(filter, new FindFilter { Page = 1, PerPage = 50 });
 
         Assert.Equal(1, totalCount);
-        Assert.Equal(["matching-duration"], items.Select(scene => scene.Title ?? string.Empty).ToArray());
+        Assert.Equal(["matching-duration"], items.Select(video => video.Title ?? string.Empty).ToArray());
     }
 
     [Fact]
@@ -495,27 +495,27 @@ public class SceneFilterBehaviorTests
     {
         await using var context = CreateContext();
         var tag = new Tag { Name = "Action", MinOccurrencePercent = 80 };
-        var qualifyingScene = CreateSceneWithFile("qualifying-derived");
-        var belowThresholdScene = CreateSceneWithFile("below-threshold-derived");
-        var manualScene = CreateSceneWithFile("manual-tagged");
-        manualScene.SceneTags.Add(new SceneTag { Tag = tag });
+        var qualifyingVideo = CreateVideoWithFile("qualifying-derived");
+        var belowThresholdVideo = CreateVideoWithFile("below-threshold-derived");
+        var manualVideo = CreateVideoWithFile("manual-tagged");
+        manualVideo.VideoTags.Add(new VideoTag { Tag = tag });
 
         context.Tags.Add(tag);
-        context.Scenes.AddRange(qualifyingScene, belowThresholdScene, manualScene);
+        context.Videos.AddRange(qualifyingVideo, belowThresholdVideo, manualVideo);
         await context.SaveChangesAsync();
 
         context.TagApplications.AddRange(
-            CreateDurationApplication(qualifyingScene.Id, tag.Id, totalDurationSec: 82, hostDurationSec: 100),
-            CreateDurationApplication(belowThresholdScene.Id, tag.Id, totalDurationSec: 72, hostDurationSec: 100),
-            CreateDurationApplication(manualScene.Id, tag.Id, totalDurationSec: 72, hostDurationSec: 100));
+            CreateDurationApplication(qualifyingVideo.Id, tag.Id, totalDurationSec: 82, hostDurationSec: 100),
+            CreateDurationApplication(belowThresholdVideo.Id, tag.Id, totalDurationSec: 72, hostDurationSec: 100),
+            CreateDurationApplication(manualVideo.Id, tag.Id, totalDurationSec: 72, hostDurationSec: 100));
         await context.SaveChangesAsync();
 
-        var repository = new SceneRepository(context);
-        var binaryFilter = new SceneFilter
+        var repository = new VideoRepository(context);
+        var binaryFilter = new VideoFilter
         {
             TagsCriterion = new MultiIdCriterion { Value = [tag.Id], Modifier = CriterionModifier.Includes },
         };
-        var explicitDurationFilter = new SceneFilter
+        var explicitDurationFilter = new VideoFilter
         {
             TagDurationCriterion = new TagDurationCriterion
             {
@@ -530,9 +530,9 @@ public class SceneFilterBehaviorTests
         var (durationItems, durationCount) = await repository.FindAsync(explicitDurationFilter, new FindFilter { Page = 1, PerPage = 50, Sort = "title" });
 
         Assert.Equal(2, binaryCount);
-        Assert.Equal(["manual-tagged", "qualifying-derived"], binaryItems.Select(scene => scene.Title ?? string.Empty).ToArray());
+        Assert.Equal(["manual-tagged", "qualifying-derived"], binaryItems.Select(video => video.Title ?? string.Empty).ToArray());
         Assert.Equal(3, durationCount);
-        Assert.Contains(durationItems, scene => scene.Title == "below-threshold-derived");
+        Assert.Contains(durationItems, video => video.Title == "below-threshold-derived");
     }
 
     [Fact]
@@ -540,22 +540,22 @@ public class SceneFilterBehaviorTests
     {
         await using var context = CreateContext();
         var tag = new Tag { Name = "Running", MinOccurrenceSec = 30, MinOccurrencePercent = 80 };
-        var secondsScene = CreateSceneWithFile("seconds-match");
-        var percentScene = CreateSceneWithFile("percent-match");
-        var neitherScene = CreateSceneWithFile("neither-match");
+        var secondsVideo = CreateVideoWithFile("seconds-match");
+        var percentVideo = CreateVideoWithFile("percent-match");
+        var neitherVideo = CreateVideoWithFile("neither-match");
 
         context.Tags.Add(tag);
-        context.Scenes.AddRange(secondsScene, percentScene, neitherScene);
+        context.Videos.AddRange(secondsVideo, percentVideo, neitherVideo);
         await context.SaveChangesAsync();
 
         context.TagApplications.AddRange(
-            CreateDurationApplication(secondsScene.Id, tag.Id, totalDurationSec: 35, hostDurationSec: 100),
-            CreateDurationApplication(percentScene.Id, tag.Id, totalDurationSec: 8, hostDurationSec: 10),
-            CreateDurationApplication(neitherScene.Id, tag.Id, totalDurationSec: 20, hostDurationSec: 100));
+            CreateDurationApplication(secondsVideo.Id, tag.Id, totalDurationSec: 35, hostDurationSec: 100),
+            CreateDurationApplication(percentVideo.Id, tag.Id, totalDurationSec: 8, hostDurationSec: 10),
+            CreateDurationApplication(neitherVideo.Id, tag.Id, totalDurationSec: 20, hostDurationSec: 100));
         await context.SaveChangesAsync();
 
-        var repository = new SceneRepository(context);
-        var filter = new SceneFilter
+        var repository = new VideoRepository(context);
+        var filter = new VideoFilter
         {
             TagsCriterion = new MultiIdCriterion { Value = [tag.Id], Modifier = CriterionModifier.Includes },
         };
@@ -563,36 +563,36 @@ public class SceneFilterBehaviorTests
         var (items, totalCount) = await repository.FindAsync(filter, new FindFilter { Page = 1, PerPage = 50, Sort = "title" });
 
         Assert.Equal(2, totalCount);
-        Assert.Equal(["percent-match", "seconds-match"], items.Select(scene => scene.Title ?? string.Empty).ToArray());
+        Assert.Equal(["percent-match", "seconds-match"], items.Select(video => video.Title ?? string.Empty).ToArray());
     }
 
     [Fact]
-    public async Task ScenesController_GetById_MapsOnlyEffectiveDerivedTagsAsNonRemovable()
+    public async Task VideosController_GetById_MapsOnlyEffectiveDerivedTagsAsNonRemovable()
     {
         await using var context = CreateContext();
         var tag = new Tag { Name = "Observed", MinOccurrencePercent = 80 };
-        var scene = CreateSceneWithFile("thresholded-scene");
+        var video = CreateVideoWithFile("thresholded-video");
 
         context.Tags.Add(tag);
-        context.Scenes.Add(scene);
+        context.Videos.Add(video);
         await context.SaveChangesAsync();
 
-        context.TagApplications.Add(CreateDurationApplication(scene.Id, tag.Id, totalDurationSec: 72, hostDurationSec: 100));
+        context.TagApplications.Add(CreateDurationApplication(video.Id, tag.Id, totalDurationSec: 72, hostDurationSec: 100));
         await context.SaveChangesAsync();
 
-        var controller = CreateScenesControllerWithRepository(context);
-        var initialResponse = await controller.GetById(scene.Id, CancellationToken.None);
+        var controller = CreateVideosControllerWithRepository(context);
+        var initialResponse = await controller.GetById(video.Id, CancellationToken.None);
         var initialOk = Assert.IsType<OkObjectResult>(initialResponse.Result);
-        var initialScene = Assert.IsType<SceneDto>(initialOk.Value);
-        Assert.Empty(initialScene.Tags);
+        var initialVideo = Assert.IsType<VideoDto>(initialOk.Value);
+        Assert.Empty(initialVideo.Tags);
 
         tag.MinOccurrencePercent = 70;
         await context.SaveChangesAsync();
 
-        var updatedResponse = await controller.GetById(scene.Id, CancellationToken.None);
+        var updatedResponse = await controller.GetById(video.Id, CancellationToken.None);
         var updatedOk = Assert.IsType<OkObjectResult>(updatedResponse.Result);
-        var updatedScene = Assert.IsType<SceneDto>(updatedOk.Value);
-        var effectiveTag = Assert.Single(updatedScene.Tags);
+        var updatedVideo = Assert.IsType<VideoDto>(updatedOk.Value);
+        var effectiveTag = Assert.Single(updatedVideo.Tags);
 
         Assert.Equal(tag.Id, effectiveTag.Id);
         Assert.True(effectiveTag.IsDerived);
@@ -601,20 +601,20 @@ public class SceneFilterBehaviorTests
     }
 
     [Fact]
-    public async Task ScenesController_GetById_LocksDirectAiOnlyTagsAsNonRemovable()
+    public async Task VideosController_GetById_LocksDirectAiOnlyTagsAsNonRemovable()
     {
         await using var context = CreateContext();
         var tag = new Tag { Name = "AI Link" };
-        var scene = CreateSceneWithFile("ai-link-scene");
-        scene.SceneTags.Add(new SceneTag { Tag = tag });
+        var video = CreateVideoWithFile("ai-link-video");
+        video.VideoTags.Add(new VideoTag { Tag = tag });
 
-        context.Scenes.Add(scene);
+        context.Videos.Add(video);
         await context.SaveChangesAsync();
 
         context.TagApplications.Add(new TagApplication
         {
-            HostType = AffinityHostType.Scene,
-            HostId = scene.Id,
+            HostType = AffinityHostType.Video,
+            HostId = video.Id,
             TagId = tag.Id,
             SourceKey = "ext:ai.tagging",
             SourceRunId = "run-ai-link",
@@ -623,10 +623,10 @@ public class SceneFilterBehaviorTests
         });
         await context.SaveChangesAsync();
 
-        var controller = CreateScenesControllerWithRepository(context);
-        var response = await controller.GetById(scene.Id, CancellationToken.None);
+        var controller = CreateVideosControllerWithRepository(context);
+        var response = await controller.GetById(video.Id, CancellationToken.None);
         var ok = Assert.IsType<OkObjectResult>(response.Result);
-        var dto = Assert.IsType<SceneDto>(ok.Value);
+        var dto = Assert.IsType<VideoDto>(ok.Value);
         var effectiveTag = Assert.Single(dto.Tags);
 
         Assert.Equal(tag.Id, effectiveTag.Id);
@@ -635,27 +635,27 @@ public class SceneFilterBehaviorTests
     }
 
     [Fact]
-    public async Task TagSceneCount_RefreshesFromEffectiveDerivedTagsWhenThresholdChanges()
+    public async Task TagVideoCount_RefreshesFromEffectiveDerivedTagsWhenThresholdChanges()
     {
         await using var context = CreateContext();
         var tag = new Tag { Name = "Counted", MinOccurrencePercent = 80 };
-        var scene = CreateSceneWithFile("counted-scene");
+        var video = CreateVideoWithFile("counted-video");
 
         context.Tags.Add(tag);
-        context.Scenes.Add(scene);
+        context.Videos.Add(video);
         await context.SaveChangesAsync();
 
-        context.TagApplications.Add(CreateDurationApplication(scene.Id, tag.Id, totalDurationSec: 82, hostDurationSec: 100));
+        context.TagApplications.Add(CreateDurationApplication(video.Id, tag.Id, totalDurationSec: 82, hostDurationSec: 100));
         await context.SaveChangesAsync();
 
         await context.Entry(tag).ReloadAsync();
-        Assert.Equal(1, tag.SceneCount);
+        Assert.Equal(1, tag.VideoCount);
 
         tag.MinOccurrencePercent = 90;
         await context.SaveChangesAsync();
         await context.Entry(tag).ReloadAsync();
 
-        Assert.Equal(0, tag.SceneCount);
+        Assert.Equal(0, tag.VideoCount);
     }
 
     [Fact]
@@ -713,18 +713,18 @@ public class SceneFilterBehaviorTests
     }
 
     [Fact]
-    public async Task HashAndChecksumCriteria_FilterSceneFingerprints()
+    public async Task HashAndChecksumCriteria_FilterVideoFingerprints()
     {
         await using var context = CreateContext();
-        context.Scenes.AddRange(
-            CreateSceneWithFile(
+        context.Videos.AddRange(
+            CreateVideoWithFile(
                 "matching-hashes",
                 fingerprints:
                 [
                     new FileFingerprint { Type = "oshash", Value = "osh-match" },
                     new FileFingerprint { Type = "md5", Value = "md5-match" },
                 ]),
-            CreateSceneWithFile(
+            CreateVideoWithFile(
                 "other-hashes",
                 fingerprints:
                 [
@@ -733,10 +733,10 @@ public class SceneFilterBehaviorTests
                 ]));
         await context.SaveChangesAsync();
 
-        var repository = new SceneRepository(context);
+        var repository = new VideoRepository(context);
 
         var (hashItems, hashCount) = await repository.FindAsync(
-            new SceneFilter
+            new VideoFilter
             {
                 HashCriterion = new StringCriterion
                 {
@@ -747,7 +747,7 @@ public class SceneFilterBehaviorTests
             new FindFilter { Page = 1, PerPage = 50 });
 
         var (checksumItems, checksumCount) = await repository.FindAsync(
-            new SceneFilter
+            new VideoFilter
             {
                 ChecksumCriterion = new StringCriterion
                 {
@@ -758,17 +758,17 @@ public class SceneFilterBehaviorTests
             new FindFilter { Page = 1, PerPage = 50 });
 
         Assert.Equal(1, hashCount);
-        Assert.Equal(["matching-hashes"], hashItems.Select(scene => scene.Title ?? string.Empty).ToArray());
+        Assert.Equal(["matching-hashes"], hashItems.Select(video => video.Title ?? string.Empty).ToArray());
         Assert.Equal(1, checksumCount);
-        Assert.Equal(["matching-hashes"], checksumItems.Select(scene => scene.Title ?? string.Empty).ToArray());
+        Assert.Equal(["matching-hashes"], checksumItems.Select(video => video.Title ?? string.Empty).ToArray());
     }
 
     [Fact]
-    public async Task FingerprintCriterion_FiltersScenesBySelectedAlgorithm()
+    public async Task FingerprintCriterion_FiltersVideosBySelectedAlgorithm()
     {
         await using var context = CreateContext();
-        context.Scenes.AddRange(
-            CreateSceneWithFile(
+        context.Videos.AddRange(
+            CreateVideoWithFile(
                 "matching-fingerprint-types",
                 fingerprints:
                 [
@@ -776,7 +776,7 @@ public class SceneFilterBehaviorTests
                     new FileFingerprint { Type = "md5", Value = "md5-match" },
                     new FileFingerprint { Type = "phash", Value = "phash-match" },
                 ]),
-            CreateSceneWithFile(
+            CreateVideoWithFile(
                 "other-fingerprint-types",
                 fingerprints:
                 [
@@ -786,10 +786,10 @@ public class SceneFilterBehaviorTests
                 ]));
         await context.SaveChangesAsync();
 
-        var repository = new SceneRepository(context);
+        var repository = new VideoRepository(context);
 
         var (oshashItems, oshashCount) = await repository.FindAsync(
-            new SceneFilter
+            new VideoFilter
             {
                 FingerprintCriterion = new FingerprintCriterion
                 {
@@ -801,7 +801,7 @@ public class SceneFilterBehaviorTests
             new FindFilter { Page = 1, PerPage = 50 });
 
         var (md5Items, md5Count) = await repository.FindAsync(
-            new SceneFilter
+            new VideoFilter
             {
                 FingerprintCriterion = new FingerprintCriterion
                 {
@@ -813,7 +813,7 @@ public class SceneFilterBehaviorTests
             new FindFilter { Page = 1, PerPage = 50 });
 
         var (phashItems, phashCount) = await repository.FindAsync(
-            new SceneFilter
+            new VideoFilter
             {
                 FingerprintCriterion = new FingerprintCriterion
                 {
@@ -825,25 +825,25 @@ public class SceneFilterBehaviorTests
             new FindFilter { Page = 1, PerPage = 50 });
 
         Assert.Equal(1, oshashCount);
-        Assert.Equal(["matching-fingerprint-types"], oshashItems.Select(scene => scene.Title ?? string.Empty).ToArray());
+        Assert.Equal(["matching-fingerprint-types"], oshashItems.Select(video => video.Title ?? string.Empty).ToArray());
         Assert.Equal(1, md5Count);
-        Assert.Equal(["matching-fingerprint-types"], md5Items.Select(scene => scene.Title ?? string.Empty).ToArray());
+        Assert.Equal(["matching-fingerprint-types"], md5Items.Select(video => video.Title ?? string.Empty).ToArray());
         Assert.Equal(1, phashCount);
-        Assert.Equal(["matching-fingerprint-types"], phashItems.Select(scene => scene.Title ?? string.Empty).ToArray());
+        Assert.Equal(["matching-fingerprint-types"], phashItems.Select(video => video.Title ?? string.Empty).ToArray());
     }
 
     [Fact]
-    public async Task DuplicatedPhashCriterion_True_FindsScenesSharingAPhashAcrossScenes()
+    public async Task DuplicatedPhashCriterion_True_FindsVideosSharingAPhashAcrossVideos()
     {
         await using var context = CreateContext();
-        context.Scenes.AddRange(
-            CreateSceneWithFile("duplicate-a", fingerprints: [new FileFingerprint { Type = "phash", Value = "same-phash" }]),
-            CreateSceneWithFile("duplicate-b", fingerprints: [new FileFingerprint { Type = "phash", Value = "same-phash" }]),
-            CreateSceneWithFile("unique", fingerprints: [new FileFingerprint { Type = "phash", Value = "unique-phash" }]));
+        context.Videos.AddRange(
+            CreateVideoWithFile("duplicate-a", fingerprints: [new FileFingerprint { Type = "phash", Value = "same-phash" }]),
+            CreateVideoWithFile("duplicate-b", fingerprints: [new FileFingerprint { Type = "phash", Value = "same-phash" }]),
+            CreateVideoWithFile("unique", fingerprints: [new FileFingerprint { Type = "phash", Value = "unique-phash" }]));
         await context.SaveChangesAsync();
 
-        var repository = new SceneRepository(context);
-        var filter = new SceneFilter
+        var repository = new VideoRepository(context);
+        var filter = new VideoFilter
         {
             DuplicatedPhashCriterion = new BoolCriterion { Value = true },
         };
@@ -851,16 +851,16 @@ public class SceneFilterBehaviorTests
         var (items, totalCount) = await repository.FindAsync(filter, new FindFilter { Page = 1, PerPage = 50, Sort = "title" });
 
         Assert.Equal(2, totalCount);
-        Assert.Equal(["duplicate-a", "duplicate-b"], items.Select(scene => scene.Title ?? string.Empty).ToArray());
+        Assert.Equal(["duplicate-a", "duplicate-b"], items.Select(video => video.Title ?? string.Empty).ToArray());
     }
 
     [Fact]
-    public async Task ScenesController_Find_BindsSeedFromQuery()
+    public async Task VideosController_Find_BindsSeedFromQuery()
     {
-        var repository = new CapturingSceneRepository();
+        var repository = new CapturingVideoRepository();
         using var memoryCache = new MemoryCache(new MemoryCacheOptions());
         await using var context = CreateContext();
-        var controller = new ScenesController(repository, context, null!, null!, null!, memoryCache, null!, null!, null!, new NoOpUserEngagementService(), new CustomFieldService(context));
+        var controller = new VideosController(repository, context, null!, null!, null!, memoryCache, null!, null!, null!, new NoOpUserEngagementService(), new CustomFieldService(context));
 
         await controller.Find(q: null, page: 1, perPage: 25, sort: "random", direction: "desc", seed: 12345, ct: default);
 
@@ -870,13 +870,13 @@ public class SceneFilterBehaviorTests
     }
 
     [Fact]
-    public async Task ScenesController_FindWithCompilations_ReturnsSceneRangeGroupsAsPagedRows()
+    public async Task VideosController_FindWithCompilations_ReturnsVideoRangeGroupsAsPagedRows()
     {
         await using var context = CreateContext();
-        var scene = CreateSceneWithFile("scene row");
-        scene.CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-        scene.UpdatedAt = scene.CreatedAt;
-        context.Scenes.Add(scene);
+        var video = CreateVideoWithFile("video row");
+        video.CreatedAt = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        video.UpdatedAt = video.CreatedAt;
+        context.Videos.Add(video);
         await context.SaveChangesAsync();
 
         context.Groups.AddRange(
@@ -885,28 +885,28 @@ public class SceneFilterBehaviorTests
                 Name = "compilation row",
                 CreatedAt = new DateTime(2024, 2, 1, 0, 0, 0, DateTimeKind.Utc),
                 UpdatedAt = new DateTime(2024, 2, 1, 0, 0, 0, DateTimeKind.Utc),
-                ShowInSceneLists = true,
-                GroupItems = [new GroupItem { Kind = GroupItemKind.SceneRange, SceneId = scene.Id, HostId = scene.Id, StartSec = 10, EndSec = 20 }],
+                ShowInVideoLists = true,
+                GroupItems = [new GroupItem { Kind = GroupItemKind.VideoRange, VideoId = video.Id, HostId = video.Id, StartSec = 10, EndSec = 20 }],
             },
             new Group
             {
-                Name = "ordinary scene group",
+                Name = "ordinary video group",
                 CreatedAt = new DateTime(2024, 3, 1, 0, 0, 0, DateTimeKind.Utc),
                 UpdatedAt = new DateTime(2024, 3, 1, 0, 0, 0, DateTimeKind.Utc),
-                ShowInSceneLists = true,
-                GroupItems = [new GroupItem { Kind = GroupItemKind.Scene, SceneId = scene.Id, HostId = scene.Id }],
+                ShowInVideoLists = true,
+                GroupItems = [new GroupItem { Kind = GroupItemKind.Video, VideoId = video.Id, HostId = video.Id }],
             },
             new Group
             {
                 Name = "hidden compilation",
                 CreatedAt = new DateTime(2024, 4, 1, 0, 0, 0, DateTimeKind.Utc),
                 UpdatedAt = new DateTime(2024, 4, 1, 0, 0, 0, DateTimeKind.Utc),
-                ShowInSceneLists = false,
-                GroupItems = [new GroupItem { Kind = GroupItemKind.SceneRange, SceneId = scene.Id, HostId = scene.Id, StartSec = 20, EndSec = 30 }],
+                ShowInVideoLists = false,
+                GroupItems = [new GroupItem { Kind = GroupItemKind.VideoRange, VideoId = video.Id, HostId = video.Id, StartSec = 20, EndSec = 30 }],
             });
         await context.SaveChangesAsync();
 
-        var controller = CreateScenesController(context);
+        var controller = CreateVideosController(context);
 
         var response = await controller.FindWithCompilations(
             q: null, page: 1, perPage: 10, sort: "created_at", direction: "desc", seed: null,
@@ -914,74 +914,74 @@ public class SceneFilterBehaviorTests
             tagIds: null, performerIds: null, ct: default);
 
         var ok = Assert.IsType<OkObjectResult>(response.Result);
-        var payload = Assert.IsType<PaginatedResponse<SceneListEntryDto>>(ok.Value);
+        var payload = Assert.IsType<PaginatedResponse<VideoListEntryDto>>(ok.Value);
 
         Assert.Equal(3, payload.TotalCount);
-        Assert.Equal(["compilation", "compilation", "scene"], payload.Items.Select(item => item.Kind).ToArray());
-        Assert.Equal("ordinary scene group", payload.Items[0].Group?.Name);
+        Assert.Equal(["compilation", "compilation", "video"], payload.Items.Select(item => item.Kind).ToArray());
+        Assert.Equal("ordinary video group", payload.Items[0].Group?.Name);
         Assert.True(payload.Items[0].Group?.IsCompilation);
         Assert.Equal("compilation row", payload.Items[1].Group?.Name);
         Assert.True(payload.Items[1].Group?.IsCompilation);
-        Assert.Equal("scene row", payload.Items[2].Scene?.Title);
+        Assert.Equal("video row", payload.Items[2].Video?.Title);
     }
 
     [Fact]
-    public async Task ScenesController_FindDuplicates_ExactFingerprint_UsesMd5AndOshash()
+    public async Task VideosController_FindDuplicates_ExactFingerprint_UsesMd5AndOshash()
     {
         await using var context = CreateContext();
-        context.Scenes.AddRange(
-            CreateSceneWithFile("md5 duplicate a", basename: "a.mp4", fingerprints: [new FileFingerprint { Type = "md5", Value = "same-md5" }]),
-            CreateSceneWithFile("md5 duplicate b", basename: "b.mp4", fingerprints: [new FileFingerprint { Type = "md5", Value = "same-md5" }]),
-            CreateSceneWithFile("oshash duplicate a", basename: "c.mp4", fingerprints: [new FileFingerprint { Type = "oshash", Value = "same-oshash" }]),
-            CreateSceneWithFile("oshash duplicate b", basename: "d.mp4", fingerprints: [new FileFingerprint { Type = "oshash", Value = "same-oshash" }]),
-            CreateSceneWithFile("unique", basename: "e.mp4", fingerprints: [new FileFingerprint { Type = "md5", Value = "unique-md5" }]));
+        context.Videos.AddRange(
+            CreateVideoWithFile("md5 duplicate a", basename: "a.mp4", fingerprints: [new FileFingerprint { Type = "md5", Value = "same-md5" }]),
+            CreateVideoWithFile("md5 duplicate b", basename: "b.mp4", fingerprints: [new FileFingerprint { Type = "md5", Value = "same-md5" }]),
+            CreateVideoWithFile("oshash duplicate a", basename: "c.mp4", fingerprints: [new FileFingerprint { Type = "oshash", Value = "same-oshash" }]),
+            CreateVideoWithFile("oshash duplicate b", basename: "d.mp4", fingerprints: [new FileFingerprint { Type = "oshash", Value = "same-oshash" }]),
+            CreateVideoWithFile("unique", basename: "e.mp4", fingerprints: [new FileFingerprint { Type = "md5", Value = "unique-md5" }]));
         await context.SaveChangesAsync();
 
-        var controller = CreateScenesController(context);
+        var controller = CreateVideosController(context);
 
         var response = await controller.FindDuplicates(matchType: "fingerprint", ct: default);
 
         var groups = GetDuplicateGroups(response);
-        Assert.Contains(groups, group => group.Select(scene => scene.Title ?? "").OrderBy(title => title).SequenceEqual(["md5 duplicate a", "md5 duplicate b"]));
-        Assert.Contains(groups, group => group.Select(scene => scene.Title ?? "").OrderBy(title => title).SequenceEqual(["oshash duplicate a", "oshash duplicate b"]));
-        Assert.DoesNotContain(groups.SelectMany(group => group), scene => scene.Title == "unique");
+        Assert.Contains(groups, group => group.Select(video => video.Title ?? "").OrderBy(title => title).SequenceEqual(["md5 duplicate a", "md5 duplicate b"]));
+        Assert.Contains(groups, group => group.Select(video => video.Title ?? "").OrderBy(title => title).SequenceEqual(["oshash duplicate a", "oshash duplicate b"]));
+        Assert.DoesNotContain(groups.SelectMany(group => group), video => video.Title == "unique");
     }
 
     [Fact]
-    public async Task ScenesController_FindDuplicates_Phash_UsesDistanceAndDurationTolerance()
+    public async Task VideosController_FindDuplicates_Phash_UsesDistanceAndDurationTolerance()
     {
         await using var context = CreateContext();
-        context.Scenes.AddRange(
-            CreateSceneWithFile("visual duplicate a", basename: "a.mp4", fingerprints: [new FileFingerprint { Type = "phash", Value = "0000000000000000" }]),
-            CreateSceneWithFile("visual duplicate b", basename: "b.mp4", fingerprints: [new FileFingerprint { Type = "phash", Value = "0000000000000001" }]),
-            CreateSceneWithFile("different visual", basename: "c.mp4", fingerprints: [new FileFingerprint { Type = "phash", Value = "ffffffffffffffff" }]));
+        context.Videos.AddRange(
+            CreateVideoWithFile("visual duplicate a", basename: "a.mp4", fingerprints: [new FileFingerprint { Type = "phash", Value = "0000000000000000" }]),
+            CreateVideoWithFile("visual duplicate b", basename: "b.mp4", fingerprints: [new FileFingerprint { Type = "phash", Value = "0000000000000001" }]),
+            CreateVideoWithFile("different visual", basename: "c.mp4", fingerprints: [new FileFingerprint { Type = "phash", Value = "ffffffffffffffff" }]));
         await context.SaveChangesAsync();
 
-        var controller = CreateScenesController(context);
+        var controller = CreateVideosController(context);
 
         var response = await controller.FindDuplicates(matchType: "phash", distance: 1, durationDiff: 0, ct: default);
 
         var groups = GetDuplicateGroups(response);
         var group = Assert.Single(groups);
-        Assert.Equal(["visual duplicate a", "visual duplicate b"], group.Select(scene => scene.Title ?? "").OrderBy(title => title).ToArray());
+        Assert.Equal(["visual duplicate a", "visual duplicate b"], group.Select(video => video.Title ?? "").OrderBy(title => title).ToArray());
     }
 
     [Fact]
-    public async Task LastPlayedAtSort_Descending_PutsPlayedScenesBeforeUnplayedScenes()
+    public async Task LastPlayedAtSort_Descending_PutsPlayedVideosBeforeUnplayedVideos()
     {
         await using var context = CreateContext();
-        var neverPlayed = new Scene { Title = "never-played" };
-        var olderPlay = new Scene { Title = "older-play" };
-        var recentPlay = new Scene { Title = "recent-play" };
-        context.Scenes.AddRange(neverPlayed, olderPlay, recentPlay);
+        var neverPlayed = new Video { Title = "never-played" };
+        var olderPlay = new Video { Title = "older-play" };
+        var recentPlay = new Video { Title = "recent-play" };
+        context.Videos.AddRange(neverPlayed, olderPlay, recentPlay);
         await context.SaveChangesAsync();
 
         context.UserEntityAffinities.AddRange(
-            new UserEntityAffinity { UserId = 1, HostType = AffinityHostType.Scene, HostId = olderPlay.Id, LastConsumedAt = new DateTime(2024, 1, 10, 8, 0, 0, DateTimeKind.Utc) },
-            new UserEntityAffinity { UserId = 1, HostType = AffinityHostType.Scene, HostId = recentPlay.Id, LastConsumedAt = new DateTime(2024, 1, 12, 8, 0, 0, DateTimeKind.Utc) });
+            new UserEntityAffinity { UserId = 1, HostType = AffinityHostType.Video, HostId = olderPlay.Id, LastConsumedAt = new DateTime(2024, 1, 10, 8, 0, 0, DateTimeKind.Utc) },
+            new UserEntityAffinity { UserId = 1, HostType = AffinityHostType.Video, HostId = recentPlay.Id, LastConsumedAt = new DateTime(2024, 1, 12, 8, 0, 0, DateTimeKind.Utc) });
         await context.SaveChangesAsync();
 
-        var repository = new SceneRepository(context);
+        var repository = new VideoRepository(context);
 
         var (items, totalCount) = await repository.FindAsync(
             filter: null,
@@ -994,13 +994,13 @@ public class SceneFilterBehaviorTests
             });
 
         Assert.Equal(3, totalCount);
-        Assert.Equal(["recent-play", "older-play", "never-played"], items.Select(scene => scene.Title ?? string.Empty).ToArray());
+        Assert.Equal(["recent-play", "older-play", "never-played"], items.Select(video => video.Title ?? string.Empty).ToArray());
     }
 
-    private static Scene CreateSceneWithFile(
+    private static Video CreateVideoWithFile(
         string title,
         string? director = null,
-        DateOnly? sceneDate = null,
+        DateOnly? videoDate = null,
         string folderPath = @"C:\library",
         string basename = "clip.mp4",
         string audioCodec = "AAC",
@@ -1009,11 +1009,11 @@ public class SceneFilterBehaviorTests
         Performer? performer = null,
         IEnumerable<FileFingerprint>? fingerprints = null)
     {
-        var scene = new Scene
+        var video = new Video
         {
             Title = title,
             Director = director,
-            Date = sceneDate ?? new DateOnly(2024, 1, 1),
+            Date = videoDate ?? new DateOnly(2024, 1, 1),
         };
 
         var file = new VideoFile
@@ -1040,14 +1040,14 @@ public class SceneFilterBehaviorTests
             }
         }
 
-        scene.Files.Add(file);
+        video.Files.Add(file);
 
         if (performer != null)
         {
-            scene.ScenePerformers.Add(new ScenePerformer { Performer = performer });
+            video.VideoPerformers.Add(new VideoPerformer { Performer = performer });
         }
 
-        return scene;
+        return video;
     }
 
     private static Performer CreatePerformer(string name, DateOnly birthdate, params Tag[] tags)
@@ -1066,11 +1066,11 @@ public class SceneFilterBehaviorTests
         return performer;
     }
 
-    private static TagApplication CreateDurationApplication(int sceneId, int tagId, double totalDurationSec, double hostDurationSec)
+    private static TagApplication CreateDurationApplication(int videoId, int tagId, double totalDurationSec, double hostDurationSec)
         => new()
         {
-            HostType = AffinityHostType.Scene,
-            HostId = sceneId,
+            HostType = AffinityHostType.Video,
+            HostId = videoId,
             TagId = tagId,
             TotalDurationSec = totalDurationSec,
             HostDurationSec = hostDurationSec,
@@ -1154,7 +1154,7 @@ public class SceneFilterBehaviorTests
     private static CoveContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<CoveContext>()
-            .UseInMemoryDatabase($"scene-filter-behavior-{Guid.NewGuid():N}")
+            .UseInMemoryDatabase($"video-filter-behavior-{Guid.NewGuid():N}")
             .Options;
 
         var principalAccessor = new CurrentPrincipalAccessor();
@@ -1170,22 +1170,22 @@ public class SceneFilterBehaviorTests
         return new TestCoveContext(options, principalAccessor);
     }
 
-    private static ScenesController CreateScenesController(CoveContext context)
+    private static VideosController CreateVideosController(CoveContext context)
     {
         var memoryCache = new MemoryCache(new MemoryCacheOptions());
-        return new ScenesController(new CapturingSceneRepository(), context, null!, null!, null!, memoryCache, null!, null!, null!, new NoOpUserEngagementService(), new CustomFieldService(context));
+        return new VideosController(new CapturingVideoRepository(), context, null!, null!, null!, memoryCache, null!, null!, null!, new NoOpUserEngagementService(), new CustomFieldService(context));
     }
 
-    private static ScenesController CreateScenesControllerWithRepository(CoveContext context)
+    private static VideosController CreateVideosControllerWithRepository(CoveContext context)
     {
         var memoryCache = new MemoryCache(new MemoryCacheOptions());
-        return new ScenesController(new SceneRepository(context), context, null!, null!, null!, memoryCache, null!, null!, null!, new NoOpUserEngagementService(), new CustomFieldService(context));
+        return new VideosController(new VideoRepository(context), context, null!, null!, null!, memoryCache, null!, null!, null!, new NoOpUserEngagementService(), new CustomFieldService(context));
     }
 
-    private static List<List<SceneDto>> GetDuplicateGroups(ActionResult<List<List<SceneDto>>> response)
+    private static List<List<VideoDto>> GetDuplicateGroups(ActionResult<List<List<VideoDto>>> response)
     {
         var ok = Assert.IsType<OkObjectResult>(response.Result);
-        return Assert.IsType<List<List<SceneDto>>>(ok.Value);
+        return Assert.IsType<List<List<VideoDto>>>(ok.Value);
     }
 
     private sealed class TestCoveContext(DbContextOptions<CoveContext> options, ICurrentPrincipalAccessor principalAccessor) : CoveContext(options, principalAccessor)
@@ -1197,22 +1197,24 @@ public class SceneFilterBehaviorTests
         }
     }
 
-    private sealed class CapturingSceneRepository : ISceneRepository
+    private sealed class CapturingVideoRepository : IVideoRepository
     {
         public FindFilter? LastFindFilter { get; private set; }
 
-        public Task<(IReadOnlyList<Scene> Items, int TotalCount)> FindAsync(SceneFilter? filter, FindFilter? findFilter, CancellationToken ct = default)
+        public Task<(IReadOnlyList<Video> Items, int TotalCount)> FindAsync(VideoFilter? filter, FindFilter? findFilter, CancellationToken ct = default)
         {
             LastFindFilter = findFilter;
-            return Task.FromResult<(IReadOnlyList<Scene>, int)>((Array.Empty<Scene>(), 0));
+            return Task.FromResult<(IReadOnlyList<Video>, int)>((Array.Empty<Video>(), 0));
         }
 
-        public Task<Scene?> GetByIdAsync(int id, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<IReadOnlyList<Scene>> GetAllAsync(CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<Scene> AddAsync(Scene entity, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task UpdateAsync(Scene entity, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Video?> GetByIdAsync(int id, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<Video>> GetAllAsync(CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Video> AddAsync(Video entity, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task UpdateAsync(Video entity, CancellationToken ct = default) => throw new NotSupportedException();
         public Task DeleteAsync(int id, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<int> CountAsync(CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<Scene?> GetByIdWithRelationsAsync(int id, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<VideoPerformer>> GetVideoPerformersAsync(IReadOnlyList<int> videoIds, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<Video?> GetByIdWithRelationsAsync(int id, CancellationToken ct = default) => throw new NotSupportedException();
     }
 }
+

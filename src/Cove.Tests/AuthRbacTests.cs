@@ -1,4 +1,4 @@
-﻿using Cove.Core.Auth;
+using Cove.Core.Auth;
 
 namespace Cove.Tests;
 
@@ -9,14 +9,14 @@ public class CovePrincipalTests
     {
         var p = CovePrincipal.System();
         Assert.True(p.Has("anything.you.want"));
-        Assert.True(p.Has("scenes.delete.file"));
+        Assert.True(p.Has("videos.delete.file"));
     }
 
     [Fact]
     public void Anonymous_principal_has_no_permissions()
     {
         var p = CovePrincipal.Anonymous();
-        Assert.False(p.Has("scenes.read"));
+        Assert.False(p.Has("videos.read"));
         Assert.Equal(PrincipalKind.Anonymous, p.Kind);
     }
 
@@ -27,11 +27,11 @@ public class CovePrincipalTests
         {
             Kind = PrincipalKind.User, UserId = 5, Username = "alice",
             Roles = new HashSet<string> { "Custom" },
-            Permissions = new HashSet<string> { "scenes.*" },
+            Permissions = new HashSet<string> { "videos.*" },
         };
-        Assert.True(p.Has("scenes.read"));
-        Assert.True(p.Has("scenes.delete"));
-        Assert.True(p.Has("scenes.delete.file"));
+        Assert.True(p.Has("videos.read"));
+        Assert.True(p.Has("videos.delete"));
+        Assert.True(p.Has("videos.delete.file"));
         Assert.False(p.Has("performers.read"));
     }
 
@@ -44,9 +44,9 @@ public class CovePrincipalTests
             Roles = new HashSet<string>(),
             Permissions = new HashSet<string> { "*.read" },
         };
-        Assert.True(p.Has("scenes.read"));
+        Assert.True(p.Has("videos.read"));
         Assert.True(p.Has("performers.read"));
-        Assert.False(p.Has("scenes.delete"));
+        Assert.False(p.Has("videos.delete"));
     }
 
     [Fact]
@@ -56,11 +56,11 @@ public class CovePrincipalTests
         {
             Kind = PrincipalKind.User, UserId = 5, Username = "alice",
             Roles = new HashSet<string>(),
-            Permissions = new HashSet<string> { "scenes.read", "performers.read" },
+            Permissions = new HashSet<string> { "videos.read", "performers.read" },
         };
-        Assert.True(p.Has("scenes.read"));
+        Assert.True(p.Has("videos.read"));
         Assert.True(p.Has("performers.read"));
-        Assert.False(p.Has("scenes.delete"));
+        Assert.False(p.Has("videos.delete"));
         Assert.False(p.Has("studios.read"));
     }
 }
@@ -72,7 +72,7 @@ public class PermissionRegistryTests
     {
         var reg = new PermissionRegistry();
         var keys = reg.All.Select(p => p.Key).ToHashSet();
-        Assert.Contains("scenes.read", keys);
+        Assert.Contains("videos.read", keys);
         Assert.Contains("users.write", keys);
         Assert.Contains("audit.read", keys);
         Assert.Contains("system.wipe", keys);
@@ -84,13 +84,13 @@ public class PermissionRegistryTests
     public void Expand_resolves_implies_recursively()
     {
         var reg = new PermissionRegistry();
-        // scenes.delete.file implies scenes.delete which implies scenes.read.
-        var expanded = reg.Expand(["scenes.delete.file"]);
-        Assert.Contains("scenes.delete.file", expanded);
-        Assert.Contains("scenes.delete", expanded);
-        Assert.Contains("scenes.read", expanded);
-        // scenes.write is NOT implied by scenes.delete.
-        Assert.DoesNotContain("scenes.write", expanded);
+        // videos.delete.file implies videos.delete which implies videos.read.
+        var expanded = reg.Expand(["videos.delete.file"]);
+        Assert.Contains("videos.delete.file", expanded);
+        Assert.Contains("videos.delete", expanded);
+        Assert.Contains("videos.read", expanded);
+        // videos.write is NOT implied by videos.delete.
+        Assert.DoesNotContain("videos.write", expanded);
     }
 
     [Fact]
@@ -141,3 +141,4 @@ public class PermissionRegistryTests
         Assert.Contains("notif.read", expanded);
     }
 }
+

@@ -58,7 +58,7 @@ export function JobDrawer({ open, onClose }: Props) {
       queryClient.invalidateQueries({ queryKey: ["jobs-history"] });
       // When a job completes, invalidate content queries
       if (job.status === "completed") {
-        queryClient.invalidateQueries({ queryKey: ["scenes"] });
+        queryClient.invalidateQueries({ queryKey: ["videos"] });
         queryClient.invalidateQueries({ queryKey: ["images"] });
         queryClient.invalidateQueries({ queryKey: ["galleries"] });
         queryClient.invalidateQueries({ queryKey: ["performers"] });
@@ -325,3 +325,4 @@ export function useJobCount() {
 
   return count;
 }
+

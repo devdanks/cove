@@ -176,7 +176,7 @@ function TagTaggerRow({ tag, state, query, onQueryChange, onSearch, onUpdateStat
   });
 
   return (
-    <div className={`px-4 py-3 ${state?.saved ? "opacity-50" : ""} ${selected ? "bg-accent/5" : ""}`}>
+    <div className={`px-4 py-3 ${selected ? "bg-accent/5" : ""}`}>
       <div className="flex gap-4">
         {onSelect && (
           <button
@@ -256,7 +256,7 @@ function TagResultRow({ result, isSelected, onClick, onSave, saving, saved }: {
           </div>
         </div>
       </div>
-      {isSelected && (
+      {isSelected && !saved && (
         <div className="border-t border-border p-3">
           {result.description && <p className="text-xs text-secondary mb-2 line-clamp-3">{result.description}</p>}
           {result.aliases.length > 0 && <FieldRow label="Aliases" value={result.aliases.join(", ")} />}

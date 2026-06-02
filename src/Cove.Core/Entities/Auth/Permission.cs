@@ -3,7 +3,7 @@ namespace Cove.Core.Entities.Auth;
 /// <summary>
 /// Catalog row for a single permission. Permissions are declared in code by core or
 /// extensions; this table is upserted from the in-memory registry on startup.
-/// The primary key is the permission key itself (e.g. "scenes.delete").
+/// The primary key is the permission key itself (e.g. "videos.delete").
 /// </summary>
 public class Permission
 {
@@ -25,3 +25,4 @@ public class Permission
 
     public DateTime RegisteredAt { get; set; } = DateTime.UtcNow;
 }
+

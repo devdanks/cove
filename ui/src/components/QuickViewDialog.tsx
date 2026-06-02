@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { scenes, images, playback } from "../api/client";
+import { videos, images, playback } from "../api/client";
 import { formatDuration, formatFileSize, formatDate, getResolutionLabel, TagBadge } from "./shared";
 import { X, ExternalLink, Star, User, Tag, Building2, Calendar, Film, Clock, HardDrive, Monitor } from "lucide-react";
 import { RatingBadge } from "./Rating";
@@ -9,8 +9,8 @@ import { useEntityEngagement } from "../hooks/useEntityEngagement";
 import { VideoPlayer } from "./VideoPlayer";
 import { createPlaybackSessionId, trackInteraction } from "../utils/interactionTracking";
 
-interface SceneQuickViewProps {
-  type: "scene";
+interface VideoQuickViewProps {
+  type: "video";
   id: number;
   onClose: () => void;
   onNavigate: (r: any) => void;
@@ -23,34 +23,34 @@ interface ImageQuickViewProps {
   onNavigate: (r: any) => void;
 }
 
-type QuickViewProps = SceneQuickViewProps | ImageQuickViewProps;
+type QuickViewProps = VideoQuickViewProps | ImageQuickViewProps;
 
 export function QuickViewDialog(props: QuickViewProps) {
-  if (props.type === "scene") return <SceneQuickView {...props} />;
+  if (props.type === "video") return <VideoQuickView {...props} />;
   return <ImageQuickView {...props} />;
 }
 
-function SceneQuickView({ id, onClose, onNavigate }: Omit<SceneQuickViewProps, "type">) {
-  const { engagement } = useEntityEngagement("scene", id);
-  const { data: scene, isLoading } = useQuery({
-    queryKey: ["scene", id],
-    queryFn: () => scenes.get(id),
+function VideoQuickView({ id, onClose, onNavigate }: Omit<VideoQuickViewProps, "type">) {
+  const { engagement } = useEntityEngagement("video", id);
+  const { data: video, isLoading } = useQuery({
+    queryKey: ["video", id],
+    queryFn: () => videos.get(id),
   });
 
   useEffect(() => {
-    if (!scene) {
+    if (!video) {
       return;
     }
 
     trackInteraction({
-      hostType: "scene",
-      hostId: scene.id,
+      hostType: "video",
+      hostId: video.id,
       kind: "openDetail",
       meta: { surface: "quickView" },
     });
-  }, [scene?.id]);
+  }, [video?.id]);
 
-  if (isLoading || !scene) {
+  if (isLoading || !video) {
     return (
       <Overlay onClose={onClose}>
         <div className="flex items-center justify-center h-64">
@@ -60,7 +60,7 @@ function SceneQuickView({ id, onClose, onNavigate }: Omit<SceneQuickViewProps, "
     );
   }
 
-  const file = scene.files?.[0];
+  const file = video.files?.[0];
   const duration = file?.duration ?? 0;
   const resLabel = file ? getResolutionLabel(file.width, file.height) : null;
 
@@ -68,10 +68,10 @@ function SceneQuickView({ id, onClose, onNavigate }: Omit<SceneQuickViewProps, "
     <Overlay onClose={onClose}>
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-3 border-b border-border">
-        <h2 className="text-lg font-semibold text-foreground truncate pr-4">{scene.title || file?.basename || "Untitled"}</h2>
+        <h2 className="text-lg font-semibold text-foreground truncate pr-4">{video.title || file?.basename || "Untitled"}</h2>
         <div className="flex items-center gap-2 flex-shrink-0">
           <button
-            onClick={() => { onClose(); onNavigate({ page: "scene", id }); }}
+            onClick={() => { onClose(); onNavigate({ page: "video", id }); }}
             className="flex items-center gap-1 px-2.5 py-1 text-xs bg-accent text-white rounded hover:bg-accent-hover"
           >
             <ExternalLink className="w-3 h-3" /> Open
@@ -86,22 +86,22 @@ function SceneQuickView({ id, onClose, onNavigate }: Omit<SceneQuickViewProps, "
       <div className="aspect-video bg-black">
         {file ? (
           <VideoPlayer
-            streamUrl={scenes.streamUrl(scene.id)}
-            posterUrl={scenes.screenshotUrl(scene.id, scene.updatedAt)}
+            streamUrl={videos.streamUrl(video.id)}
+            posterUrl={videos.screenshotUrl(video.id, video.updatedAt)}
             format={file.format}
             duration={duration}
-            sceneId={scene.id}
+            videoId={video.id}
             playbackTracking={{
-              hostType: "scene",
-              hostId: scene.id,
+              hostType: "video",
+              hostId: video.id,
               surface: "quickView",
-              scopeKey: `scene:${scene.id}:quickView`,
+              scopeKey: `video:${video.id}:quickView`,
             }}
             showAbLoop={false}
           />
         ) : (
           <img
-            src={scenes.screenshotUrl(scene.id, scene.updatedAt)}
+            src={videos.screenshotUrl(video.id, video.updatedAt)}
             alt=""
             className="h-full w-full object-contain"
           />
@@ -120,8 +120,8 @@ function SceneQuickView({ id, onClose, onNavigate }: Omit<SceneQuickViewProps, "
 
         {/* Meta row */}
         <div className="flex flex-wrap gap-3 text-xs text-secondary">
-          {scene.date && (
-            <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {scene.date}</span>
+          {video.date && (
+            <span className="flex items-center gap-1"><Calendar className="w-3 h-3" /> {video.date}</span>
           )}
           {resLabel && (
             <span className="flex items-center gap-1"><Monitor className="w-3 h-3" /> {resLabel}</span>
@@ -135,24 +135,24 @@ function SceneQuickView({ id, onClose, onNavigate }: Omit<SceneQuickViewProps, "
         </div>
 
         {/* Studio */}
-        {scene.studioName && (
+        {video.studioName && (
           <button
-            onClick={() => { onClose(); onNavigate({ page: "studio", id: scene.studioId }); }}
+            onClick={() => { onClose(); onNavigate({ page: "studio", id: video.studioId }); }}
             className="flex items-center gap-2 text-sm text-foreground hover:text-accent"
           >
             <Building2 className="w-4 h-4 text-muted" />
-            {scene.studioName}
+            {video.studioName}
           </button>
         )}
 
         {/* Performers */}
-        {scene.performers?.length > 0 && (
+        {video.performers?.length > 0 && (
           <div>
             <div className="flex items-center gap-1 text-xs text-muted mb-1.5">
               <User className="w-3 h-3" /> Performers
             </div>
             <div className="flex flex-wrap gap-1.5">
-              {scene.performers.map((p: any) => (
+              {video.performers.map((p: any) => (
                 <button
                   key={p.id}
                   onClick={() => { onClose(); onNavigate({ page: "performer", id: p.id }); }}
@@ -171,13 +171,13 @@ function SceneQuickView({ id, onClose, onNavigate }: Omit<SceneQuickViewProps, "
         )}
 
         {/* Tags */}
-        {scene.tags?.length > 0 && (
+        {video.tags?.length > 0 && (
           <div>
             <div className="flex items-center gap-1 text-xs text-muted mb-1.5">
               <Tag className="w-3 h-3" /> Tags
             </div>
             <div className="flex flex-wrap gap-1">
-              {scene.tags.map((t: any) => (
+              {video.tags.map((t: any) => (
                 <TagBadge key={t.id} name={t.name} tag={t} onClick={() => { onClose(); onNavigate({ page: "tag", id: t.id }); }} />
               ))}
             </div>
@@ -185,8 +185,8 @@ function SceneQuickView({ id, onClose, onNavigate }: Omit<SceneQuickViewProps, "
         )}
 
         {/* Details text */}
-        {scene.details && (
-          <p className="text-sm text-secondary leading-relaxed">{scene.details}</p>
+        {video.details && (
+          <p className="text-sm text-secondary leading-relaxed">{video.details}</p>
         )}
 
         {/* File path */}
@@ -379,3 +379,4 @@ function Overlay({ onClose, children }: { onClose: () => void; children: React.R
     </div>
   );
 }
+

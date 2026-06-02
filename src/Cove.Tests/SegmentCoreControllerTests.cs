@@ -17,18 +17,18 @@ namespace Cove.Tests;
 public class SegmentCoreControllerTests
 {
     [Fact]
-    public async Task SceneSegmentsController_CanCreateUpdateListAndDeleteSceneSegments()
+    public async Task VideoSegmentsController_CanCreateUpdateListAndDeleteVideoSegments()
     {
         await using var scope = await CreateContextAsync();
         var context = scope.Context;
-        var scene = new Scene { Title = "Segment Scene" };
+        var video = new Video { Title = "Segment Video" };
         var tag = new Tag { Name = "Face" };
-        context.Scenes.Add(scene);
+        context.Videos.Add(video);
         context.Tags.Add(tag);
         await context.SaveChangesAsync();
 
         var spanResolver = new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions()));
-        var controller = CreateSceneSegmentsController(context, spanResolver);
+        var controller = CreateVideoSegmentsController(context, spanResolver);
         var createDto = new SegmentCreateDto(
             12.5,
             18.25,
@@ -42,10 +42,10 @@ public class SegmentCoreControllerTests
             "Lead face",
             "#ffaa00");
 
-        var createResult = await controller.Create(scene.Id, createDto, CancellationToken.None);
+        var createResult = await controller.Create(video.Id, createDto, CancellationToken.None);
         var created = Assert.IsType<CreatedAtActionResult>(createResult.Result);
         var createdDto = Assert.IsType<SegmentDto>(created.Value);
-        Assert.Equal(scene.Id, createdDto.HostId);
+        Assert.Equal(video.Id, createdDto.HostId);
         Assert.Equal(tag.Id, createdDto.TagId);
         Assert.Equal("Face", createdDto.TagName);
         Assert.Equal("face", createdDto.Kind);
@@ -53,7 +53,7 @@ public class SegmentCoreControllerTests
         Assert.True(createdDto.Payload.HasValue);
         Assert.Equal(JsonValueKind.Array, createdDto.Payload.Value.GetProperty("confidencePeaks").ValueKind);
 
-        var listResult = await controller.GetByScene(scene.Id, CancellationToken.None);
+        var listResult = await controller.GetByVideo(video.Id, CancellationToken.None);
         var listOk = Assert.IsType<OkObjectResult>(listResult.Result);
         var listed = Assert.IsAssignableFrom<IReadOnlyList<SegmentDto>>(listOk.Value);
         var listedSegment = Assert.Single(listed);
@@ -72,7 +72,7 @@ public class SegmentCoreControllerTests
             "Updated face",
             null);
 
-        var updateResult = await controller.Update(scene.Id, createdDto.Id, updateDto, CancellationToken.None);
+        var updateResult = await controller.Update(video.Id, createdDto.Id, updateDto, CancellationToken.None);
         var updateOk = Assert.IsType<OkObjectResult>(updateResult.Result);
         var updatedDto = Assert.IsType<SegmentDto>(updateOk.Value);
         Assert.Equal(13.0, updatedDto.StartSec);
@@ -83,23 +83,23 @@ public class SegmentCoreControllerTests
         Assert.True(updatedDto.Payload.HasValue);
         Assert.Equal(321, updatedDto.Payload.Value.GetProperty("frame").GetInt32());
 
-        var deleteResult = await controller.Delete(scene.Id, createdDto.Id, CancellationToken.None);
+        var deleteResult = await controller.Delete(video.Id, createdDto.Id, CancellationToken.None);
         Assert.IsType<NoContentResult>(deleteResult);
 
-        var finalListResult = await controller.GetByScene(scene.Id, CancellationToken.None);
+        var finalListResult = await controller.GetByVideo(video.Id, CancellationToken.None);
         var finalListOk = Assert.IsType<OkObjectResult>(finalListResult.Result);
         var finalList = Assert.IsAssignableFrom<IReadOnlyList<SegmentDto>>(finalListOk.Value);
         Assert.Empty(finalList);
     }
 
     [Fact]
-    public async Task SceneSegmentsController_CanResolveSceneSpansAndSpanDetail()
+    public async Task VideoSegmentsController_CanResolveVideoSpansAndSpanDetail()
     {
         await using var scope = await CreateContextAsync();
         var context = scope.Context;
-        var scene = new Scene { Title = "Resolved Segment Scene" };
+        var video = new Video { Title = "Resolved Segment Video" };
         var tag = new Tag { Name = "Highlights" };
-        context.Scenes.Add(scene);
+        context.Videos.Add(video);
         context.Tags.Add(tag);
         await context.SaveChangesAsync();
 
@@ -124,8 +124,8 @@ public class SegmentCoreControllerTests
         context.Segments.AddRange(
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 StartSec = 10,
                 EndSec = 12,
                 TagId = tag.Id,
@@ -134,8 +134,8 @@ public class SegmentCoreControllerTests
             },
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 StartSec = 12.5,
                 EndSec = 14,
                 TagId = tag.Id,
@@ -144,8 +144,8 @@ public class SegmentCoreControllerTests
             },
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 StartSec = 20,
                 EndSec = 21,
                 TagId = tag.Id,
@@ -157,11 +157,11 @@ public class SegmentCoreControllerTests
         var principalAccessor = new CurrentPrincipalAccessor();
         principalAccessor.Set(CreatePrincipal(7));
         var spanResolver = new SegmentSpanResolver(context, principalAccessor, new MemoryCache(new MemoryCacheOptions()));
-        var controller = CreateSceneSegmentsController(context, spanResolver);
+        var controller = CreateVideoSegmentsController(context, spanResolver);
 
-        var spansResult = await controller.GetSpans(scene.Id, profile.Id, CancellationToken.None);
+        var spansResult = await controller.GetSpans(video.Id, profile.Id, CancellationToken.None);
         var spansOk = Assert.IsType<OkObjectResult>(spansResult.Result);
-        var spansDto = Assert.IsType<SceneResolvedSpansDto>(spansOk.Value);
+        var spansDto = Assert.IsType<VideoResolvedSpansDto>(spansOk.Value);
         Assert.Equal(profile.Id, spansDto.ProfileId);
         Assert.Equal(2, spansDto.Spans.Count);
         var mergedSpan = spansDto.Spans[0];
@@ -169,11 +169,11 @@ public class SegmentCoreControllerTests
         Assert.Equal(14, mergedSpan.EndSec);
         Assert.Equal(2, mergedSpan.SegmentIds.Count);
 
-        var detailResult = await controller.GetSpanDetail(scene.Id, mergedSpan.SpanKey, profile.Id, CancellationToken.None);
+        var detailResult = await controller.GetSpanDetail(video.Id, mergedSpan.SpanKey, profile.Id, CancellationToken.None);
         var detailOk = Assert.IsType<OkObjectResult>(detailResult.Result);
         var detailDto = Assert.IsType<ResolvedSpanDetailDto>(detailOk.Value);
-        Assert.Equal(scene.Id, detailDto.SceneId);
-        Assert.Equal("Resolved Segment Scene", detailDto.SceneTitle);
+        Assert.Equal(video.Id, detailDto.VideoId);
+        Assert.Equal("Resolved Segment Video", detailDto.VideoTitle);
         Assert.Equal(2, detailDto.Intervals.Count);
         Assert.Equal(10, detailDto.Intervals[0].StartSec);
         Assert.Equal(12, detailDto.Intervals[0].EndSec);
@@ -182,19 +182,19 @@ public class SegmentCoreControllerTests
     }
 
     [Fact]
-    public async Task SceneSegmentsController_CanQueryDerivedSpans()
+    public async Task VideoSegmentsController_CanQueryDerivedSpans()
     {
         await using var scope = await CreateContextAsync();
         var context = scope.Context;
-        var scene = new Scene { Title = "Derived Segment Scene" };
-        context.Scenes.Add(scene);
+        var video = new Video { Title = "Derived Segment Video" };
+        context.Videos.Add(video);
         await context.SaveChangesAsync();
 
         context.Segments.AddRange(
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 StartSec = 10,
                 EndSec = 12,
                 Kind = "face",
@@ -202,8 +202,8 @@ public class SegmentCoreControllerTests
             },
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 StartSec = 20,
                 EndSec = 22,
                 Kind = "face",
@@ -211,8 +211,8 @@ public class SegmentCoreControllerTests
             },
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 StartSec = 11,
                 EndSec = 13,
                 Kind = "user.face",
@@ -220,8 +220,8 @@ public class SegmentCoreControllerTests
             },
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 StartSec = 21,
                 EndSec = 25,
                 Kind = "user.face",
@@ -230,9 +230,9 @@ public class SegmentCoreControllerTests
         await context.SaveChangesAsync();
 
         var spanResolver = new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions()));
-        var controller = CreateSceneSegmentsController(context, spanResolver);
+        var controller = CreateVideoSegmentsController(context, spanResolver);
 
-        var queryResult = await controller.QuerySpans(scene.Id, new SegmentSpanQueryRequestDto(
+        var queryResult = await controller.QuerySpans(video.Id, new SegmentSpanQueryRequestDto(
             null,
             "intersection",
             [
@@ -251,11 +251,11 @@ public class SegmentCoreControllerTests
     }
 
     [Fact]
-    public async Task SceneSegmentsController_TagLevelOverride_WinsOverHiddenRuleAndSetsAppearance()
+    public async Task VideoSegmentsController_TagLevelOverride_WinsOverHiddenRuleAndSetsAppearance()
     {
         await using var scope = await CreateContextAsync();
         var context = scope.Context;
-        var scene = new Scene { Title = "Tag override scene" };
+        var video = new Video { Title = "Tag override video" };
         var tag = new Tag
         {
             Name = "Highlight",
@@ -263,7 +263,7 @@ public class SegmentCoreControllerTests
             SegmentColorOverride = "#22cc88",
             SegmentLaneOverride = 3,
         };
-        context.AddRange(scene, tag);
+        context.AddRange(video, tag);
         await context.SaveChangesAsync();
 
         var profile = new SegmentDisplayProfile
@@ -287,8 +287,8 @@ public class SegmentCoreControllerTests
         });
         context.Segments.Add(new Segment
         {
-            HostType = SegmentHostType.Scene,
-            HostId = scene.Id,
+            HostType = SegmentHostType.Video,
+            HostId = video.Id,
             StartSec = 5,
             EndSec = 7,
             TagId = tag.Id,
@@ -299,33 +299,33 @@ public class SegmentCoreControllerTests
 
         var principalAccessor = new CurrentPrincipalAccessor();
         principalAccessor.Set(CreatePrincipal(7));
-        var controller = CreateSceneSegmentsController(context, new SegmentSpanResolver(context, principalAccessor, new MemoryCache(new MemoryCacheOptions())));
+        var controller = CreateVideoSegmentsController(context, new SegmentSpanResolver(context, principalAccessor, new MemoryCache(new MemoryCacheOptions())));
 
-        var spansResult = await controller.GetSpans(scene.Id, profile.Id, CancellationToken.None);
+        var spansResult = await controller.GetSpans(video.Id, profile.Id, CancellationToken.None);
         var spansOk = Assert.IsType<OkObjectResult>(spansResult.Result);
-        var spansDto = Assert.IsType<SceneResolvedSpansDto>(spansOk.Value);
+        var spansDto = Assert.IsType<VideoResolvedSpansDto>(spansOk.Value);
         var span = Assert.Single(spansDto.Spans);
         Assert.Equal("#22cc88", span.ColorHint);
         Assert.Equal(3, span.Lane);
     }
 
     [Fact]
-    public async Task SceneSegmentsController_QueryDerivedSpansSupportsSecondaryTagsAndRefIds()
+    public async Task VideoSegmentsController_QueryDerivedSpansSupportsSecondaryTagsAndRefIds()
     {
         await using var scope = await CreateContextAsync();
         var context = scope.Context;
-        var scene = new Scene { Title = "Derived Identity Segment Scene" };
+        var video = new Video { Title = "Derived Identity Segment Video" };
         var primaryTag = new Tag { Name = "Primary" };
         var secondaryTag = new Tag { Name = "Secondary" };
-        context.Scenes.Add(scene);
+        context.Videos.Add(video);
         context.Tags.AddRange(primaryTag, secondaryTag);
         await context.SaveChangesAsync();
 
         context.Segments.AddRange(
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 StartSec = 10,
                 EndSec = 14,
                 TagId = primaryTag.Id,
@@ -336,8 +336,8 @@ public class SegmentCoreControllerTests
             },
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 StartSec = 20,
                 EndSec = 24,
                 TagId = primaryTag.Id,
@@ -349,9 +349,9 @@ public class SegmentCoreControllerTests
         await context.SaveChangesAsync();
 
         var spanResolver = new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions()));
-        var controller = CreateSceneSegmentsController(context, spanResolver);
+        var controller = CreateVideoSegmentsController(context, spanResolver);
 
-        var queryResult = await controller.QuerySpans(scene.Id, new SegmentSpanQueryRequestDto(
+        var queryResult = await controller.QuerySpans(video.Id, new SegmentSpanQueryRequestDto(
             null,
             "intersection",
             [
@@ -374,17 +374,17 @@ public class SegmentCoreControllerTests
     {
         await using var scope = await CreateContextAsync();
         var context = scope.Context;
-        var scene = new Scene { Title = "Derived Detail Scene", MaxDuration = 120 };
+        var video = new Video { Title = "Derived Detail Video", MaxDuration = 120 };
         var group = new Group { Name = "Derived Query Compilation" };
-        context.Scenes.Add(scene);
+        context.Videos.Add(video);
         context.Groups.Add(group);
         await context.SaveChangesAsync();
 
         context.Segments.AddRange(
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 StartSec = 10,
                 EndSec = 12,
                 Kind = "face",
@@ -392,8 +392,8 @@ public class SegmentCoreControllerTests
             },
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 StartSec = 11,
                 EndSec = 13,
                 Kind = "user.face",
@@ -402,9 +402,9 @@ public class SegmentCoreControllerTests
         await context.SaveChangesAsync();
 
         var spanResolver = new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions()));
-        var sceneController = CreateSceneSegmentsController(context, spanResolver);
+        var videoController = CreateVideoSegmentsController(context, spanResolver);
 
-        var queryResult = await sceneController.QuerySpans(scene.Id, new SegmentSpanQueryRequestDto(
+        var queryResult = await videoController.QuerySpans(video.Id, new SegmentSpanQueryRequestDto(
             null,
             "intersection",
             [
@@ -418,11 +418,11 @@ public class SegmentCoreControllerTests
         var derivedSpan = Assert.Single(queryDto.Spans);
         Assert.StartsWith("dq-intersection-", derivedSpan.SpanKey, StringComparison.Ordinal);
 
-        var detailResult = await sceneController.GetSpanDetail(scene.Id, derivedSpan.SpanKey, null, CancellationToken.None);
+        var detailResult = await videoController.GetSpanDetail(video.Id, derivedSpan.SpanKey, null, CancellationToken.None);
         var detailOk = Assert.IsType<OkObjectResult>(detailResult.Result);
         var detailDto = Assert.IsType<ResolvedSpanDetailDto>(detailOk.Value);
-        Assert.Equal(scene.Id, detailDto.SceneId);
-        Assert.Equal("Derived Detail Scene", detailDto.SceneTitle);
+        Assert.Equal(video.Id, detailDto.VideoId);
+        Assert.Equal("Derived Detail Video", detailDto.VideoTitle);
         Assert.Equal("derived", detailDto.Span.SourceKey);
         Assert.Equal("intersection", detailDto.Span.Kind);
         Assert.Single(detailDto.Intervals);
@@ -431,12 +431,12 @@ public class SegmentCoreControllerTests
 
         var groupController = new GroupItemsController(context, spanResolver);
         var createFromSpansResult = await groupController.CreateFromSpans(group.Id, new GroupItemsFromSpansDto([
-            new GroupItemSpanInputDto(derivedSpan.SpanKey, scene.Id, null, null, null, null)
+            new GroupItemSpanInputDto(derivedSpan.SpanKey, video.Id, null, null, null, null)
         ]), CancellationToken.None);
         var createFromSpansOk = Assert.IsType<OkObjectResult>(createFromSpansResult.Result);
         var createdItems = Assert.IsAssignableFrom<IReadOnlyList<GroupItemDto>>(createFromSpansOk.Value);
         var createdItem = Assert.Single(createdItems);
-        Assert.Equal(GroupItemKind.SceneRange, createdItem.Kind);
+        Assert.Equal(GroupItemKind.VideoRange, createdItem.Kind);
         Assert.Equal(11, createdItem.StartSec);
         Assert.Equal(12, createdItem.EndSec);
         Assert.Equal(derivedSpan.SpanKey, createdItem.SourceSpanKey);
@@ -449,17 +449,17 @@ public class SegmentCoreControllerTests
     {
         await using var scope = await CreateContextAsync();
         var context = scope.Context;
-        var scene = new Scene { Title = "Explicit Derived Query Scene", MaxDuration = 120 };
+        var video = new Video { Title = "Explicit Derived Query Video", MaxDuration = 120 };
         var group = new Group { Name = "Explicit Derived Query Group" };
-        context.Scenes.Add(scene);
+        context.Videos.Add(video);
         context.Groups.Add(group);
         await context.SaveChangesAsync();
 
         context.Segments.AddRange(
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 StartSec = 10,
                 EndSec = 12,
                 Kind = "face",
@@ -467,8 +467,8 @@ public class SegmentCoreControllerTests
             },
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 StartSec = 11,
                 EndSec = 13,
                 Kind = "user.face",
@@ -488,13 +488,13 @@ public class SegmentCoreControllerTests
             0);
 
         var createResult = await controller.CreateFromSpans(group.Id, new GroupItemsFromSpansDto([
-            new GroupItemSpanInputDto(null, scene.Id, null, null, "Intersection snapshot", null, derivedQuery)
+            new GroupItemSpanInputDto(null, video.Id, null, null, "Intersection snapshot", null, derivedQuery)
         ]), CancellationToken.None);
 
         var createOk = Assert.IsType<OkObjectResult>(createResult.Result);
         var createdItems = Assert.IsAssignableFrom<IReadOnlyList<GroupItemDto>>(createOk.Value);
         var createdItem = Assert.Single(createdItems);
-        Assert.Equal(GroupItemKind.SceneRange, createdItem.Kind);
+        Assert.Equal(GroupItemKind.VideoRange, createdItem.Kind);
         Assert.Equal(11, createdItem.StartSec);
         Assert.Equal(12, createdItem.EndSec);
         Assert.StartsWith("dq-intersection-", createdItem.SourceSpanKey, StringComparison.Ordinal);
@@ -507,23 +507,23 @@ public class SegmentCoreControllerTests
     }
 
     [Fact]
-    public async Task SegmentsController_CanListAndLoadTopLevelSceneSegments()
+    public async Task SegmentsController_CanListAndLoadTopLevelVideoSegments()
     {
         await using var scope = await CreateContextAsync();
         var context = scope.Context;
 
-        var scene = new Scene { Title = "Library Scene" };
-        var otherScene = new Scene { Title = "Other Scene" };
+        var video = new Video { Title = "Library Video" };
+        var otherVideo = new Video { Title = "Other Video" };
         var tag = new Tag { Name = "Highlight" };
-        context.Scenes.AddRange(scene, otherScene);
+        context.Videos.AddRange(video, otherVideo);
         context.Tags.Add(tag);
         await context.SaveChangesAsync();
 
         context.Segments.AddRange(
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 StartSec = 15,
                 EndSec = 24,
                 TagId = tag.Id,
@@ -533,8 +533,8 @@ public class SegmentCoreControllerTests
             },
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = otherScene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = otherVideo.Id,
                 StartSec = 30,
                 EndSec = 40,
                 Kind = "action",
@@ -545,16 +545,15 @@ public class SegmentCoreControllerTests
 
         var controller = new SegmentsController(
             context,
-            new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions())),
-            new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>());
+            new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions())));
 
-        var listResult = await controller.List(q: "Opening", ids: null, sceneId: null, sceneIds: null, sceneTitle: null, tagId: null, tagIds: null, kind: null, sourceKey: null, sourceCategory: null, refIds: null, performerIds: null, tagged: null, minConfidence: null, minDurationSec: null, confidence: null, confidence2: null, confidenceModifier: null, durationSec: null, durationSec2: null, durationModifier: null, sort: null, direction: null, page: 1, perPage: 20, cancellationToken: CancellationToken.None);
+        var listResult = await controller.List(q: "Opening", ids: null, videoId: null, videoIds: null, videoTitle: null, tagId: null, tagIds: null, kind: null, sourceKey: null, sourceCategory: null, refIds: null, performerIds: null, tagged: null, minConfidence: null, minDurationSec: null, confidence: null, confidence2: null, confidenceModifier: null, durationSec: null, durationSec2: null, durationModifier: null, sort: null, direction: null, page: 1, perPage: 20, cancellationToken: CancellationToken.None);
         var listOk = Assert.IsType<OkObjectResult>(listResult.Result);
         var page = Assert.IsType<PaginatedResponse<SegmentRecordDto>>(listOk.Value);
         Assert.Equal(1, page.TotalCount);
         var listed = Assert.Single(page.Items);
-        Assert.Equal(scene.Id, listed.HostId);
-        Assert.Equal("Library Scene", listed.HostTitle);
+        Assert.Equal(video.Id, listed.HostId);
+        Assert.Equal("Library Video", listed.HostTitle);
         Assert.Equal(tag.Id, listed.TagId);
         Assert.Equal("Highlight", listed.TagName);
 
@@ -563,7 +562,7 @@ public class SegmentCoreControllerTests
         var detail = Assert.IsType<SegmentRecordDto>(detailOk.Value);
         Assert.Equal(listed.Id, detail.Id);
         Assert.Equal("Opening beat", detail.Title);
-        Assert.Equal("Library Scene", detail.HostTitle);
+        Assert.Equal("Library Video", detail.HostTitle);
     }
 
     [Fact]
@@ -572,17 +571,17 @@ public class SegmentCoreControllerTests
         await using var scope = await CreateContextAsync();
         var context = scope.Context;
 
-        var scene = new Scene { Title = "Filter Scene" };
+        var video = new Video { Title = "Filter Video" };
         var tag = new Tag { Name = "Tagged" };
-        context.Scenes.Add(scene);
+        context.Videos.Add(video);
         context.Tags.Add(tag);
         await context.SaveChangesAsync();
 
         context.Segments.AddRange(
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 StartSec = 5,
                 EndSec = 7,
                 Kind = "face",
@@ -593,8 +592,8 @@ public class SegmentCoreControllerTests
             },
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 StartSec = 15,
                 EndSec = 24,
                 TagId = tag.Id,
@@ -606,8 +605,8 @@ public class SegmentCoreControllerTests
             },
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 StartSec = 30,
                 EndSec = 50,
                 Kind = "highlight",
@@ -620,16 +619,15 @@ public class SegmentCoreControllerTests
 
         var controller = new SegmentsController(
             context,
-            new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions())),
-            new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>());
+            new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions())));
 
-        var filteredResult = await controller.List(q: null, ids: null, sceneId: scene.Id, sceneIds: null, sceneTitle: null, tagId: null, tagIds: null, kind: "highlight", sourceKey: null, sourceCategory: null, refIds: null, performerIds: null, tagged: true, minConfidence: 0.8f, minDurationSec: 5, confidence: null, confidence2: null, confidenceModifier: null, durationSec: null, durationSec2: null, durationModifier: null, sort: "duration", direction: "desc", page: 1, perPage: 20, cancellationToken: CancellationToken.None);
+        var filteredResult = await controller.List(q: null, ids: null, videoId: video.Id, videoIds: null, videoTitle: null, tagId: null, tagIds: null, kind: "highlight", sourceKey: null, sourceCategory: null, refIds: null, performerIds: null, tagged: true, minConfidence: 0.8f, minDurationSec: 5, confidence: null, confidence2: null, confidenceModifier: null, durationSec: null, durationSec2: null, durationModifier: null, sort: "duration", direction: "desc", page: 1, perPage: 20, cancellationToken: CancellationToken.None);
         var filteredOk = Assert.IsType<OkObjectResult>(filteredResult.Result);
         var filteredPage = Assert.IsType<PaginatedResponse<SegmentRecordDto>>(filteredOk.Value);
         var filtered = Assert.Single(filteredPage.Items);
         Assert.Equal("Tagged beat", filtered.Title);
 
-        var sortedResult = await controller.List(q: null, ids: null, sceneId: scene.Id, sceneIds: null, sceneTitle: null, tagId: null, tagIds: null, kind: null, sourceKey: null, sourceCategory: null, refIds: null, performerIds: null, tagged: null, minConfidence: null, minDurationSec: null, confidence: null, confidence2: null, confidenceModifier: null, durationSec: null, durationSec2: null, durationModifier: null, sort: "duration", direction: "asc", page: 1, perPage: 20, cancellationToken: CancellationToken.None);
+        var sortedResult = await controller.List(q: null, ids: null, videoId: video.Id, videoIds: null, videoTitle: null, tagId: null, tagIds: null, kind: null, sourceKey: null, sourceCategory: null, refIds: null, performerIds: null, tagged: null, minConfidence: null, minDurationSec: null, confidence: null, confidence2: null, confidenceModifier: null, durationSec: null, durationSec2: null, durationModifier: null, sort: "duration", direction: "asc", page: 1, perPage: 20, cancellationToken: CancellationToken.None);
         var sortedOk = Assert.IsType<OkObjectResult>(sortedResult.Result);
         var sortedPage = Assert.IsType<PaginatedResponse<SegmentRecordDto>>(sortedOk.Value);
 
@@ -643,17 +641,17 @@ public class SegmentCoreControllerTests
         await using var scope = await CreateContextAsync();
         var context = scope.Context;
 
-        var scene = new Scene { Title = "Bulk Remove Scene" };
+        var video = new Video { Title = "Bulk Remove Video" };
         var tag = new Tag { Name = "Remove Me" };
         var otherTag = new Tag { Name = "Keep Me" };
-        context.Scenes.Add(scene);
+        context.Videos.Add(video);
         context.Tags.AddRange(tag, otherTag);
         await context.SaveChangesAsync();
 
         var targetSegment = new Segment
         {
-            HostType = SegmentHostType.Scene,
-            HostId = scene.Id,
+            HostType = SegmentHostType.Video,
+            HostId = video.Id,
             StartSec = 1,
             EndSec = 3,
             TagId = tag.Id,
@@ -662,8 +660,8 @@ public class SegmentCoreControllerTests
         };
         var unselectedSegment = new Segment
         {
-            HostType = SegmentHostType.Scene,
-            HostId = scene.Id,
+            HostType = SegmentHostType.Video,
+            HostId = video.Id,
             StartSec = 4,
             EndSec = 6,
             TagId = tag.Id,
@@ -672,8 +670,8 @@ public class SegmentCoreControllerTests
         };
         var differentTagSegment = new Segment
         {
-            HostType = SegmentHostType.Scene,
-            HostId = scene.Id,
+            HostType = SegmentHostType.Video,
+            HostId = video.Id,
             StartSec = 7,
             EndSec = 9,
             TagId = otherTag.Id,
@@ -685,8 +683,7 @@ public class SegmentCoreControllerTests
 
         var controller = new SegmentsController(
             context,
-            new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions())),
-            new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>());
+            new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions())));
 
         var result = await controller.RemoveTagFromSegments(new SegmentsController.SegmentTagBulkRemoveRequest(tag.Id, [targetSegment.Id, differentTagSegment.Id]), CancellationToken.None);
 
@@ -708,15 +705,15 @@ public class SegmentCoreControllerTests
         await using var scope = await CreateContextAsync();
         var context = scope.Context;
 
-        var scene = new Scene { Title = "Distinct Scene" };
-        context.Scenes.Add(scene);
+        var video = new Video { Title = "Distinct Video" };
+        context.Videos.Add(video);
         await context.SaveChangesAsync();
 
         context.Segments.AddRange(
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 StartSec = 1,
                 EndSec = 3,
                 Kind = "face",
@@ -724,8 +721,8 @@ public class SegmentCoreControllerTests
             },
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 StartSec = 5,
                 EndSec = 7,
                 Kind = "face",
@@ -733,8 +730,8 @@ public class SegmentCoreControllerTests
             },
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 StartSec = 10,
                 EndSec = 14,
                 Kind = "action",
@@ -744,8 +741,7 @@ public class SegmentCoreControllerTests
 
         var controller = new SegmentsController(
             context,
-            new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions())),
-            new ServiceCollection().BuildServiceProvider().GetRequiredService<IServiceScopeFactory>());
+            new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions())));
 
         var sourceKeysResult = await controller.DistinctSourceKeys(CancellationToken.None);
         var sourceKeysOk = Assert.IsType<OkObjectResult>(sourceKeysResult.Result);
@@ -761,19 +757,19 @@ public class SegmentCoreControllerTests
     }
 
     [Fact]
-    public async Task SegmentsController_SearchSpans_PaginatesFlattenedSparseSceneResults()
+    public async Task SegmentsController_SearchSpans_PaginatesFlattenedSparseVideoResults()
     {
         await using var scope = await CreateContextAsync();
         var context = scope.Context;
 
-        var scenes = Enumerable.Range(1, 5)
-            .Select(index => new Scene
+        var videos = Enumerable.Range(1, 5)
+            .Select(index => new Video
             {
-                Title = $"Scene {index}",
+                Title = $"Video {index}",
                 UpdatedAt = new DateTime(2024, 1, index, 12, 0, 0, DateTimeKind.Utc),
             })
             .ToList();
-        context.Scenes.AddRange(scenes);
+        context.Videos.AddRange(videos);
         await context.SaveChangesAsync();
 
         var profile = new SegmentDisplayProfile
@@ -795,8 +791,8 @@ public class SegmentCoreControllerTests
         context.Segments.AddRange(
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scenes[0].Id,
+                HostType = SegmentHostType.Video,
+                HostId = videos[0].Id,
                 StartSec = 5,
                 EndSec = 7,
                 Kind = "clip",
@@ -804,8 +800,8 @@ public class SegmentCoreControllerTests
             },
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scenes[2].Id,
+                HostType = SegmentHostType.Video,
+                HostId = videos[2].Id,
                 StartSec = 15,
                 EndSec = 18,
                 Kind = "clip",
@@ -813,8 +809,8 @@ public class SegmentCoreControllerTests
             },
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scenes[4].Id,
+                HostType = SegmentHostType.Video,
+                HostId = videos[4].Id,
                 StartSec = 25,
                 EndSec = 29,
                 Kind = "clip",
@@ -825,8 +821,7 @@ public class SegmentCoreControllerTests
         using var serviceProvider = CreateSegmentControllerServiceProvider(scope.Connection);
         var controller = new SegmentsController(
             context,
-            new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions())),
-            serviceProvider.GetRequiredService<IServiceScopeFactory>());
+            new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions())));
 
         var page1Result = await controller.SearchSpans(new SegmentSpanSearchRequestDto(profile.Id, null, 1, 1, "title", "asc", null, null, null, null), CancellationToken.None);
         var page2Result = await controller.SearchSpans(new SegmentSpanSearchRequestDto(profile.Id, null, 2, 1, "title", "asc", null, null, null, null), CancellationToken.None);
@@ -844,9 +839,9 @@ public class SegmentCoreControllerTests
         Assert.Single(page2.Items);
         Assert.Single(page3.Items);
 
-        Assert.Equal(scenes[0].Id, page1.Items[0].SceneId);
-        Assert.Equal(scenes[2].Id, page2.Items[0].SceneId);
-        Assert.Equal(scenes[4].Id, page3.Items[0].SceneId);
+        Assert.Equal(videos[0].Id, page1.Items[0].VideoId);
+        Assert.Equal(videos[2].Id, page2.Items[0].VideoId);
+        Assert.Equal(videos[4].Id, page3.Items[0].VideoId);
     }
 
     [Fact]
@@ -855,8 +850,8 @@ public class SegmentCoreControllerTests
         await using var scope = await CreateContextAsync();
         var context = scope.Context;
 
-        var scene = new Scene { Title = "Span Filter Scene" };
-        context.Scenes.Add(scene);
+        var video = new Video { Title = "Span Filter Video" };
+        context.Videos.Add(video);
         await context.SaveChangesAsync();
 
         var profile = new SegmentDisplayProfile
@@ -878,8 +873,8 @@ public class SegmentCoreControllerTests
 
         var older = new Segment
         {
-            HostType = SegmentHostType.Scene,
-            HostId = scene.Id,
+            HostType = SegmentHostType.Video,
+            HostId = video.Id,
             StartSec = 20,
             EndSec = 24,
             Kind = "action",
@@ -892,8 +887,8 @@ public class SegmentCoreControllerTests
         };
         var matching = new Segment
         {
-            HostType = SegmentHostType.Scene,
-            HostId = scene.Id,
+            HostType = SegmentHostType.Video,
+            HostId = video.Id,
             StartSec = 5,
             EndSec = 9,
             Kind = "face",
@@ -913,8 +908,7 @@ public class SegmentCoreControllerTests
         using var serviceProvider = CreateSegmentControllerServiceProvider(scope.Connection);
         var controller = new SegmentsController(
             context,
-            new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions())),
-            serviceProvider.GetRequiredService<IServiceScopeFactory>());
+            new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions())));
 
         var sortedResult = await controller.SearchSpans(new SegmentSpanSearchRequestDto(profile.Id, null, 1, 10, "segment_created_at", "asc", null, null, null, null), CancellationToken.None);
         var sorted = Assert.IsType<SegmentSpanSearchResponseDto>(Assert.IsType<OkObjectResult>(sortedResult.Result).Value);
@@ -933,7 +927,7 @@ public class SegmentCoreControllerTests
             null,
             Title: "Needle",
             TitleModifier: "INCLUDES",
-            HostType: "scene",
+            HostType: "video",
             SourceCategory: "extensions",
             SourceRunId: "run-b",
             SourceRunIdModifier: "EQUALS",
@@ -961,8 +955,8 @@ public class SegmentCoreControllerTests
         await using var scope = await CreateContextAsync();
         var context = scope.Context;
 
-        var scene = new Scene { Title = "Span Updated Sort Scene" };
-        context.Scenes.Add(scene);
+        var video = new Video { Title = "Span Updated Sort Video" };
+        context.Videos.Add(video);
         await context.SaveChangesAsync();
 
         var profile = new SegmentDisplayProfile
@@ -985,8 +979,8 @@ public class SegmentCoreControllerTests
 
         var stableOld = new Segment
         {
-            HostType = SegmentHostType.Scene,
-            HostId = scene.Id,
+            HostType = SegmentHostType.Video,
+            HostId = video.Id,
             StartSec = 1,
             EndSec = 2,
             Kind = "action",
@@ -996,8 +990,8 @@ public class SegmentCoreControllerTests
         };
         var mid = new Segment
         {
-            HostType = SegmentHostType.Scene,
-            HostId = scene.Id,
+            HostType = SegmentHostType.Video,
+            HostId = video.Id,
             StartSec = 5,
             EndSec = 6,
             Kind = "action",
@@ -1007,8 +1001,8 @@ public class SegmentCoreControllerTests
         };
         var mergedOldPart = new Segment
         {
-            HostType = SegmentHostType.Scene,
-            HostId = scene.Id,
+            HostType = SegmentHostType.Video,
+            HostId = video.Id,
             StartSec = 10,
             EndSec = 11,
             Kind = "action",
@@ -1018,8 +1012,8 @@ public class SegmentCoreControllerTests
         };
         var mergedNewestPart = new Segment
         {
-            HostType = SegmentHostType.Scene,
-            HostId = scene.Id,
+            HostType = SegmentHostType.Video,
+            HostId = video.Id,
             StartSec = 11.5,
             EndSec = 12,
             Kind = "action",
@@ -1033,8 +1027,7 @@ public class SegmentCoreControllerTests
         using var serviceProvider = CreateSegmentControllerServiceProvider(scope.Connection);
         var controller = new SegmentsController(
             context,
-            new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions())),
-            serviceProvider.GetRequiredService<IServiceScopeFactory>());
+            new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions())));
 
         var ascResult = await controller.SearchSpans(new SegmentSpanSearchRequestDto(profile.Id, null, 1, 10, "segment_updated_at", "asc", null, null, null, null), CancellationToken.None);
         var asc = Assert.IsType<SegmentSpanSearchResponseDto>(Assert.IsType<OkObjectResult>(ascResult.Result).Value);
@@ -1054,15 +1047,15 @@ public class SegmentCoreControllerTests
     }
 
     [Fact]
-    public async Task SceneDetectionsController_CanCreateUpdateListAndDeleteSceneDetections()
+    public async Task VideoDetectionsController_CanCreateUpdateListAndDeleteVideoDetections()
     {
         await using var scope = await CreateContextAsync();
         var context = scope.Context;
-        var scene = new Scene { Title = "Detection Scene" };
-        context.Scenes.Add(scene);
+        var video = new Video { Title = "Detection Video" };
+        context.Videos.Add(video);
         await context.SaveChangesAsync();
 
-        var controller = new SceneDetectionsController(context);
+        var controller = new VideoDetectionsController(context);
         var createDto = new DetectionCreateDto(
             42.0,
             1920,
@@ -1080,15 +1073,15 @@ public class SegmentCoreControllerTests
             "ext:ai.faces",
             "run-2");
 
-        var createResult = await controller.Create(scene.Id, createDto, CancellationToken.None);
+        var createResult = await controller.Create(video.Id, createDto, CancellationToken.None);
         var created = Assert.IsType<CreatedAtActionResult>(createResult.Result);
         var createdDto = Assert.IsType<DetectionDto>(created.Value);
-        Assert.Equal(scene.Id, createdDto.HostId);
+        Assert.Equal(video.Id, createdDto.HostId);
         Assert.Equal("face", createdDto.Class);
         Assert.True(createdDto.Extra.HasValue);
         Assert.Equal("track-1", createdDto.GroupKey);
 
-        var listResult = await controller.GetByScene(scene.Id, CancellationToken.None);
+        var listResult = await controller.GetByVideo(video.Id, CancellationToken.None);
         var listOk = Assert.IsType<OkObjectResult>(listResult.Result);
         var listed = Assert.IsAssignableFrom<IReadOnlyList<DetectionDto>>(listOk.Value);
         var listedDetection = Assert.Single(listed);
@@ -1111,7 +1104,7 @@ public class SegmentCoreControllerTests
             "ext:ai.faces",
             "run-3");
 
-        var updateResult = await controller.Update(scene.Id, createdDto.Id, updateDto, CancellationToken.None);
+        var updateResult = await controller.Update(video.Id, createdDto.Id, updateDto, CancellationToken.None);
         var updateOk = Assert.IsType<OkObjectResult>(updateResult.Result);
         var updatedDto = Assert.IsType<DetectionDto>(updateOk.Value);
         Assert.Equal(45.0, updatedDto.ObservedAtSec);
@@ -1121,7 +1114,7 @@ public class SegmentCoreControllerTests
         Assert.Equal("segment", updatedDto.RefKind);
         Assert.Equal(50, updatedDto.RefId);
 
-        var deleteResult = await controller.Delete(scene.Id, createdDto.Id, CancellationToken.None);
+        var deleteResult = await controller.Delete(video.Id, createdDto.Id, CancellationToken.None);
         Assert.IsType<NoContentResult>(deleteResult);
     }
 
@@ -1217,7 +1210,7 @@ public class SegmentCoreControllerTests
             "tag",
             null,
             "favorites",
-            SegmentHostType.Scene,
+            SegmentHostType.Video,
             true,
             0.5f,
             null,
@@ -1241,7 +1234,7 @@ public class SegmentCoreControllerTests
             "face",
             tag.Id,
             null,
-            SegmentHostType.Scene,
+            SegmentHostType.Video,
             false,
             0.8f,
             1.5,
@@ -1274,7 +1267,7 @@ public class SegmentCoreControllerTests
             "tag",
             null,
             "favorites",
-            SegmentHostType.Scene,
+            SegmentHostType.Video,
             true,
             0.5f,
             null,
@@ -1290,7 +1283,7 @@ public class SegmentCoreControllerTests
             "face",
             tag.Id,
             null,
-            SegmentHostType.Scene,
+            SegmentHostType.Video,
             true,
             0.7f,
             2.5,
@@ -1337,7 +1330,7 @@ public class SegmentCoreControllerTests
         var globalRulesOk = Assert.IsType<OkObjectResult>(globalRulesResult.Result);
         var globalRules = Assert.IsAssignableFrom<IReadOnlyList<SegmentDisplayRuleDto>>(globalRulesOk.Value);
         var globalDefaultRule = Assert.Single(globalRules);
-        Assert.Equal(SegmentHostType.Scene, globalDefaultRule.HostType);
+        Assert.Equal(SegmentHostType.Video, globalDefaultRule.HostType);
         Assert.True(globalDefaultRule.Visible);
         Assert.Equal(10, globalDefaultRule.MinDurationSec);
         Assert.Equal(8, globalDefaultRule.MergeGapSec);
@@ -1346,7 +1339,7 @@ public class SegmentCoreControllerTests
         var userRulesOk = Assert.IsType<OkObjectResult>(userRulesResult.Result);
         var userRules = Assert.IsAssignableFrom<IReadOnlyList<SegmentDisplayRuleDto>>(userRulesOk.Value);
         var userDefaultRule = Assert.Single(userRules);
-        Assert.Equal(SegmentHostType.Scene, userDefaultRule.HostType);
+        Assert.Equal(SegmentHostType.Video, userDefaultRule.HostType);
         Assert.True(userDefaultRule.Visible);
         Assert.Equal(10, userDefaultRule.MinDurationSec);
         Assert.Equal(8, userDefaultRule.MergeGapSec);
@@ -1375,15 +1368,15 @@ public class SegmentCoreControllerTests
     {
         await using var scope = await CreateContextAsync();
         var context = scope.Context;
-        var scene = new Scene { Title = "Preview Scene" };
+        var video = new Video { Title = "Preview Video" };
         var tag = new Tag { Name = "Highlight" };
-        context.AddRange(scene, tag);
+        context.AddRange(video, tag);
         await context.SaveChangesAsync();
 
         context.Segments.Add(new Segment
         {
-            HostType = SegmentHostType.Scene,
-            HostId = scene.Id,
+            HostType = SegmentHostType.Video,
+            HostId = video.Id,
             StartSec = 3,
             EndSec = 9,
             TagId = tag.Id,
@@ -1401,14 +1394,14 @@ public class SegmentCoreControllerTests
             principalAccessor);
 
         var previewResult = await controller.Preview(new SegmentDisplayProfilePreviewRequestDto(
-            scene.Id,
+            video.Id,
             [
                 new SegmentDisplayRuleCreateDto(
                     "ext:ai.actions",
                     "action",
                     tag.Id,
                     null,
-                    SegmentHostType.Scene,
+                    SegmentHostType.Video,
                     true,
                     null,
                     null,
@@ -1453,7 +1446,7 @@ public class SegmentCoreControllerTests
             "face",
             tag.Id,
             null,
-            SegmentHostType.Scene,
+            SegmentHostType.Video,
             true,
             0.8f,
             1.5,
@@ -1477,7 +1470,7 @@ public class SegmentCoreControllerTests
             "face",
             tag.Id,
             null,
-            SegmentHostType.Scene,
+            SegmentHostType.Video,
             false,
             0.9f,
             2.0,
@@ -1511,34 +1504,34 @@ public class SegmentCoreControllerTests
         await using var scope = await CreateContextAsync();
         var context = scope.Context;
         var group = new Group { Name = "Compilation" };
-        var sceneA = new Scene { Title = "Scene A", MaxDuration = 120 };
-        var sceneB = new Scene { Title = "Scene B", MaxDuration = 90 };
+        var videoA = new Video { Title = "Video A", MaxDuration = 120 };
+        var videoB = new Video { Title = "Video B", MaxDuration = 90 };
         context.Groups.Add(group);
-        context.Scenes.AddRange(sceneA, sceneB);
+        context.Videos.AddRange(videoA, videoB);
         await context.SaveChangesAsync();
 
         var controller = new GroupItemsController(context, new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions())));
 
-        var createSceneResult = await controller.Create(group.Id, new GroupItemCreateDto(
+        var createVideoResult = await controller.Create(group.Id, new GroupItemCreateDto(
             0,
-            GroupItemKind.Scene,
-            sceneA.Id,
+            GroupItemKind.Video,
+            videoA.Id,
             null,
             null,
             null,
             null,
-            "Full scene",
+            "Full video",
             null,
             null,
             null), CancellationToken.None);
-        var createSceneCreated = Assert.IsType<CreatedAtActionResult>(createSceneResult.Result);
-        var sceneItem = Assert.IsType<GroupItemDto>(createSceneCreated.Value);
-        Assert.Equal(GroupItemKind.Scene, sceneItem.Kind);
+        var createVideoCreated = Assert.IsType<CreatedAtActionResult>(createVideoResult.Result);
+        var videoItem = Assert.IsType<GroupItemDto>(createVideoCreated.Value);
+        Assert.Equal(GroupItemKind.Video, videoItem.Kind);
 
         var createRangeResult = await controller.Create(group.Id, new GroupItemCreateDto(
             1,
-            GroupItemKind.SceneRange,
-            sceneB.Id,
+            GroupItemKind.VideoRange,
+            videoB.Id,
             null,
             null,
             5,
@@ -1552,7 +1545,7 @@ public class SegmentCoreControllerTests
         Assert.Equal(5, rangeItem.StartSec);
         Assert.Equal(17, rangeItem.EndSec);
 
-        var reorderResult = await controller.Reorder(group.Id, new GroupItemsReorderDto([rangeItem.Id, sceneItem.Id]), CancellationToken.None);
+        var reorderResult = await controller.Reorder(group.Id, new GroupItemsReorderDto([rangeItem.Id, videoItem.Id]), CancellationToken.None);
         Assert.IsType<OkResult>(reorderResult);
 
         var listResult = await controller.List(group.Id, CancellationToken.None);
@@ -1560,14 +1553,14 @@ public class SegmentCoreControllerTests
         var listed = Assert.IsAssignableFrom<IReadOnlyList<GroupItemDto>>(listOk.Value);
         Assert.Equal(2, listed.Count);
         Assert.Equal(rangeItem.Id, listed[0].Id);
-        Assert.Equal(sceneItem.Id, listed[1].Id);
+        Assert.Equal(videoItem.Id, listed[1].Id);
 
         var manifestResult = await controller.GetPlaybackManifest(group.Id, CancellationToken.None);
         var manifestOk = Assert.IsType<OkObjectResult>(manifestResult.Result);
         var manifest = Assert.IsType<GroupPlaybackManifestDto>(manifestOk.Value);
         Assert.Equal(2, manifest.Items.Count);
-        Assert.Equal(sceneB.Id, manifest.Items[0].SceneId);
-        Assert.Equal("/api/stream/scene/" + sceneB.Id, manifest.Items[0].Src);
+        Assert.Equal(videoB.Id, manifest.Items[0].VideoId);
+        Assert.Equal("/api/stream/video/" + videoB.Id, manifest.Items[0].Src);
         Assert.Equal(12, manifest.Items[0].DurationSec);
         Assert.Equal(0, manifest.Items[1].StartSec);
         Assert.Null(manifest.Items[1].EndSec);
@@ -1583,13 +1576,13 @@ public class SegmentCoreControllerTests
         var audio = new Audio { Title = "Audio Chapter" };
         var text = new TextDocument { Title = "Text Chapter" };
         var image = new Image { Title = "Image Chapter" };
-        var scene = new Scene { Title = "Segment Host", MaxDuration = 80 };
-        context.AddRange(group, audio, text, image, scene);
+        var video = new Video { Title = "Segment Host", MaxDuration = 80 };
+        context.AddRange(group, audio, text, image, video);
         await context.SaveChangesAsync();
         var segment = new Segment
         {
-            HostType = SegmentHostType.Scene,
-            HostId = scene.Id,
+            HostType = SegmentHostType.Video,
+            HostId = video.Id,
             StartSec = 30,
             EndSec = 36,
             Kind = "highlight",
@@ -1684,7 +1677,7 @@ public class SegmentCoreControllerTests
         Assert.Contains(manifest.Items, item => item.ImageId == image.Id && item.Src == $"/api/stream/image/{image.Id}");
         var segmentManifestItem = Assert.Single(manifest.Items.Where(item => item.SegmentId == segment.Id));
         Assert.Equal("segment", segmentManifestItem.HostType);
-        Assert.Equal(scene.Id, segmentManifestItem.SceneId);
+        Assert.Equal(video.Id, segmentManifestItem.VideoId);
         Assert.Equal(30, segmentManifestItem.StartSec);
         Assert.Equal(36, segmentManifestItem.EndSec);
         Assert.Equal(6, segmentManifestItem.DurationSec);
@@ -1696,10 +1689,10 @@ public class SegmentCoreControllerTests
         await using var scope = await CreateContextAsync();
         var context = scope.Context;
         var group = new Group { Name = "Compilation" };
-        var scene = new Scene { Title = "Scene A", MaxDuration = 120 };
+        var video = new Video { Title = "Video A", MaxDuration = 120 };
         var tag = new Tag { Name = "Highlights" };
         context.Groups.Add(group);
-        context.Scenes.Add(scene);
+        context.Videos.Add(video);
         context.Tags.Add(tag);
         await context.SaveChangesAsync();
 
@@ -1724,8 +1717,8 @@ public class SegmentCoreControllerTests
         context.Segments.AddRange(
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 StartSec = 10,
                 EndSec = 12,
                 TagId = tag.Id,
@@ -1734,8 +1727,8 @@ public class SegmentCoreControllerTests
             },
             new Segment
             {
-                HostType = SegmentHostType.Scene,
-                HostId = scene.Id,
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
                 StartSec = 12.5,
                 EndSec = 14,
                 TagId = tag.Id,
@@ -1747,17 +1740,17 @@ public class SegmentCoreControllerTests
         var principalAccessor = new CurrentPrincipalAccessor();
         principalAccessor.Set(CreatePrincipal(11));
         var spanResolver = new SegmentSpanResolver(context, principalAccessor, new MemoryCache(new MemoryCacheOptions()));
-        var resolved = await spanResolver.ResolveSceneAsync(scene.Id, profile.Id, CancellationToken.None);
+        var resolved = await spanResolver.ResolveVideoAsync(video.Id, profile.Id, CancellationToken.None);
         var span = Assert.Single(resolved.Spans);
 
         var controller = new GroupItemsController(context, spanResolver);
         var createFromSpansResult = await controller.CreateFromSpans(group.Id, new GroupItemsFromSpansDto([
-            new GroupItemSpanInputDto(span.SpanKey, scene.Id, null, null, null, profile.Id)
+            new GroupItemSpanInputDto(span.SpanKey, video.Id, null, null, null, profile.Id)
         ]), CancellationToken.None);
         var createFromSpansOk = Assert.IsType<OkObjectResult>(createFromSpansResult.Result);
         var createdItems = Assert.IsAssignableFrom<IReadOnlyList<GroupItemDto>>(createFromSpansOk.Value);
         var createdItem = Assert.Single(createdItems);
-        Assert.Equal(GroupItemKind.SceneRange, createdItem.Kind);
+        Assert.Equal(GroupItemKind.VideoRange, createdItem.Kind);
         Assert.Equal(10, createdItem.StartSec);
         Assert.Equal(14, createdItem.EndSec);
         Assert.Equal(span.SpanKey, createdItem.SourceSpanKey);
@@ -1767,7 +1760,7 @@ public class SegmentCoreControllerTests
 
     private static JsonElement ParseJson(string json) => JsonSerializer.Deserialize<JsonElement>(json);
 
-    private static SceneSegmentsController CreateSceneSegmentsController(CoveContext context, SegmentSpanResolver spanResolver)
+    private static VideoSegmentsController CreateVideoSegmentsController(CoveContext context, SegmentSpanResolver spanResolver)
         => new(context, spanResolver, new StubBlobService());
 
     private static async Task<TestContextScope> CreateContextAsync()
@@ -1850,3 +1843,4 @@ public class SegmentCoreControllerTests
         }
     }
 }
+

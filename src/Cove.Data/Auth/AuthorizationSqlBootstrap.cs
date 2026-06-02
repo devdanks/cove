@@ -12,7 +12,7 @@ public static class AuthorizationSqlDefinitions
             STABLE
             AS $$
                 SELECT CASE lower(p_kind)
-                    WHEN 'scene' THEN EXISTS (SELECT 1 FROM scene_tags st WHERE st."TagId" = p_tag_id AND st."SceneId" = p_entity_id)
+                    WHEN 'video' THEN EXISTS (SELECT 1 FROM video_tags st WHERE st."TagId" = p_tag_id AND st."VideoId" = p_entity_id)
                     WHEN 'performer' THEN EXISTS (SELECT 1 FROM performer_tags pt WHERE pt."TagId" = p_tag_id AND pt."PerformerId" = p_entity_id)
                     WHEN 'tag' THEN p_entity_id = p_tag_id
                     WHEN 'studio' THEN EXISTS (SELECT 1 FROM studio_tags st WHERE st."TagId" = p_tag_id AND st."StudioId" = p_entity_id)
@@ -25,7 +25,7 @@ public static class AuthorizationSqlDefinitions
                         WHERE f."Id" = p_entity_id
                           AND (
                               (f."FileType" = 'Video' AND EXISTS (
-                                  SELECT 1 FROM scene_tags st WHERE st."TagId" = p_tag_id AND st."SceneId" = f."SceneId"
+                                  SELECT 1 FROM video_tags st WHERE st."TagId" = p_tag_id AND st."VideoId" = f."VideoId"
                               ))
                               OR (f."FileType" = 'Image' AND EXISTS (
                                   SELECT 1 FROM image_tags it WHERE it."TagId" = p_tag_id AND it."ImageId" = f."ImageId"
@@ -35,8 +35,8 @@ public static class AuthorizationSqlDefinitions
                               ))
                           )
                     )
-                    WHEN 'marker' THEN EXISTS (SELECT 1 FROM scene_marker_tags smt WHERE smt."TagId" = p_tag_id AND smt."SceneMarkerId" = p_entity_id)
-                        OR EXISTS (SELECT 1 FROM scene_markers sm WHERE sm."Id" = p_entity_id AND sm."PrimaryTagId" = p_tag_id)
+                    WHEN 'marker' THEN EXISTS (SELECT 1 FROM video_marker_tags smt WHERE smt."TagId" = p_tag_id AND smt."VideoMarkerId" = p_entity_id)
+                        OR EXISTS (SELECT 1 FROM video_markers sm WHERE sm."Id" = p_entity_id AND sm."PrimaryTagId" = p_tag_id)
                     ELSE false
                 END;
             $$;
@@ -50,7 +50,7 @@ public static class AuthorizationSqlDefinitions
             STABLE
             AS $$
                 SELECT CASE lower(p_kind)
-                    WHEN 'scene' THEN EXISTS (SELECT 1 FROM scenes s WHERE s."Id" = p_entity_id AND s."StudioId" = p_studio_id)
+                    WHEN 'video' THEN EXISTS (SELECT 1 FROM videos s WHERE s."Id" = p_entity_id AND s."StudioId" = p_studio_id)
                     WHEN 'studio' THEN p_entity_id = p_studio_id
                     WHEN 'gallery' THEN EXISTS (SELECT 1 FROM galleries g WHERE g."Id" = p_entity_id AND g."StudioId" = p_studio_id)
                     WHEN 'image' THEN EXISTS (SELECT 1 FROM images i WHERE i."Id" = p_entity_id AND i."StudioId" = p_studio_id)
@@ -61,7 +61,7 @@ public static class AuthorizationSqlDefinitions
                         WHERE f."Id" = p_entity_id
                           AND (
                               (f."FileType" = 'Video' AND EXISTS (
-                                  SELECT 1 FROM scenes s WHERE s."Id" = f."SceneId" AND s."StudioId" = p_studio_id
+                                  SELECT 1 FROM videos s WHERE s."Id" = f."VideoId" AND s."StudioId" = p_studio_id
                               ))
                               OR (f."FileType" = 'Image' AND EXISTS (
                                   SELECT 1 FROM images i WHERE i."Id" = f."ImageId" AND i."StudioId" = p_studio_id
@@ -73,8 +73,8 @@ public static class AuthorizationSqlDefinitions
                     )
                     WHEN 'marker' THEN EXISTS (
                         SELECT 1
-                        FROM scene_markers sm
-                        JOIN scenes s ON s."Id" = sm."SceneId"
+                        FROM video_markers sm
+                        JOIN videos s ON s."Id" = sm."VideoId"
                         WHERE sm."Id" = p_entity_id AND s."StudioId" = p_studio_id
                     )
                     ELSE false
@@ -114,9 +114,9 @@ public static class AuthorizationSqlDefinitions
             AS $$
                 SELECT coalesce(
                     CASE lower(p_kind)
-                        WHEN 'scene' THEN (
+                        WHEN 'video' THEN (
                             SELECT jsonb_object_agg(lower(entry.key), entry.value)
-                            FROM scenes entity
+                            FROM videos entity
                             CROSS JOIN LATERAL jsonb_each(to_jsonb(entity)) AS entry
                             WHERE entity."Id" = p_entity_id
                         )
@@ -164,7 +164,7 @@ public static class AuthorizationSqlDefinitions
                         )
                         WHEN 'marker' THEN (
                             SELECT jsonb_object_agg(lower(entry.key), entry.value)
-                            FROM scene_markers entity
+                            FROM video_markers entity
                             CROSS JOIN LATERAL jsonb_each(to_jsonb(entity)) AS entry
                             WHERE entity."Id" = p_entity_id
                         )

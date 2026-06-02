@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { audios, galleries, groups, images, metadata, performers, scenes, segmentLibrary, studios, tags, texts, entityImages } from "../api/client";
-import type { Audio, FindFilter, Gallery, Group, Image, Performer, Scene, SceneFilterCriteria, SegmentRecord, Studio, TagDetail as TagDetailModel, TextDocument } from "../api/types";
+import { audios, galleries, groups, images, metadata, performers, videos, segmentLibrary, studios, tags, texts, entityImages } from "../api/client";
+import type { Audio, FindFilter, Gallery, Group, Image, Performer, Video, VideoFilterCriteria, SegmentRecord, Studio, TagDetail as TagDetailModel, TextDocument } from "../api/types";
 import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay, FieldProvenanceHover, resolveTagProvenance } from "../components/shared";
 import { Building2, FileText, Film, FolderOpen, GitMerge, Headphones, Heart, ImageIcon, Layers, Loader2, MoreVertical, Music, Pencil, Search, Tag as TagIcon, Trash2, UserRound, Wand2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -8,7 +8,7 @@ import { TagEditModal } from "./TagEditModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DetailMergeDialog } from "../components/DetailMergeDialog";
 import { ExtensionSlot } from "../router/RouteRegistry";
-import { AudioTile, SceneCard, PerformerTile, ImageTile, GalleryTile, StudioTile, GroupTile, SegmentTile, TextTile } from "../components/EntityCards";
+import { AudioTile, VideoCard, PerformerTile, ImageTile, GalleryTile, StudioTile, GroupTile, SegmentTile, TextTile } from "../components/EntityCards";
 import { QuickViewDialog } from "../components/QuickViewDialog";
 import { DetailListToolbar } from "../components/DetailListToolbar";
 import { BulkSelectionActions } from "../components/BulkSelectionActions";
@@ -19,8 +19,8 @@ import { CoverImageDialog } from "../components/CoverImageDialog";
 import { FloatingActionMenu } from "../components/FloatingActionMenu";
 import { TagMetadataTaggerDialog } from "../components/MetadataTaggerDialog";
 import { RelatedEntityListView, useRelatedEntityDisplayMode } from "../components/RelatedEntityListView";
-import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
-import { SCENE_CRITERIA } from "../components/FilterDialog";
+import { VIDEO_SORT_OPTIONS } from "../components/videoSortOptions";
+import { VIDEO_CRITERIA } from "../components/FilterDialog";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { GALLERY_SORT_OPTIONS } from "../components/gallerySortOptions";
 import { PERFORMER_SORT_OPTIONS } from "../components/performerSortOptions";
@@ -83,7 +83,7 @@ interface Props {
   onNavigate: (r: any) => void;
 }
 
-type TabKey = "scenes" | "performers" | "images" | "galleries" | "audios" | "texts" | "segments" | "studios" | "groups" | (string & {});
+type TabKey = "videos" | "performers" | "images" | "galleries" | "audios" | "texts" | "segments" | "studios" | "groups" | (string & {});
 
 export function TagDetailPage({ id, onNavigate }: Props) {
   const { hasPermission, user } = useAuth();
@@ -97,10 +97,10 @@ export function TagDetailPage({ id, onNavigate }: Props) {
   const [metadataTaggerOpen, setMetadataTaggerOpen] = useState(false);
   const [showOpsMenu, setShowOpsMenu] = useState(false);
   const [coverOpen, setCoverOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabKey>("scenes");
+  const [activeTab, setActiveTab] = useState<TabKey>("videos");
   const opsMenuRef = useRef<HTMLDivElement | null>(null);
   const { allTabs: tagTabs, renderExtensionTab, extensionCounts } = useExtensionTabs("tag", [
-    { key: "scenes", label: "Scenes", count: tag?.sceneCount },
+    { key: "videos", label: "Videos", count: tag?.videoCount },
     { key: "performers", label: "Performers", count: tag?.performerCount },
     { key: "images", label: "Images", count: tag?.imageCount },
     { key: "galleries", label: "Galleries", count: tag?.galleryCount },
@@ -110,7 +110,7 @@ export function TagDetailPage({ id, onNavigate }: Props) {
     { key: "studios", label: "Studios", count: tag?.studioCount },
     { key: "groups", label: "Groups", count: tag?.groupCount },
   ], id);
-  const [sceneFilter, setSceneFilter] = useState<FindFilter>({ page: 1, perPage: 24, direction: "desc" });
+  const [videoFilter, setVideoFilter] = useState<FindFilter>({ page: 1, perPage: 24, direction: "desc" });
   const [performerFilter, setPerformerFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "asc" });
   const [imageFilter, setImageFilter] = useState<FindFilter>({ page: 1, perPage: 30, direction: "desc" });
   const [galleryFilter, setGalleryFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "desc" });
@@ -127,13 +127,13 @@ export function TagDetailPage({ id, onNavigate }: Props) {
   const canAutoTagTag = hasPermission("library.autotag") && canWriteTag;
   const showTagOpsMenu = canAutoTagTag || canWriteTag || canDeleteTag;
   const visibleTagTabs = filterItemsByPermission(tagTabs, {
-    scenes: "scenes.read",
+    videos: "videos.read",
     performers: "performers.read",
     images: "images.read",
     galleries: "galleries.read",
     audios: "audios.read",
     texts: "texts.read",
-    segments: "scenes.read",
+    segments: "videos.read",
     studios: "studios.read",
     groups: "groups.read",
   }, hasPermission);
@@ -246,7 +246,7 @@ export function TagDetailPage({ id, onNavigate }: Props) {
         organizedPending={updateMut.isPending}
         onOrganizedToggle={canWriteTag ? (organized) => updateMut.mutate({ organized }) : undefined}
         counts={[
-          { key: "scenes", label: "Scenes", value: tag.sceneCount, icon: <Film className="h-4 w-4" /> },
+          { key: "videos", label: "Videos", value: tag.videoCount, icon: <Film className="h-4 w-4" /> },
           { key: "performers", label: "Performers", value: tag.performerCount, icon: <UserRound className="h-4 w-4" /> },
           { key: "images", label: "Images", value: tag.imageCount, icon: <ImageIcon className="h-4 w-4" /> },
           { key: "galleries", label: "Galleries", value: tag.galleryCount, icon: <FolderOpen className="h-4 w-4" /> },
@@ -316,8 +316,8 @@ export function TagDetailPage({ id, onNavigate }: Props) {
         <EntityDetailTabs tabs={visibleTagTabs} activeTab={activeTab} onTabChange={(key) => setActiveTab(key as TabKey)} className="mx-auto max-w-7xl" />
 
         <div className="py-6">
-          {activeTab === "scenes" && (
-            <TagScenesPanel tagId={id} filter={sceneFilter} setFilter={setSceneFilter} onNavigate={onNavigate} />
+          {activeTab === "videos" && (
+            <TagVideosPanel tagId={id} filter={videoFilter} setFilter={setVideoFilter} onNavigate={onNavigate} />
           )}
           {activeTab === "performers" && (
             <TagPerformersPanel tagId={id} filter={performerFilter} setFilter={setPerformerFilter} onNavigate={onNavigate} />
@@ -432,41 +432,41 @@ function TagHierarchyLinks({
   );
 }
 
-function TagScenesPanel({ tagId, filter, setFilter, onNavigate }: {
+function TagVideosPanel({ tagId, filter, setFilter, onNavigate }: {
   tagId: number;
   filter: FindFilter;
   setFilter: (filter: FindFilter) => void;
   onNavigate: (r: any) => void;
 }) {
   const [zoomLevel, setZoomLevel] = useState(0);
-  const { displayMode, setDisplayMode, availableDisplayModes } = useRelatedEntityDisplayMode("scenes");
+  const { displayMode, setDisplayMode, availableDisplayModes } = useRelatedEntityDisplayMode("videos");
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
   const [objectFilter, setObjectFilter] = useState<Record<string, unknown>>({});
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
-  const { data, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<Scene>({
-    queryKey: ["tag-scenes", tagId, objectFilter],
+  const { data, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<Video>({
+    queryKey: ["tag-videos", tagId, objectFilter],
     filter,
     queryFn: (nextFilter) => hasObjectFilter
-      ? scenes.findFiltered({
+      ? videos.findFiltered({
           findFilter: nextFilter,
-          objectFilter: withRequiredMultiId(objectFilter as SceneFilterCriteria, "tagsCriterion", tagId),
+          objectFilter: withRequiredMultiId(objectFilter as VideoFilterCriteria, "tagsCriterion", tagId),
         })
-      : scenes.find(nextFilter, { tagIds: String(tagId) }),
+      : videos.find(nextFilter, { tagIds: String(tagId) }),
   });
   const items = data?.items ?? [];
   const { selectedIds, toggle, selectAll, selectAllPending, selectShown, selectNone } = useDetailListSelection({ items, infinitePageSize, infiniteFilterKey, fetchAllIds, resetKeyParts: [objectFilter] });
   const selecting = selectedIds.size > 0;
-  const toolbar = <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={SCENE_SORT_OPTIONS} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} selectAllPending={selectAllPending} onSelectAllMatching={selectShown} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="scenes" selectedIds={selectedIds} onDone={selectNone} sceneItems={items} onNavigate={onNavigate} removeFromParent={{ type: "tag", id: tagId }} />} criteriaDefinitions={SCENE_CRITERIA} objectFilter={objectFilter} onObjectFilterChange={setObjectFilter} allowInfinitePageSize displayMode={displayMode} onDisplayModeChange={setDisplayMode} availableDisplayModes={availableDisplayModes} />;
+  const toolbar = <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={VIDEO_SORT_OPTIONS} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} selectAllPending={selectAllPending} onSelectAllMatching={selectShown} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="videos" selectedIds={selectedIds} onDone={selectNone} videoItems={items} onNavigate={onNavigate} removeFromParent={{ type: "tag", id: tagId }} />} criteriaDefinitions={VIDEO_CRITERIA} objectFilter={objectFilter} onObjectFilterChange={setObjectFilter} allowInfinitePageSize displayMode={displayMode} onDisplayModeChange={setDisplayMode} availableDisplayModes={availableDisplayModes} />;
 
-  if (isLoading) return <LoadingPanel icon={<Film className="h-10 w-10" />} message="Loading scenes..." />;
-  if (!data || items.length === 0) return <>{toolbar}<EmptyPanel icon={<Film className="h-12 w-12" />} message="No scenes with this tag" /></>;
+  if (isLoading) return <LoadingPanel icon={<Film className="h-10 w-10" />} message="Loading videos..." />;
+  if (!data || items.length === 0) return <>{toolbar}<EmptyPanel icon={<Film className="h-12 w-12" />} message="No videos with this tag" /></>;
 
   return (
     <>
       {toolbar}
-      <RelatedEntityListView entityType="scenes" items={items} displayMode={displayMode} zoomLevel={zoomLevel} selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} onSceneQuickView={setQuickViewId} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} />
+      <RelatedEntityListView entityType="videos" items={items} displayMode={displayMode} zoomLevel={zoomLevel} selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} onVideoQuickView={setQuickViewId} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} />
       {quickViewId !== null && (
-        <QuickViewDialog type="scene" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
+        <QuickViewDialog type="video" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
       )}
     </>
   );
@@ -753,3 +753,4 @@ function EmptyPanel({ icon, message }: { icon: React.ReactNode; message: string 
     </div>
   );
 }
+

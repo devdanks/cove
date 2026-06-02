@@ -6,7 +6,7 @@ export const SEGMENT_SORT_OPTIONS: { value: string; label: string }[] = [
   { value: "duration", label: "Duration" },
   { value: "confidence", label: "Confidence" },
   { value: "title", label: "Title" },
-  { value: "scene_title", label: "Scene Title" },
+  { value: "video_title", label: "Video Title" },
   { value: "kind", label: "Kind" },
   { value: "source_key", label: "Source Key" },
   { value: "tag_name", label: "Tag Name" },

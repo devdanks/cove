@@ -4,33 +4,33 @@ using Cove.Core.Entities;
 
 namespace Cove.Data.Configuration;
 
-public class SceneConfiguration : IEntityTypeConfiguration<Scene>
+public class VideoConfiguration : IEntityTypeConfiguration<Video>
 {
-    public void Configure(EntityTypeBuilder<Scene> builder)
+    public void Configure(EntityTypeBuilder<Video> builder)
     {
-        builder.ToTable("scenes");
+        builder.ToTable("videos");
         builder.HasKey(s => s.Id);
 
         builder.HasOne(s => s.Studio)
-            .WithMany(st => st.Scenes)
+            .WithMany(st => st.Videos)
             .HasForeignKey(s => s.StudioId)
             .OnDelete(DeleteBehavior.SetNull);
 
-        builder.HasOne(s => s.ParentScene)
-            .WithMany(s => s.ChildScenes)
-            .HasForeignKey(s => s.ParentSceneId)
+        builder.HasOne(s => s.ParentVideo)
+            .WithMany(s => s.ChildVideos)
+            .HasForeignKey(s => s.ParentVideoId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        builder.HasMany(s => s.Urls).WithOne(u => u.Scene).HasForeignKey(u => u.SceneId).OnDelete(DeleteBehavior.Cascade);
-        builder.HasMany(s => s.Files).WithOne(f => f.Scene).HasForeignKey(f => f.SceneId).OnDelete(DeleteBehavior.SetNull);
-        builder.HasMany(s => s.SceneMarkers).WithOne(m => m.Scene).HasForeignKey(m => m.SceneId).OnDelete(DeleteBehavior.Cascade);
-        builder.HasMany(s => s.RemoteIds).WithOne(si => si.Scene).HasForeignKey(si => si.SceneId).OnDelete(DeleteBehavior.Cascade);
-        builder.HasMany(s => s.PlayHistory).WithOne(h => h.Scene).HasForeignKey(h => h.SceneId).OnDelete(DeleteBehavior.Cascade);
-        builder.HasMany(s => s.LikeHistory).WithOne(h => h.Scene).HasForeignKey(h => h.SceneId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasMany(s => s.Urls).WithOne(u => u.Video).HasForeignKey(u => u.VideoId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasMany(s => s.Files).WithOne(f => f.Video).HasForeignKey(f => f.VideoId).OnDelete(DeleteBehavior.SetNull);
+        builder.HasMany(s => s.VideoMarkers).WithOne(m => m.Video).HasForeignKey(m => m.VideoId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasMany(s => s.RemoteIds).WithOne(si => si.Video).HasForeignKey(si => si.VideoId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasMany(s => s.PlayHistory).WithOne(h => h.Video).HasForeignKey(h => h.VideoId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasMany(s => s.LikeHistory).WithOne(h => h.Video).HasForeignKey(h => h.VideoId).OnDelete(DeleteBehavior.Cascade);
 
         builder.HasIndex(s => s.Title);
         builder.HasIndex(s => s.StudioId);
-        builder.HasIndex(s => s.ParentSceneId);
+        builder.HasIndex(s => s.ParentVideoId);
         builder.HasIndex(s => s.Date);
         builder.HasIndex(s => s.CreatedAt);
         builder.HasIndex(s => s.UpdatedAt);
@@ -75,50 +75,50 @@ public class SceneConfiguration : IEntityTypeConfiguration<Scene>
     }
 }
 
-public class SceneTagConfiguration : IEntityTypeConfiguration<SceneTag>
+public class VideoTagConfiguration : IEntityTypeConfiguration<VideoTag>
 {
-    public void Configure(EntityTypeBuilder<SceneTag> builder)
+    public void Configure(EntityTypeBuilder<VideoTag> builder)
     {
-        builder.ToTable("scene_tags");
-        builder.HasKey(st => new { st.SceneId, st.TagId });
-        builder.HasOne(st => st.Scene).WithMany(s => s.SceneTags).HasForeignKey(st => st.SceneId).OnDelete(DeleteBehavior.Cascade);
-        builder.HasOne(st => st.Tag).WithMany(t => t.SceneTags).HasForeignKey(st => st.TagId).OnDelete(DeleteBehavior.Cascade);
+        builder.ToTable("video_tags");
+        builder.HasKey(st => new { st.VideoId, st.TagId });
+        builder.HasOne(st => st.Video).WithMany(s => s.VideoTags).HasForeignKey(st => st.VideoId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne(st => st.Tag).WithMany(t => t.VideoTags).HasForeignKey(st => st.TagId).OnDelete(DeleteBehavior.Cascade);
         builder.HasIndex(st => st.TagId);
     }
 }
 
-public class ScenePerformerConfiguration : IEntityTypeConfiguration<ScenePerformer>
+public class VideoPerformerConfiguration : IEntityTypeConfiguration<VideoPerformer>
 {
-    public void Configure(EntityTypeBuilder<ScenePerformer> builder)
+    public void Configure(EntityTypeBuilder<VideoPerformer> builder)
     {
-        builder.ToTable("scene_performers");
-        builder.HasKey(sp => new { sp.SceneId, sp.PerformerId });
-        builder.HasOne(sp => sp.Scene).WithMany(s => s.ScenePerformers).HasForeignKey(sp => sp.SceneId).OnDelete(DeleteBehavior.Cascade);
-        builder.HasOne(sp => sp.Performer).WithMany(p => p.ScenePerformers).HasForeignKey(sp => sp.PerformerId).OnDelete(DeleteBehavior.Cascade);
+        builder.ToTable("video_performers");
+        builder.HasKey(sp => new { sp.VideoId, sp.PerformerId });
+        builder.HasOne(sp => sp.Video).WithMany(s => s.VideoPerformers).HasForeignKey(sp => sp.VideoId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne(sp => sp.Performer).WithMany(p => p.VideoPerformers).HasForeignKey(sp => sp.PerformerId).OnDelete(DeleteBehavior.Cascade);
         builder.HasIndex(sp => sp.PerformerId);
     }
 }
 
-public class SceneRemoteIdConfiguration : IEntityTypeConfiguration<SceneRemoteId>
+public class VideoRemoteIdConfiguration : IEntityTypeConfiguration<VideoRemoteId>
 {
-    public void Configure(EntityTypeBuilder<SceneRemoteId> builder)
+    public void Configure(EntityTypeBuilder<VideoRemoteId> builder)
     {
-        builder.ToTable("SceneRemoteId");
+        builder.ToTable("VideoRemoteId");
         builder.HasKey(remoteId => remoteId.Id);
         builder.Property(remoteId => remoteId.Endpoint).IsRequired();
         builder.Property(remoteId => remoteId.RemoteId).IsRequired();
-        builder.HasIndex(remoteId => remoteId.SceneId);
+        builder.HasIndex(remoteId => remoteId.VideoId);
     }
 }
 
-public class SceneGalleryConfiguration : IEntityTypeConfiguration<SceneGallery>
+public class VideoGalleryConfiguration : IEntityTypeConfiguration<VideoGallery>
 {
-    public void Configure(EntityTypeBuilder<SceneGallery> builder)
+    public void Configure(EntityTypeBuilder<VideoGallery> builder)
     {
-        builder.ToTable("scene_galleries");
-        builder.HasKey(sg => new { sg.SceneId, sg.GalleryId });
-        builder.HasOne(sg => sg.Scene).WithMany(s => s.SceneGalleries).HasForeignKey(sg => sg.SceneId).OnDelete(DeleteBehavior.Cascade);
-        builder.HasOne(sg => sg.Gallery).WithMany(g => g.SceneGalleries).HasForeignKey(sg => sg.GalleryId).OnDelete(DeleteBehavior.Cascade);
+        builder.ToTable("video_galleries");
+        builder.HasKey(sg => new { sg.VideoId, sg.GalleryId });
+        builder.HasOne(sg => sg.Video).WithMany(s => s.VideoGalleries).HasForeignKey(sg => sg.VideoId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasOne(sg => sg.Gallery).WithMany(g => g.VideoGalleries).HasForeignKey(sg => sg.GalleryId).OnDelete(DeleteBehavior.Cascade);
     }
 }
 
@@ -129,14 +129,14 @@ public class GroupItemConfiguration : IEntityTypeConfiguration<GroupItem>
         builder.ToTable("group_items");
         builder.HasKey(item => item.Id);
         builder.HasOne(item => item.Group).WithMany(group => group.GroupItems).HasForeignKey(item => item.GroupId).OnDelete(DeleteBehavior.Cascade);
-        builder.Property(item => item.HostType).IsRequired().HasMaxLength(50).HasDefaultValue("scene");
-        builder.HasOne(item => item.Scene).WithMany(scene => scene.GroupItems).HasForeignKey(item => item.SceneId).OnDelete(DeleteBehavior.Cascade);
+        builder.Property(item => item.HostType).IsRequired().HasMaxLength(50).HasDefaultValue("video");
+        builder.HasOne(item => item.Video).WithMany(video => video.GroupItems).HasForeignKey(item => item.VideoId).OnDelete(DeleteBehavior.Cascade);
         builder.HasOne(item => item.Image).WithMany().HasForeignKey(item => item.ImageId).OnDelete(DeleteBehavior.Cascade);
         builder.HasOne(item => item.ChildGroup).WithMany().HasForeignKey(item => item.ChildGroupId).OnDelete(DeleteBehavior.Cascade);
 
         builder.HasIndex(item => new { item.GroupId, item.OrderIndex });
         builder.HasIndex(item => new { item.HostType, item.HostId });
-        builder.HasIndex(item => item.SceneId);
+        builder.HasIndex(item => item.VideoId);
         builder.HasIndex(item => item.ImageId);
         builder.HasIndex(item => item.ChildGroupId);
         builder.HasIndex(item => item.SourceProfileId);
@@ -328,7 +328,7 @@ public class PerformerConfiguration : IEntityTypeConfiguration<Performer>
         builder.ToTable("performers");
         builder.HasKey(p => p.Id);
         builder.Property(p => p.Name).IsRequired().HasMaxLength(500);
-        builder.Property(p => p.SceneCount).HasDefaultValue(0);
+        builder.Property(p => p.VideoCount).HasDefaultValue(0);
         builder.Property(p => p.ImageCount).HasDefaultValue(0);
         builder.Property(p => p.GalleryCount).HasDefaultValue(0);
         builder.Property(p => p.TagCount).HasDefaultValue(0);
@@ -339,7 +339,7 @@ public class PerformerConfiguration : IEntityTypeConfiguration<Performer>
 
         builder.HasIndex(p => p.Name);
         builder.HasIndex(p => p.Favorite);
-        builder.HasIndex(p => p.SceneCount);
+        builder.HasIndex(p => p.VideoCount);
         builder.HasIndex(p => p.ImageCount);
         builder.HasIndex(p => p.GalleryCount);
         builder.HasIndex(p => p.TagCount);
@@ -378,8 +378,8 @@ public class TagConfiguration : IEntityTypeConfiguration<Tag>
         builder.HasKey(t => t.Id);
         builder.Property(t => t.Name).IsRequired().HasMaxLength(500);
         builder.Property(t => t.Color).HasMaxLength(9);
-        builder.Property(t => t.SceneCount).HasDefaultValue(0);
-        builder.Property(t => t.SceneMarkerCount).HasDefaultValue(0);
+        builder.Property(t => t.VideoCount).HasDefaultValue(0);
+        builder.Property(t => t.VideoMarkerCount).HasDefaultValue(0);
         builder.Property(t => t.ImageCount).HasDefaultValue(0);
         builder.Property(t => t.GalleryCount).HasDefaultValue(0);
         builder.Property(t => t.GroupCount).HasDefaultValue(0);
@@ -394,8 +394,8 @@ public class TagConfiguration : IEntityTypeConfiguration<Tag>
     builder.HasIndex(t => t.TagGroupId);
         builder.HasIndex(t => t.Favorite);
         builder.HasIndex(t => t.Organized);
-        builder.HasIndex(t => t.SceneCount);
-        builder.HasIndex(t => t.SceneMarkerCount);
+        builder.HasIndex(t => t.VideoCount);
+        builder.HasIndex(t => t.VideoMarkerCount);
         builder.HasIndex(t => t.ImageCount);
         builder.HasIndex(t => t.GalleryCount);
         builder.HasIndex(t => t.GroupCount);
@@ -434,7 +434,7 @@ public class StudioConfiguration : IEntityTypeConfiguration<Studio>
         builder.ToTable("studios");
         builder.HasKey(s => s.Id);
         builder.Property(s => s.Name).IsRequired().HasMaxLength(500);
-        builder.Property(s => s.SceneCount).HasDefaultValue(0);
+        builder.Property(s => s.VideoCount).HasDefaultValue(0);
         builder.Property(s => s.ImageCount).HasDefaultValue(0);
         builder.Property(s => s.GalleryCount).HasDefaultValue(0);
         builder.Property(s => s.GroupCount).HasDefaultValue(0);
@@ -451,7 +451,7 @@ public class StudioConfiguration : IEntityTypeConfiguration<Studio>
         builder.HasIndex(s => s.ParentId);
         builder.HasIndex(s => s.Favorite);
         builder.HasIndex(s => s.Organized);
-        builder.HasIndex(s => s.SceneCount);
+        builder.HasIndex(s => s.VideoCount);
         builder.HasIndex(s => s.ImageCount);
         builder.HasIndex(s => s.GalleryCount);
         builder.HasIndex(s => s.GroupCount);
@@ -491,7 +491,7 @@ public class GalleryConfiguration : IEntityTypeConfiguration<Gallery>
         builder.ToTable("galleries");
         builder.HasKey(g => g.Id);
         builder.Property(g => g.ImageCount).HasDefaultValue(0);
-        builder.Property(g => g.SceneCount).HasDefaultValue(0);
+        builder.Property(g => g.VideoCount).HasDefaultValue(0);
         builder.Property(g => g.PerformerCount).HasDefaultValue(0);
         builder.Property(g => g.TagCount).HasDefaultValue(0);
 
@@ -508,7 +508,7 @@ public class GalleryConfiguration : IEntityTypeConfiguration<Gallery>
         builder.HasIndex(g => g.CreatedAt);
         builder.HasIndex(g => g.UpdatedAt);
         builder.HasIndex(g => g.ImageCount);
-        builder.HasIndex(g => g.SceneCount);
+        builder.HasIndex(g => g.VideoCount);
         builder.HasIndex(g => g.PerformerCount);
         builder.HasIndex(g => g.TagCount);
 
@@ -666,25 +666,25 @@ public class GroupRelationConfiguration : IEntityTypeConfiguration<GroupRelation
     }
 }
 
-public class SceneMarkerConfiguration : IEntityTypeConfiguration<SceneMarker>
+public class VideoMarkerConfiguration : IEntityTypeConfiguration<VideoMarker>
 {
-    public void Configure(EntityTypeBuilder<SceneMarker> builder)
+    public void Configure(EntityTypeBuilder<VideoMarker> builder)
     {
-        builder.ToTable("scene_markers");
+        builder.ToTable("video_markers");
         builder.HasKey(m => m.Id);
         builder.HasOne(m => m.PrimaryTag).WithMany().HasForeignKey(m => m.PrimaryTagId).OnDelete(DeleteBehavior.Cascade);
-        builder.HasOne(m => m.Scene).WithMany(s => s.SceneMarkers).HasForeignKey(m => m.SceneId).OnDelete(DeleteBehavior.Cascade);
-        builder.HasIndex(m => m.SceneId);
+        builder.HasOne(m => m.Video).WithMany(s => s.VideoMarkers).HasForeignKey(m => m.VideoId).OnDelete(DeleteBehavior.Cascade);
+        builder.HasIndex(m => m.VideoId);
     }
 }
 
-public class SceneMarkerTagConfiguration : IEntityTypeConfiguration<SceneMarkerTag>
+public class VideoMarkerTagConfiguration : IEntityTypeConfiguration<VideoMarkerTag>
 {
-    public void Configure(EntityTypeBuilder<SceneMarkerTag> builder)
+    public void Configure(EntityTypeBuilder<VideoMarkerTag> builder)
     {
-        builder.ToTable("scene_marker_tags");
-        builder.HasKey(smt => new { smt.SceneMarkerId, smt.TagId });
-        builder.HasOne(smt => smt.SceneMarker).WithMany(m => m.SceneMarkerTags).HasForeignKey(smt => smt.SceneMarkerId).OnDelete(DeleteBehavior.Cascade);
+        builder.ToTable("video_marker_tags");
+        builder.HasKey(smt => new { smt.VideoMarkerId, smt.TagId });
+        builder.HasOne(smt => smt.VideoMarker).WithMany(m => m.VideoMarkerTags).HasForeignKey(smt => smt.VideoMarkerId).OnDelete(DeleteBehavior.Cascade);
         builder.HasOne(smt => smt.Tag).WithMany().HasForeignKey(smt => smt.TagId).OnDelete(DeleteBehavior.Cascade);
     }
 }
@@ -807,7 +807,7 @@ public class FaceConfiguration : IEntityTypeConfiguration<Face>
         builder.Property(face => face.DetectionCount).HasDefaultValue(0);
         builder.Property(face => face.AppearanceCount).HasDefaultValue(0);
         builder.Property(face => face.FrameSampleCount).HasDefaultValue(0);
-        builder.Property(face => face.SceneCount).HasDefaultValue(0);
+        builder.Property(face => face.VideoCount).HasDefaultValue(0);
         builder.Property(face => face.ImageCount).HasDefaultValue(0);
 
         builder.HasOne(face => face.Performer)
@@ -1087,9 +1087,9 @@ public class VideoFileConfiguration : IEntityTypeConfiguration<VideoFile>
 {
     public void Configure(EntityTypeBuilder<VideoFile> builder)
     {
-        // Composite (SceneId, Path) lets MIN(Path) WHERE SceneId = ? be answered
-        // by an Index Only Scan, which is what the scene-list "path" sort relies on.
-        builder.HasIndex(v => new { v.SceneId, v.Path });
+        // Composite (VideoId, Path) lets MIN(Path) WHERE VideoId = ? be answered
+        // by an Index Only Scan, which is what the video-list "path" sort relies on.
+        builder.HasIndex(v => new { v.VideoId, v.Path });
     }
 }
 
@@ -1137,6 +1137,7 @@ public class ExtensionDataConfiguration : IEntityTypeConfiguration<ExtensionData
         builder.HasIndex(e => e.ExtensionId);
     }
 }
+
 
 
 

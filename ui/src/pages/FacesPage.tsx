@@ -34,7 +34,7 @@ const FACE_SORT_OPTIONS = [
   { value: "updated_desc", label: "Recently updated" },
   { value: "created_desc", label: "Recently created" },
   { value: "appearance_desc", label: "Most appearances" },
-  { value: "scene_count_desc", label: "Most scenes" },
+  { value: "video_count_desc", label: "Most videos" },
   { value: "image_count_desc", label: "Most images" },
   { value: "label_asc", label: "Label A-Z" },
   { value: "label_desc", label: "Label Z-A" },
@@ -46,7 +46,7 @@ const FACE_SORT_OPTIONS = [
   { value: "appearance_count_asc", label: "Fewest appearances" },
   { value: "frame_sample_count_desc", label: "Most frame samples" },
   { value: "frame_sample_count_asc", label: "Fewest frame samples" },
-  { value: "scene_count_asc", label: "Fewest scenes" },
+  { value: "video_count_asc", label: "Fewest videos" },
   { value: "image_count_asc", label: "Fewest images" },
   { value: "primary_source_key_asc", label: "Source A-Z" },
   { value: "primary_source_key_desc", label: "Source Z-A" },
@@ -67,7 +67,7 @@ const FACE_CRITERIA: CriterionDefinition[] = [
   { id: "detectionCount", label: "Detection Count", type: "number", filterKey: "detectionCountCriterion" },
   { id: "appearanceCount", label: "Appearance Count", type: "number", filterKey: "appearanceCountCriterion" },
   { id: "frameSampleCount", label: "Frame Sample Count", type: "number", filterKey: "frameSampleCountCriterion" },
-  { id: "sceneCount", label: "Scene Count", type: "number", filterKey: "sceneCountCriterion" },
+  { id: "videoCount", label: "Video Count", type: "number", filterKey: "videoCountCriterion" },
   { id: "imageCount", label: "Image Count", type: "number", filterKey: "imageCountCriterion" },
   { id: "mergedIntoFaceId", label: "Merged Into Face ID", type: "number", filterKey: "mergedIntoFaceIdCriterion" },
   { id: "suggestionConfidence", label: "Suggestion Confidence", type: "number", filterKey: "suggestionConfidenceCriterion" },
@@ -220,7 +220,7 @@ function sanitizeFaceFilters(filter: Record<string, unknown>) {
   const detectionCountCriterion = readCountCriterion(filter.detectionCountCriterion);
   const appearanceCountCriterion = readCountCriterion(filter.appearanceCountCriterion);
   const frameSampleCountCriterion = readCountCriterion(filter.frameSampleCountCriterion);
-  const sceneCountCriterion = readCountCriterion(filter.sceneCountCriterion);
+  const videoCountCriterion = readCountCriterion(filter.videoCountCriterion);
   const imageCountCriterion = readCountCriterion(filter.imageCountCriterion);
   const mergedIntoFaceIdCriterion = readCountCriterion(filter.mergedIntoFaceIdCriterion);
   const customFieldCriteria = readCustomFieldCriteria(filter.customFieldCriteria);
@@ -251,7 +251,7 @@ function sanitizeFaceFilters(filter: Record<string, unknown>) {
   if (detectionCountCriterion) next.detectionCountCriterion = detectionCountCriterion;
   if (appearanceCountCriterion) next.appearanceCountCriterion = appearanceCountCriterion;
   if (frameSampleCountCriterion) next.frameSampleCountCriterion = frameSampleCountCriterion;
-  if (sceneCountCriterion) next.sceneCountCriterion = sceneCountCriterion;
+  if (videoCountCriterion) next.videoCountCriterion = videoCountCriterion;
   if (imageCountCriterion) next.imageCountCriterion = imageCountCriterion;
   if (mergedIntoFaceIdCriterion) next.mergedIntoFaceIdCriterion = mergedIntoFaceIdCriterion;
   if (customFieldCriteria.length > 0) next.customFieldCriteria = customFieldCriteria;
@@ -324,7 +324,7 @@ export function FacesPage({ onNavigate }: Props) {
   const detectionCountCriterion = readCountCriterion(objectFilter.detectionCountCriterion);
   const appearanceCountCriterion = readCountCriterion(objectFilter.appearanceCountCriterion);
   const frameSampleCountCriterion = readCountCriterion(objectFilter.frameSampleCountCriterion);
-  const sceneCountCriterion = readCountCriterion(objectFilter.sceneCountCriterion);
+  const videoCountCriterion = readCountCriterion(objectFilter.videoCountCriterion);
   const imageCountCriterion = readCountCriterion(objectFilter.imageCountCriterion);
   const mergedIntoFaceIdCriterion = readCountCriterion(objectFilter.mergedIntoFaceIdCriterion);
   const linkedPerformerIds = useMemo(() => readMultiIdIncludes(objectFilter.performersCriterion), [objectFilter.performersCriterion]);
@@ -398,9 +398,9 @@ export function FacesPage({ onNavigate }: Props) {
     frameSampleCount: frameSampleCountCriterion?.value,
     frameSampleCount2: frameSampleCountCriterion?.value2,
     frameSampleCountModifier: frameSampleCountCriterion?.modifier,
-    sceneCount: sceneCountCriterion?.value,
-    sceneCount2: sceneCountCriterion?.value2,
-    sceneCountModifier: sceneCountCriterion?.modifier,
+    videoCount: videoCountCriterion?.value,
+    videoCount2: videoCountCriterion?.value2,
+    videoCountModifier: videoCountCriterion?.modifier,
     imageCount: imageCountCriterion?.value,
     imageCount2: imageCountCriterion?.value2,
     imageCountModifier: imageCountCriterion?.modifier,
@@ -415,7 +415,7 @@ export function FacesPage({ onNavigate }: Props) {
     customFieldCriteria,
     page: filter.page ?? 1,
     perPage: filter.perPage ?? 36,
-  }), [appearanceCountCriterion?.modifier, appearanceCountCriterion?.value, appearanceCountCriterion?.value2, customFieldCriteria, detectionCountCriterion?.modifier, detectionCountCriterion?.value, detectionCountCriterion?.value2, filter.direction, filter.page, filter.perPage, filter.q, frameSampleCountCriterion?.modifier, frameSampleCountCriterion?.value, frameSampleCountCriterion?.value2, hasCoverCriterion?.value, ignored, imageCountCriterion?.modifier, imageCountCriterion?.value, imageCountCriterion?.value2, labelCriterion?.modifier, labelCriterion?.value, linked, linkedPerformerIds, merged, mergedIntoFaceIdCriterion?.value, minSuggestionConfidence, primarySourceKeyCriterion?.modifier, primarySourceKeyCriterion?.value, sceneCountCriterion?.modifier, sceneCountCriterion?.value, sceneCountCriterion?.value2, sort, suggestionConfidenceCriterion?.modifier, suggestionConfidenceCriterion?.value, suggestionConfidenceCriterion?.value2, topSuggestionPerformerIds]);
+  }), [appearanceCountCriterion?.modifier, appearanceCountCriterion?.value, appearanceCountCriterion?.value2, customFieldCriteria, detectionCountCriterion?.modifier, detectionCountCriterion?.value, detectionCountCriterion?.value2, filter.direction, filter.page, filter.perPage, filter.q, frameSampleCountCriterion?.modifier, frameSampleCountCriterion?.value, frameSampleCountCriterion?.value2, hasCoverCriterion?.value, ignored, imageCountCriterion?.modifier, imageCountCriterion?.value, imageCountCriterion?.value2, labelCriterion?.modifier, labelCriterion?.value, linked, linkedPerformerIds, merged, mergedIntoFaceIdCriterion?.value, minSuggestionConfidence, primarySourceKeyCriterion?.modifier, primarySourceKeyCriterion?.value, videoCountCriterion?.modifier, videoCountCriterion?.value, videoCountCriterion?.value2, sort, suggestionConfidenceCriterion?.modifier, suggestionConfidenceCriterion?.value, suggestionConfidenceCriterion?.value2, topSuggestionPerformerIds]);
   const batchMinConfidence = readSuggestionConfidenceLowerBound(objectFilter.suggestionConfidenceCriterion) ?? minSuggestionConfidence ?? 60;
 
   const listData = useInfiniteListData<Face>({
@@ -707,7 +707,7 @@ function FaceListTable({
       <div className="hidden grid-cols-[minmax(0,1.1fr)_110px_130px_minmax(0,1fr)_120px] gap-3 border-b border-border bg-surface/70 px-4 py-2 text-[11px] font-medium uppercase tracking-wide text-muted lg:grid">
         <span>Face</span>
         <span>Detections</span>
-        <span>Scenes / Images</span>
+        <span>Videos / Images</span>
         <span>Top suggestion</span>
         <span>Updated</span>
       </div>
@@ -821,7 +821,7 @@ function FaceListRow({
           </div>
         </div>
         <div className="hidden text-xs text-secondary lg:block">{face.detectionCount}</div>
-        <div className="hidden text-xs text-secondary lg:block">{face.sceneCount} / {face.imageCount}</div>
+        <div className="hidden text-xs text-secondary lg:block">{face.videoCount} / {face.imageCount}</div>
         <div className="hidden lg:block">
           {face.performerId ? (
             <LinkedPerformerSummary face={face} onNavigate={onNavigate} canReadPerformers={canReadPerformers} compact />
@@ -843,7 +843,7 @@ function FaceListRow({
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-3 pl-8 text-[11px] text-secondary lg:hidden">
         <span>{face.detectionCount} detections</span>
-        <span>{face.sceneCount} scenes</span>
+        <span>{face.videoCount} videos</span>
         <span>{face.imageCount} images</span>
         {face.topSuggestion ? <span>Top match: {face.topSuggestion.performerName}</span> : null}
       </div>
@@ -997,3 +997,4 @@ function formatPercent(value: number) {
   const scaled = value <= 1 ? value * 100 : value;
   return Math.max(0, Math.min(100, Math.round(scaled)));
 }
+

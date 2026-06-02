@@ -1,6 +1,6 @@
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { audios, faces, galleries, groups, images, metadata, performers, scenes, texts, entityImages } from "../api/client";
-import type { Audio, AudioFilterCriteria, Face, FaceSimilar, FieldProvenance, FindFilter, Gallery, GalleryFilterCriteria, Group, GroupFilterCriteria, Image, ImageFilterCriteria, Performer as PerformerModel, PerformerFilterCriteria, Scene, SceneFilterCriteria, MetadataServer, MetadataServerPerformerMatch, TextDocument, TextFilterCriteria } from "../api/types";
+import { audios, faces, galleries, groups, images, metadata, performers, videos, texts, entityImages } from "../api/client";
+import type { Audio, AudioFilterCriteria, Face, FaceSimilar, FieldProvenance, FindFilter, Gallery, GalleryFilterCriteria, Group, GroupFilterCriteria, Image, ImageFilterCriteria, Performer as PerformerModel, PerformerFilterCriteria, Video, VideoFilterCriteria, MetadataServer, MetadataServerPerformerMatch, TextDocument, TextFilterCriteria } from "../api/types";
 import { formatDate, formatDuration, getResolutionLabel, TagBadge, CustomFieldsDisplay, FieldProvenanceHover, resolveTagProvenance } from "../components/shared";
 import { Calendar, ChevronDown, CloudDownload, ExternalLink, FileText, Film, FolderOpen, GitMerge, Headphones, Heart, ImageIcon, Layers, Loader2, MapPin, MoreHorizontal, MoreVertical, Music, Pencil, Ruler, Scale, Search, Sparkles, Trash2, Users, UserRound, Wand2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -21,8 +21,8 @@ import { EntityHeroLayout, HERO_ACTION_BUTTON_CLASS, HERO_PRIMARY_ACTION_BUTTON_
 import { CoverImageDialog } from "../components/CoverImageDialog";
 import { FloatingActionMenu } from "../components/FloatingActionMenu";
 import { RelatedEntityListView, useRelatedEntityDisplayMode } from "../components/RelatedEntityListView";
-import { SCENE_SORT_OPTIONS } from "../components/sceneSortOptions";
-import { AUDIO_CRITERIA, GALLERY_CRITERIA, GROUP_CRITERIA, IMAGE_CRITERIA, SCENE_CRITERIA, TEXT_CRITERIA } from "../components/FilterDialog";
+import { VIDEO_SORT_OPTIONS } from "../components/videoSortOptions";
+import { AUDIO_CRITERIA, GALLERY_CRITERIA, GROUP_CRITERIA, IMAGE_CRITERIA, VIDEO_CRITERIA, TEXT_CRITERIA } from "../components/FilterDialog";
 import { useBackNavigation } from "../hooks/useBackNavigation";
 import { GALLERY_SORT_OPTIONS } from "../components/gallerySortOptions";
 import { PerformerMetadataTaggerDialog } from "../components/MetadataTaggerDialog";
@@ -39,7 +39,7 @@ interface Props {
   onNavigate: (r: any) => void;
 }
 
-type TabKey = "scenes" | "galleries" | "images" | "audios" | "texts" | "groups" | "appearsWith" | "similar" | (string & {});
+type TabKey = "videos" | "galleries" | "images" | "audios" | "texts" | "groups" | "appearsWith" | "similar" | (string & {});
 
 const IMAGE_SORT = [
   { value: "updated_at", label: "Updated At" },
@@ -83,8 +83,8 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [mergeOpen, setMergeOpen] = useState(false);
   const [scrapeOpen, setScrapeOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabKey>("scenes");
-  const [sceneFilter, setSceneFilter] = useState<FindFilter>({ page: 1, perPage: 24, direction: "desc" });
+  const [activeTab, setActiveTab] = useState<TabKey>("videos");
+  const [videoFilter, setVideoFilter] = useState<FindFilter>({ page: 1, perPage: 24, direction: "desc" });
   const [galleryFilter, setGalleryFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "desc" });
   const [imageFilter, setImageFilter] = useState<FindFilter>({ page: 1, perPage: 30, direction: "desc" });
   const [audioFilter, setAudioFilter] = useState<FindFilter>({ page: 1, perPage: 18, direction: "desc" });
@@ -95,7 +95,7 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
   const [urlsOverflowing, setUrlsOverflowing] = useState(false);
   const urlsRef = useRef<HTMLDivElement>(null);
   const { allTabs: performerTabs, renderExtensionTab, extensionCounts } = useExtensionTabs("performer", [
-    { key: "scenes", label: "Scenes", count: performer?.sceneCount },
+    { key: "videos", label: "Videos", count: performer?.videoCount },
     { key: "galleries", label: "Galleries", count: performer?.galleryCount },
     { key: "images", label: "Images", count: performer?.imageCount },
     { key: "audios", label: "Audios", count: performer?.audioCount },
@@ -113,7 +113,7 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
   const canEngagePerformer = canReadEntity("performer", hasPermission) && (user?.kind === "user" || user?.kind === "system");
   const canDeletePerformer = canDeleteEntity("performer", hasPermission);
   const canReadFaces = canReadEntity("face", hasPermission);
-  const canReadPerformerScenes = canReadEntity("scene", hasPermission);
+  const canReadPerformerVideos = canReadEntity("video", hasPermission);
   const canReadPerformerGalleries = canReadEntity("gallery", hasPermission);
   const canReadPerformerImages = canReadEntity("image", hasPermission);
   const canReadPerformerAudios = canReadEntity("audio", hasPermission);
@@ -124,7 +124,7 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
   const canScrapePerformer = hasAnyPermission(hasPermission, ["performers.scrape", "performers.write"]);
   const showPerformerOpsMenu = canWritePerformer || canAutoTagPerformer || canScrapePerformer || canDeletePerformer;
   const visiblePerformerTabs = filterItemsByPermission(performerTabs, {
-    scenes: "scenes.read",
+    videos: "videos.read",
     galleries: "galleries.read",
     images: "images.read",
     audios: "audios.read",
@@ -169,13 +169,13 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
       switch (e.key) {
         case "e": if (canWritePerformer) setEditing((v) => !v); break;
         case "f": if (performer && canEngagePerformer) setPerformerFavorite(!performerFavorite); break;
-        case "c": if (canReadPerformerScenes) setActiveTab("scenes"); break;
+        case "c": if (canReadPerformerVideos) setActiveTab("videos"); break;
         case "g": if (canReadPerformerGalleries) setActiveTab("galleries"); break;
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [canEngagePerformer, canReadPerformerGalleries, canReadPerformerScenes, canWritePerformer, performer, performerFavorite, setPerformerFavorite]);
+  }, [canEngagePerformer, canReadPerformerGalleries, canReadPerformerVideos, canWritePerformer, performer, performerFavorite, setPerformerFavorite]);
 
   useEffect(() => {
     if (!showOpsMenu) return;
@@ -264,7 +264,7 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
         favorite={performerFavorite}
         onFavoriteToggle={canEngagePerformer ? () => setPerformerFavorite(!performerFavorite) : undefined}
         counts={[
-          { key: "scenes", label: "Scenes", value: performer.sceneCount, icon: <Film className="h-4 w-4" /> },
+          { key: "videos", label: "Videos", value: performer.videoCount, icon: <Film className="h-4 w-4" /> },
           { key: "galleries", label: "Galleries", value: performer.galleryCount, icon: <FolderOpen className="h-4 w-4" /> },
           { key: "images", label: "Images", value: performer.imageCount, icon: <ImageIcon className="h-4 w-4" /> },
           { key: "audios", label: "Audios", value: performer.audioCount, icon: <Headphones className="h-4 w-4" /> },
@@ -379,8 +379,8 @@ export function PerformerDetailPage({ id, onNavigate }: Props) {
         <EntityDetailTabs tabs={visiblePerformerTabs} activeTab={activeTab} onTabChange={(key) => setActiveTab(key as TabKey)} className="mx-auto max-w-7xl mt-0" />
 
         <div className="py-6">
-          {activeTab === "scenes" && (
-            <PerformerScenesPanel performerId={id} filter={sceneFilter} setFilter={setSceneFilter} onNavigate={onNavigate} />
+          {activeTab === "videos" && (
+            <PerformerVideosPanel performerId={id} filter={videoFilter} setFilter={setVideoFilter} onNavigate={onNavigate} />
           )}
           {activeTab === "galleries" && (
             <PerformerGalleriesPanel performerId={id} filter={galleryFilter} setFilter={setGalleryFilter} onNavigate={onNavigate} />
@@ -470,7 +470,7 @@ function PerformerAttributeSimilarityPanel({ performer, onNavigate }: { performe
     queries: attributeQueries.map((query) => ({
       queryKey: ["performer", performer.id, "similar-attribute", query.key, query.value],
       queryFn: () => performers.findFiltered({
-        findFilter: { page: 1, perPage: 18, sort: "latest_scene_date", direction: "desc" },
+        findFilter: { page: 1, perPage: 18, sort: "latest_video_date", direction: "desc" },
         objectFilter: query.objectFilter,
       }),
       enabled: attributeQueries.length > 0,
@@ -504,7 +504,7 @@ function PerformerAttributeSimilarityPanel({ performer, onNavigate }: { performe
 
     return Array.from(byPerformer.values())
       .map(({ reasonSet: _reasonSet, ...match }) => match)
-      .sort((left, right) => right.reasons.length - left.reasons.length || right.performer.sceneCount - left.performer.sceneCount || left.performer.name.localeCompare(right.performer.name))
+      .sort((left, right) => right.reasons.length - left.reasons.length || right.performer.videoCount - left.performer.videoCount || left.performer.name.localeCompare(right.performer.name))
       .slice(0, 12);
   }, [attributeQueries, performer.id, queryResults]);
 
@@ -968,27 +968,27 @@ function InfoItem({ icon, label, value, fieldProvenance, fieldKey }: { icon?: Re
   );
 }
 
-function PerformerScenesPanel({ performerId, filter, setFilter, onNavigate }: {
+function PerformerVideosPanel({ performerId, filter, setFilter, onNavigate }: {
   performerId: number;
   filter: FindFilter;
   setFilter: (filter: FindFilter) => void;
   onNavigate: (r: any) => void;
 }) {
   const [zoomLevel, setZoomLevel] = useState(0);
-  const { displayMode, setDisplayMode, availableDisplayModes } = useRelatedEntityDisplayMode("scenes");
+  const { displayMode, setDisplayMode, availableDisplayModes } = useRelatedEntityDisplayMode("videos");
   const [quickViewId, setQuickViewId] = useState<number | null>(null);
   const [objectFilter, setObjectFilter] = useState<Record<string, unknown>>({});
   const [selectAllMatchingPending, setSelectAllMatchingPending] = useState(false);
   const hasObjectFilter = Object.keys(objectFilter).length > 0;
-  const { data, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<Scene>({
-    queryKey: ["performer-scenes", performerId, objectFilter],
+  const { data, isLoading, infinitePageSize, infiniteQuery, infiniteFilterKey, fetchAllIds, loadMore } = useDetailListQuery<Video>({
+    queryKey: ["performer-videos", performerId, objectFilter],
     filter,
     queryFn: (nextFilter) => hasObjectFilter
-      ? scenes.findFiltered({
+      ? videos.findFiltered({
           findFilter: nextFilter,
-          objectFilter: withRequiredMultiId(objectFilter as SceneFilterCriteria, "performersCriterion", performerId),
+          objectFilter: withRequiredMultiId(objectFilter as VideoFilterCriteria, "performersCriterion", performerId),
         })
-      : scenes.find(nextFilter, { performerIds: String(performerId) }),
+      : videos.find(nextFilter, { performerIds: String(performerId) }),
   });
   const selectionResetKey = useMemo(() => JSON.stringify({ filter: infiniteFilterKey, objectFilter }), [infiniteFilterKey, objectFilter]);
   const { selectedIds, toggle, selectAll, selectIds, selectNone } = useMultiSelect(data?.items ?? [], { preserveOnAppend: infinitePageSize, resetKey: selectionResetKey });
@@ -1003,18 +1003,18 @@ function PerformerScenesPanel({ performerId, filter, setFilter, onNavigate }: {
     }
   };
   const toolbar = (
-    <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={SCENE_SORT_OPTIONS} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={infinitePageSize ? handleSelectAllMatching : selectAll} selectAllPending={infinitePageSize ? selectAllMatchingPending : false} onSelectAllMatching={infinitePageSize ? selectAll : undefined} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="scenes" selectedIds={selectedIds} onDone={selectNone} sceneItems={items} onNavigate={onNavigate} removeFromParent={{ type: "performer", id: performerId }} />} criteriaDefinitions={SCENE_CRITERIA} objectFilter={objectFilter} onObjectFilterChange={setObjectFilter} allowInfinitePageSize displayMode={displayMode} onDisplayModeChange={setDisplayMode} availableDisplayModes={availableDisplayModes} />
+    <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={VIDEO_SORT_OPTIONS} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={infinitePageSize ? handleSelectAllMatching : selectAll} selectAllPending={infinitePageSize ? selectAllMatchingPending : false} onSelectAllMatching={infinitePageSize ? selectAll : undefined} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="videos" selectedIds={selectedIds} onDone={selectNone} videoItems={items} onNavigate={onNavigate} removeFromParent={{ type: "performer", id: performerId }} />} criteriaDefinitions={VIDEO_CRITERIA} objectFilter={objectFilter} onObjectFilterChange={setObjectFilter} allowInfinitePageSize displayMode={displayMode} onDisplayModeChange={setDisplayMode} availableDisplayModes={availableDisplayModes} />
   );
 
-  if (isLoading) return <LoadingPanel icon={<Film className="h-10 w-10" />} message="Loading scenes..." />;
-  if (!data || items.length === 0) return <>{toolbar}<EmptyPanel icon={<Film className="h-12 w-12" />} message="No scenes found for this performer" /></>;
+  if (isLoading) return <LoadingPanel icon={<Film className="h-10 w-10" />} message="Loading videos..." />;
+  if (!data || items.length === 0) return <>{toolbar}<EmptyPanel icon={<Film className="h-12 w-12" />} message="No videos found for this performer" /></>;
 
   return (
     <>
       {toolbar}
-      <RelatedEntityListView entityType="scenes" items={items} displayMode={displayMode} zoomLevel={zoomLevel} selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} onSceneQuickView={setQuickViewId} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} />
+      <RelatedEntityListView entityType="videos" items={items} displayMode={displayMode} zoomLevel={zoomLevel} selectedIds={selectedIds} selecting={selecting} onToggle={toggle} onNavigate={onNavigate} onVideoQuickView={setQuickViewId} infinitePageSize={infinitePageSize} hasNextPage={infiniteQuery.hasNextPage} isFetchingNextPage={infiniteQuery.isFetchingNextPage} loadMore={loadMore} />
       {quickViewId !== null && (
-        <QuickViewDialog type="scene" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
+        <QuickViewDialog type="video" id={quickViewId} onClose={() => setQuickViewId(null)} onNavigate={onNavigate} />
       )}
     </>
   );
@@ -1274,7 +1274,7 @@ function PerformerAppearsWithPanel({ performerId, filter, setFilter, onNavigate 
   const items = data?.items ?? [];
   const { selectedIds, toggle, selectAll, selectAllPending, selectShown, selectNone } = useDetailListSelection({ items, infinitePageSize, infiniteFilterKey, fetchAllIds });
   const selecting = selectedIds.size > 0;
-  const toolbar = <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={[{ value: "co_scene_count", label: "Shared Scenes" }, { value: "name", label: "Name" }]} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} selectAllPending={selectAllPending} onSelectAllMatching={selectShown} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="performers" selectedIds={selectedIds} onDone={selectNone} />} allowInfinitePageSize displayMode={displayMode} onDisplayModeChange={setDisplayMode} availableDisplayModes={availableDisplayModes} />;
+  const toolbar = <DetailListToolbar filter={filter} onFilterChange={setFilter} totalCount={data?.totalCount ?? 0} sortOptions={[{ value: "co_video_count", label: "Shared Videos" }, { value: "name", label: "Name" }]} zoomLevel={zoomLevel} onZoomChange={setZoomLevel} showSearch selectedCount={selectedIds.size} onSelectAll={selectAll} selectAllPending={selectAllPending} onSelectAllMatching={selectShown} selectAllMatchingLabel="Select shown" onSelectNone={selectNone} selectionActions={<BulkSelectionActions entityType="performers" selectedIds={selectedIds} onDone={selectNone} />} allowInfinitePageSize displayMode={displayMode} onDisplayModeChange={setDisplayMode} availableDisplayModes={availableDisplayModes} />;
 
   if (isLoading) return <LoadingPanel icon={<Users className="h-10 w-10" />} message="Loading co-stars..." />;
   if (!data || items.length === 0) return <>{toolbar}<EmptyPanel icon={<Users className="h-12 w-12" />} message="No co-stars found" /></>;
@@ -1304,3 +1304,4 @@ function EmptyPanel({ icon, message }: { icon: React.ReactNode; message: string 
     </div>
   );
 }
+

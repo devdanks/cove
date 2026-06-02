@@ -138,15 +138,15 @@ function normalizeUiPreferences(preferences: UserUiPreferences | null | undefine
     ? (preferences as Record<string, unknown>)[legacyTrackingEnabledKey]
     : undefined;
   const tracking = normalizeTrackingPreferences(preferences?.tracking, legacyTrackingEnabled);
-  const includeCompilationGroups = preferences?.scenes?.includeCompilationGroups;
-  const scenes = typeof includeCompilationGroups === "boolean"
+  const includeCompilationGroups = preferences?.videos?.includeCompilationGroups;
+  const videos = typeof includeCompilationGroups === "boolean"
     ? {
         ...(typeof includeCompilationGroups === "boolean" ? { includeCompilationGroups } : {}),
       }
     : null;
   const playback = normalizePlaybackPreferences(preferences?.playback);
   const keybindingOverrides = normalizeKeybindingOverrides(preferences?.keybindingOverrides);
-  if (!theme && !ratingSystemOptions && !tracking && !scenes && !playback && !keybindingOverrides) {
+  if (!theme && !ratingSystemOptions && !tracking && !videos && !playback && !keybindingOverrides) {
     return null;
   }
 
@@ -154,7 +154,7 @@ function normalizeUiPreferences(preferences: UserUiPreferences | null | undefine
     theme,
     ratingSystemOptions,
     tracking,
-    scenes,
+    videos,
     playback,
     keybindingOverrides,
   };

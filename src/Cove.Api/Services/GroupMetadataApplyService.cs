@@ -85,7 +85,7 @@ public sealed class GroupMetadataApplyService(
             fieldProvenance["synopsis"] = group.Synopsis;
         }
 
-        if (ShouldApply(fieldSet, "date") && ScrapedSceneDateParser.TryParse(metadata.Date, out var parsedDate))
+        if (ShouldApply(fieldSet, "date") && ScrapedVideoDateParser.TryParse(metadata.Date, out var parsedDate))
         {
             group.Date = parsedDate;
             fieldProvenance["date"] = group.Date.Value.ToString("yyyy-MM-dd");

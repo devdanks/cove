@@ -58,12 +58,12 @@ public class JobsController(IJobService jobService, IScanService scanService, IT
         return Accepted(new { jobId });
     }
 
-    [HttpPost("generate-scene-phashes")]
+    [HttpPost("generate-video-phashes")]
     [RequiresPermission(Permissions.LibraryScan)]
-    public ActionResult<object> GenerateScenePhashes()
+    public ActionResult<object> GenerateVideoPhashes()
     {
-        Console.WriteLine("[JobsController] Received request to generate scene phashes");
-        var jobId = fingerprintService.StartGenerateScenePhashes();
+        Console.WriteLine("[JobsController] Received request to generate video phashes");
+        var jobId = fingerprintService.StartGenerateVideoPhashes();
         return Accepted(new { jobId });
     }
 
@@ -119,3 +119,4 @@ public class ReorderJobRequest
 {
     public string? BeforeJobId { get; set; }
 }
+

@@ -4,14 +4,14 @@ import {
   GROUP_CRITERIA,
   IMAGE_CRITERIA,
   PERFORMER_CRITERIA,
-  SCENE_CRITERIA,
+  VIDEO_CRITERIA,
   STUDIO_CRITERIA,
   TAG_CRITERIA,
   type CriterionDefinition,
 } from "../components/FilterDialog";
 
 const criteriaSets = [
-  ["scene", SCENE_CRITERIA],
+  ["video", VIDEO_CRITERIA],
   ["performer", PERFORMER_CRITERIA],
   ["tag", TAG_CRITERIA],
   ["studio", STUDIO_CRITERIA],
@@ -48,22 +48,22 @@ describe("filter criteria definitions", () => {
     expectUnique(criteria, "filterKey", entityName);
   });
 
-  it("keeps scene filter labels and modifiers aligned with the supported UI", () => {
-    const sceneCriteriaById = new Map(SCENE_CRITERIA.map((criterion) => [criterion.id, criterion]));
+  it("keeps video filter labels and modifiers aligned with the supported UI", () => {
+    const videoCriteriaById = new Map(VIDEO_CRITERIA.map((criterion) => [criterion.id, criterion]));
 
-    expect(sceneCriteriaById.get("code")?.label).toBe("Studio Code");
-    expect(sceneCriteriaById.get("hash")?.filterKey).toBe("fingerprintCriterion");
-    expect(sceneCriteriaById.get("hash")?.options?.map((option) => option.value)).toEqual(["oshash", "md5", "phash"]);
-    expect(sceneCriteriaById.get("likeCounter")?.label).toBe("Likes");
-    expect(sceneCriteriaById.has("isMissing")).toBe(false);
-    expect(sceneCriteriaById.has("interactive")).toBe(false);
-    expect(sceneCriteriaById.has("interactiveSpeed")).toBe(false);
-    expect(sceneCriteriaById.has("checksum")).toBe(false);
-    expect(sceneCriteriaById.has("hasMarkers")).toBe(false);
-    expect(sceneCriteriaById.get("playCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
-    expect(sceneCriteriaById.get("fileCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
-    expect(sceneCriteriaById.get("frameRate")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
-    expect(sceneCriteriaById.get("orientation")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS"]);
+    expect(videoCriteriaById.get("code")?.label).toBe("Studio Code");
+    expect(videoCriteriaById.get("hash")?.filterKey).toBe("fingerprintCriterion");
+    expect(videoCriteriaById.get("hash")?.options?.map((option) => option.value)).toEqual(["oshash", "md5", "phash"]);
+    expect(videoCriteriaById.get("likeCounter")?.label).toBe("Likes");
+    expect(videoCriteriaById.has("isMissing")).toBe(false);
+    expect(videoCriteriaById.has("interactive")).toBe(false);
+    expect(videoCriteriaById.has("interactiveSpeed")).toBe(false);
+    expect(videoCriteriaById.has("checksum")).toBe(false);
+    expect(videoCriteriaById.has("hasMarkers")).toBe(false);
+    expect(videoCriteriaById.get("playCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
+    expect(videoCriteriaById.get("fileCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
+    expect(videoCriteriaById.get("frameRate")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
+    expect(videoCriteriaById.get("orientation")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS"]);
   });
 
   it("does not expose unsupported performer path filtering", () => {
@@ -76,7 +76,7 @@ describe("filter criteria definitions", () => {
     expect(performerCriteriaById.get("name")?.label).toBe("Name");
     expect(performerCriteriaById.get("gender")?.multiSelectOptions).toBe(true);
     expect(performerCriteriaById.get("studios")?.hierarchyToggleLabel).toBe("Include sub-studios");
-    expect(performerCriteriaById.get("sceneCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
+    expect(performerCriteriaById.get("videoCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
     expect(performerCriteriaById.get("studioCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
     expect(performerCriteriaById.get("imageCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
     expect(performerCriteriaById.get("galleryCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
@@ -100,8 +100,8 @@ describe("filter criteria definitions", () => {
     const imageCriteriaById = new Map(IMAGE_CRITERIA.map((criterion) => [criterion.id, criterion]));
     const groupCriteriaById = new Map(GROUP_CRITERIA.map((criterion) => [criterion.id, criterion]));
 
-    expect(tagCriteriaById.get("sceneCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
-    expect(tagCriteriaById.get("sceneCount")?.auxiliaryToggleKey).toBe("sceneCountIncludesChildren");
+    expect(tagCriteriaById.get("videoCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
+    expect(tagCriteriaById.get("videoCount")?.auxiliaryToggleKey).toBe("videoCountIncludesChildren");
     expect(tagCriteriaById.has("markerCount")).toBe(false);
     expect(tagCriteriaById.get("performerCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
     expect(tagCriteriaById.get("performerCount")?.auxiliaryToggleKey).toBe("performerCountIncludesChildren");
@@ -116,7 +116,7 @@ describe("filter criteria definitions", () => {
     expect(tagCriteriaById.get("remoteIdProvider")?.label).toBe("Remote ID Provider");
 
     expect(studioCriteriaById.get("childCount")?.label).toBe("Substudios Count");
-    expect(studioCriteriaById.get("sceneCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
+    expect(studioCriteriaById.get("videoCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
     expect(studioCriteriaById.get("galleryCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
     expect(studioCriteriaById.get("groupCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
 
@@ -129,7 +129,7 @@ describe("filter criteria definitions", () => {
     expect(imageCriteriaById.has("checksum")).toBe(false);
     expect(imageCriteriaById.get("performerCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
     expect(imageCriteriaById.get("tagCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
-    expect(groupCriteriaById.get("sceneCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
+    expect(groupCriteriaById.get("videoCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
     expect(groupCriteriaById.get("tagCount")?.modifiers).toEqual(["EQUALS", "NOT_EQUALS", "GREATER_THAN", "LESS_THAN", "BETWEEN", "NOT_BETWEEN"]);
   });
 });

@@ -383,11 +383,11 @@ public class ScraperService
             summaries,
             scraperId,
             scraperName,
-            "scene",
+            "video",
             file,
-            byName: definition.SceneByName,
-            byFragments: [definition.SceneByFragment, definition.SceneByQueryFragment],
-            byUrls: definition.SceneByUrl
+            byName: definition.VideoByName ?? definition.SceneByName,
+            byFragments: [definition.VideoByFragment ?? definition.SceneByFragment, definition.VideoByQueryFragment ?? definition.SceneByQueryFragment],
+            byUrls: definition.VideoByUrl.Count > 0 ? definition.VideoByUrl : definition.SceneByUrl
         );
         AddSummary(
             summaries,
@@ -522,14 +522,26 @@ public class ScraperService
         [YamlMember(Alias = "performerByURL")]
         public List<ByUrlDefinition> PerformerByUrl { get; init; } = [];
 
+        [YamlMember(Alias = "videoByName")]
+        public ByNameDefinition? VideoByName { get; init; }
+
         [YamlMember(Alias = "sceneByName")]
         public ByNameDefinition? SceneByName { get; init; }
+
+        [YamlMember(Alias = "videoByFragment")]
+        public ByFragmentDefinition? VideoByFragment { get; init; }
 
         [YamlMember(Alias = "sceneByFragment")]
         public ByFragmentDefinition? SceneByFragment { get; init; }
 
+        [YamlMember(Alias = "videoByQueryFragment")]
+        public ByFragmentDefinition? VideoByQueryFragment { get; init; }
+
         [YamlMember(Alias = "sceneByQueryFragment")]
         public ByFragmentDefinition? SceneByQueryFragment { get; init; }
+
+        [YamlMember(Alias = "videoByURL")]
+        public List<ByUrlDefinition> VideoByUrl { get; init; } = [];
 
         [YamlMember(Alias = "sceneByURL")]
         public List<ByUrlDefinition> SceneByUrl { get; init; } = [];
@@ -661,7 +673,7 @@ public class ScraperService
         // Find matching URL definition
         var urlDefs = entityType switch
         {
-            "scene" => manifest.SceneByUrl,
+            "video" => manifest.VideoByUrl.Count > 0 ? manifest.VideoByUrl : manifest.SceneByUrl,
             "performer" => manifest.PerformerByUrl,
             "gallery" => manifest.GalleryByUrl,
             "image" => manifest.ImageByUrl,
@@ -868,7 +880,7 @@ public class ScraperService
 
         var nameDef = entityType switch
         {
-            "scene" => manifest.SceneByName,
+            "video" => manifest.VideoByName ?? manifest.SceneByName,
             "performer" => manifest.PerformerByName,
             _ => null
         };
@@ -919,7 +931,7 @@ public class ScraperService
 
         var fragDefs = entityType switch
         {
-            "scene" => GetSceneFragmentDefinitions(manifest, fragment),
+            "video" => GetVideoFragmentDefinitions(manifest, fragment),
             "performer" => manifest.PerformerByFragment is null ? [] : [manifest.PerformerByFragment],
             "gallery" => manifest.GalleryByFragment is null ? [] : [manifest.GalleryByFragment],
             "image" => manifest.ImageByFragment is null ? [] : [manifest.ImageByFragment],
@@ -958,20 +970,32 @@ public class ScraperService
         return null;
     }
 
-    private static List<ActionDefinitionBase> GetSceneFragmentDefinitions(ScraperManifest manifest, IReadOnlyDictionary<string, object> fragment)
+    private static List<ActionDefinitionBase> GetVideoFragmentDefinitions(ScraperManifest manifest, IReadOnlyDictionary<string, object> fragment)
     {
         var definitions = new List<ActionDefinitionBase>();
         var hasUrl = !string.IsNullOrWhiteSpace(GetFragmentString(fragment, "url"))
             || GetFragmentStringList(fragment, "urls").Count > 0;
 
-        if (hasUrl && manifest.SceneByQueryFragment != null)
-            definitions.Add(manifest.SceneByQueryFragment);
+        if (hasUrl)
+        {
+            if (manifest.VideoByQueryFragment != null)
+                definitions.Add(manifest.VideoByQueryFragment);
+            else if (manifest.SceneByQueryFragment != null)
+                definitions.Add(manifest.SceneByQueryFragment);
+        }
 
-        if (manifest.SceneByFragment != null)
+        if (manifest.VideoByFragment != null)
+            definitions.Add(manifest.VideoByFragment);
+        else if (manifest.SceneByFragment != null)
             definitions.Add(manifest.SceneByFragment);
 
-        if (!hasUrl && manifest.SceneByQueryFragment != null)
-            definitions.Add(manifest.SceneByQueryFragment);
+        if (!hasUrl)
+        {
+            if (manifest.VideoByQueryFragment != null)
+                definitions.Add(manifest.VideoByQueryFragment);
+            else if (manifest.SceneByQueryFragment != null)
+                definitions.Add(manifest.SceneByQueryFragment);
+        }
 
         return definitions;
     }
@@ -1355,7 +1379,7 @@ public class ScraperService
 
         return registration.Descriptor.Entity switch
         {
-            ScraperEntity.Scene => ToResultDictionary(await registration.Provider.ScrapeSceneAsync(new ScraperRequest<SceneScrapeInput>(registration.Descriptor.Id, new SceneScrapeInput { Url = url, Urls = urls }, permissions), ct)),
+            ScraperEntity.Video => ToResultDictionary(await registration.Provider.ScrapeVideoAsync(new ScraperRequest<VideoScrapeInput>(registration.Descriptor.Id, new VideoScrapeInput { Url = url, Urls = urls }, permissions), ct)),
             ScraperEntity.Performer => ToResultDictionary(await registration.Provider.ScrapePerformerAsync(new ScraperRequest<PerformerScrapeInput>(registration.Descriptor.Id, new PerformerScrapeInput { Url = url, Urls = urls }, permissions), ct)),
             ScraperEntity.Gallery => ToResultDictionary(await registration.Provider.ScrapeGalleryAsync(new ScraperRequest<GalleryScrapeInput>(registration.Descriptor.Id, new GalleryScrapeInput { Url = url, Urls = urls }, permissions), ct)),
             ScraperEntity.Image => ToResultDictionary(await registration.Provider.ScrapeImageAsync(new ScraperRequest<ImageScrapeInput>(registration.Descriptor.Id, new ImageScrapeInput { Url = url, Urls = urls }, permissions), ct)),
@@ -1377,7 +1401,7 @@ public class ScraperService
         var request = new ScraperRequest<string>(registration.Descriptor.Id, name, new ScraperPermissions());
         return registration.Descriptor.Entity switch
         {
-            ScraperEntity.Scene => ToResultDictionaries(await registration.Provider.SearchScenesAsync(request, ct)),
+            ScraperEntity.Video => ToResultDictionaries(await registration.Provider.SearchVideosAsync(request, ct)),
             ScraperEntity.Performer => ToResultDictionaries(await registration.Provider.SearchPerformersAsync(request, ct)),
             ScraperEntity.Gallery => ToResultDictionaries(await registration.Provider.SearchGalleriesAsync(request, ct)),
             ScraperEntity.Image => ToResultDictionaries(await registration.Provider.SearchImagesAsync(request, ct)),
@@ -1398,10 +1422,10 @@ public class ScraperService
 
         switch (registration.Descriptor.Entity)
         {
-            case ScraperEntity.Scene:
+            case ScraperEntity.Video:
             {
-                var input = BuildSceneInput(fragment);
-                return ToResultDictionary(await registration.Provider.ScrapeSceneAsync(new ScraperRequest<SceneScrapeInput>(registration.Descriptor.Id, input, BuildScraperPermissions(input.Url)), ct));
+                var input = BuildVideoInput(fragment);
+                return ToResultDictionary(await registration.Provider.ScrapeVideoAsync(new ScraperRequest<VideoScrapeInput>(registration.Descriptor.Id, input, BuildScraperPermissions(input.Url)), ct));
             }
             case ScraperEntity.Performer:
             {
@@ -1438,11 +1462,11 @@ public class ScraperService
         }
     }
 
-    private static SceneScrapeInput BuildSceneInput(IReadOnlyDictionary<string, object> fragment)
+    private static VideoScrapeInput BuildVideoInput(IReadOnlyDictionary<string, object> fragment)
     {
         var (primaryUrl, urls) = BuildFragmentUrls(fragment);
 
-        return new SceneScrapeInput
+        return new VideoScrapeInput
         {
             Url = primaryUrl,
             Urls = urls,
@@ -1807,7 +1831,7 @@ public class ScraperService
     {
         return entityType switch
         {
-            "scene" => scraperDef.Scene,
+            "video" => scraperDef.Video ?? scraperDef.Scene,
             "performer" => scraperDef.Performer,
             "gallery" => scraperDef.Gallery,
             "image" => scraperDef.Image,
@@ -2465,6 +2489,9 @@ public class ScraperService
     {
         [YamlMember(Alias = "common")]
         public Dictionary<string, string>? Common { get; init; }
+
+        [YamlMember(Alias = "video")]
+        public Dictionary<string, object>? Video { get; init; }
 
         [YamlMember(Alias = "scene")]
         public Dictionary<string, object>? Scene { get; init; }

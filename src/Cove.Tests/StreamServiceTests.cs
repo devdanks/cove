@@ -8,7 +8,7 @@ namespace Cove.Tests;
 public class StreamServiceTests
 {
     [Fact]
-    public async Task GetSceneScreenshot_UsesSpriteVttFrame_WhenTimestampThumbnailIsMissing()
+    public async Task GetVideoScreenshot_UsesSpriteVttFrame_WhenTimestampThumbnailIsMissing()
     {
         var tempRoot = Path.Combine(Path.GetTempPath(), $"cove-stream-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempRoot);
@@ -50,7 +50,7 @@ public class StreamServiceTests
 
             var service = new StreamService(null!, new FakeThumbnailService(timestampPath, animatedPath, spritePath, vttPath), null!);
 
-            var screenshot = await service.GetSceneScreenshot(42, 6, CancellationToken.None);
+            var screenshot = await service.GetVideoScreenshot(42, 6, CancellationToken.None);
             var segmentPreview = await service.GetSegmentAnimatedPreview(42, 6, CancellationToken.None);
 
             Assert.NotNull(screenshot);
@@ -73,25 +73,25 @@ public class StreamServiceTests
 
     private sealed class FakeThumbnailService(string timestampPath, string animatedPath, string spritePath, string vttPath) : IThumbnailService
     {
-        public Task<string?> GetSceneThumbnailPathAsync(int sceneId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task<string?> GetVideoThumbnailPathAsync(int videoId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<string?> GetImageFilePathAsync(int imageId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<(Stream stream, string contentType, bool supportsRangeRequests)?> GetImageStreamAsync(int imageId, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<(Stream stream, string contentType, bool supportsRangeRequests)?> GetImageThumbnailStreamAsync(int imageId, int maxDimension = 640, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<(Stream stream, string contentType, bool supportsRangeRequests)?> GetBlobImageThumbnailStreamAsync(string blobId, int maxDimension = 640, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task DeleteSceneGeneratedFilesAsync(int sceneId, CancellationToken ct = default) => Task.CompletedTask;
+        public Task DeleteVideoGeneratedFilesAsync(int videoId, CancellationToken ct = default) => Task.CompletedTask;
         public Task DeleteImageGeneratedFilesAsync(int imageId, CancellationToken ct = default) => Task.CompletedTask;
         public Task DeleteBlobGeneratedFilesAsync(string blobId, CancellationToken ct = default) => Task.CompletedTask;
-        public Task GenerateSceneThumbnailAsync(int sceneId, double? atSeconds = null, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task GenerateVideoThumbnailAsync(int videoId, double? atSeconds = null, CancellationToken ct = default) => throw new NotImplementedException();
         public Task GenerateImageThumbnailAsync(int imageId, int maxDimension = 640, bool overwrite = false, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task GenerateScenePreviewAsync(int sceneId, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task GenerateSegmentAnimatedPreviewAsync(int sceneId, double startSec, double? endSec = null, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task GenerateSceneSpriteAsync(int sceneId, CancellationToken ct = default) => throw new NotImplementedException();
-        public string GetThumbnailPathForScene(int sceneId) => throw new NotImplementedException();
-        public string GetTimestampedThumbnailPath(int sceneId, double seconds) => timestampPath;
-        public string GetSegmentAnimatedPreviewPath(int sceneId, double seconds) => animatedPath;
-        public string GetPreviewPath(int sceneId) => throw new NotImplementedException();
-        public string GetSpritePath(int sceneId) => spritePath;
-        public string GetSpriteVttPath(int sceneId) => vttPath;
+        public Task GenerateVideoPreviewAsync(int videoId, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task GenerateSegmentAnimatedPreviewAsync(int videoId, double startSec, double? endSec = null, CancellationToken ct = default) => throw new NotImplementedException();
+        public Task GenerateVideoSpriteAsync(int videoId, CancellationToken ct = default) => throw new NotImplementedException();
+        public string GetThumbnailPathForVideo(int videoId) => throw new NotImplementedException();
+        public string GetTimestampedThumbnailPath(int videoId, double seconds) => timestampPath;
+        public string GetSegmentAnimatedPreviewPath(int videoId, double seconds) => animatedPath;
+        public string GetPreviewPath(int videoId) => throw new NotImplementedException();
+        public string GetSpritePath(int videoId) => spritePath;
+        public string GetSpriteVttPath(int videoId) => vttPath;
         public string StartGenerateAllThumbnails() => throw new NotImplementedException();
     }
 }

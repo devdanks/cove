@@ -11,7 +11,7 @@ import {
   formatSegmentDuration,
   formatSegmentRange,
   Pill,
-  SegmentScenePreview,
+  SegmentVideoPreview,
 } from "./segmentDisplayUtils";
 import { useSegmentListDensity, type SegmentListDensity } from "./segmentListDensity";
 import type { RawSegmentItem } from "./types";
@@ -19,7 +19,7 @@ import type { RawSegmentItem } from "./types";
 interface Props {
   displayMode: DisplayMode;
   items: RawSegmentItem[];
-  canReadScenes: boolean;
+  canReadVideos: boolean;
   onNavigate: (route: any) => void;
   selectedIds: Set<string | number>;
   onToggle: (id: string | number) => void;
@@ -33,7 +33,7 @@ interface Props {
 export function RawSegmentResults({
   displayMode,
   items,
-  canReadScenes,
+  canReadVideos,
   onNavigate,
   selectedIds,
   onToggle,
@@ -68,18 +68,18 @@ export function RawSegmentResults({
             footer={(
               <div className="flex items-center justify-between gap-2">
                 <span>Updated {formatDate(item.updatedAt)}</span>
-                {canReadScenes ? (
+                {canReadVideos ? (
                   <button
                     type="button"
                     onClick={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
-                      onNavigate({ page: "scene", id: item.hostId, seekTo: item.startSec });
+                      onNavigate({ page: "video", id: item.hostId, seekTo: item.startSec });
                     }}
                     className="inline-flex items-center gap-1 text-accent hover:underline"
                   >
                     <FolderOpen className="h-3.5 w-3.5" />
-                    Open scene
+                    Open video
                   </button>
                 ) : null}
               </div>
@@ -95,7 +95,7 @@ export function RawSegmentResults({
       <div className="hidden grid-cols-[minmax(0,1.3fr)_140px_minmax(0,1fr)_120px_120px] gap-3 border-b border-border bg-surface/70 px-4 py-2 text-[11px] font-medium uppercase tracking-wide text-muted lg:grid">
         <span>Segment</span>
         <span>Range</span>
-        <span>Scene</span>
+        <span>Video</span>
         <span>Source</span>
         <span>Updated</span>
       </div>
@@ -104,7 +104,7 @@ export function RawSegmentResults({
           <RawSegmentListRow
             key={item.key}
             item={item}
-            canReadScenes={canReadScenes}
+            canReadVideos={canReadVideos}
             onNavigate={onNavigate}
             selected={selectedIds.has(item.id)}
             onToggle={() => onToggle(item.id)}
@@ -119,7 +119,7 @@ export function RawSegmentResults({
 
 function RawSegmentListRow({
   item,
-  canReadScenes,
+  canReadVideos,
   onNavigate,
   selected,
   onToggle,
@@ -127,7 +127,7 @@ function RawSegmentListRow({
   density,
 }: {
   item: RawSegmentItem;
-  canReadScenes: boolean;
+  canReadVideos: boolean;
   onNavigate: (route: any) => void;
   selected: boolean;
   onToggle: () => void;
@@ -137,14 +137,14 @@ function RawSegmentListRow({
   const title = buildRawSegmentTitle(item);
 
   return (
-    <div onClick={selecting ? onToggle : undefined} className={`scene-card group relative cursor-pointer px-4 ${density.rowPaddingClassName} transition-colors ${selected ? "bg-accent/10" : "hover:bg-surface/40"}`}>
+    <div onClick={selecting ? onToggle : undefined} className={`video-card group relative cursor-pointer px-4 ${density.rowPaddingClassName} transition-colors ${selected ? "bg-accent/10" : "hover:bg-surface/40"}`}>
       <RouteCardLinkOverlay route={{ page: "segment", id: item.id }} onClick={() => onNavigate({ page: "segment", id: item.id })} label={`Open raw segment ${title}`} disabled={selecting} selectionSafeZone />
       <div className="flex items-start gap-3 lg:grid lg:grid-cols-[minmax(0,1.3fr)_140px_minmax(0,1fr)_120px_120px] lg:items-center">
         <div className="relative min-w-0 pl-8">
           <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onToggle} />
           <div className="flex items-start gap-3">
             {density.showPreview ? <div className="hidden shrink-0 overflow-hidden rounded-lg bg-surface sm:block" style={{ height: density.previewHeight, width: density.previewWidth }}>
-              <SegmentScenePreview hostId={item.hostId} segmentId={item.id} updatedAt={item.updatedAt} startSec={item.startSec} endSec={item.endSec} title={title} imgClassName="h-full w-full object-cover" />
+              <SegmentVideoPreview hostId={item.hostId} segmentId={item.id} updatedAt={item.updatedAt} startSec={item.startSec} endSec={item.endSec} title={title} imgClassName="h-full w-full object-cover" />
             </div> : null}
             <div className="min-w-0">
               <div className="truncate text-sm font-medium text-foreground">{title}</div>
@@ -159,20 +159,20 @@ function RawSegmentListRow({
         </div>
         <div className="hidden text-xs text-secondary lg:block">{formatSegmentRange(item.startSec, item.endSec)}</div>
         <div className="min-w-0 text-xs text-secondary lg:text-sm">
-          <div className="truncate text-foreground">{item.sceneTitle}</div>
-          {canReadScenes ? (
+          <div className="truncate text-foreground">{item.videoTitle}</div>
+          {canReadVideos ? (
             <div className="mt-1 flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
-                  onNavigate({ page: "scene", id: item.hostId, seekTo: item.startSec });
+                  onNavigate({ page: "video", id: item.hostId, seekTo: item.startSec });
                 }}
                 className="relative z-10 inline-flex items-center gap-1 text-accent hover:underline"
               >
                 <FolderOpen className="h-3.5 w-3.5" />
-                Open scene
+                Open video
               </button>
             </div>
           ) : null}

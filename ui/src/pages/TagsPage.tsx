@@ -37,13 +37,13 @@ function clampOptionalPercent(value: number | undefined) {
 const SORT_OPTIONS = [
   { value: "name", label: "Name" },
   { value: "tag_group", label: "Tag Group" },
-  { value: "scene_count", label: "Scene Count" },
+  { value: "video_count", label: "Video Count" },
   { value: "gallery_count", label: "Gallery Count" },
   { value: "group_count", label: "Group Count" },
   { value: "image_count", label: "Image Count" },
   { value: "performer_count", label: "Performer Count" },
   { value: "studio_count", label: "Studio Count" },
-  { value: "latest_scene_date", label: "Latest Scene Date" },
+  { value: "latest_video_date", label: "Latest Video Date" },
   { value: "total_file_size", label: "Total File Size" },
   { value: "random", label: "Random" },
   { value: "created_at", label: "Created At" },
@@ -58,7 +58,7 @@ export function TagsPage({ onNavigate }: Props) {
   const defaultState = useMemo(() => {
     const savedFilter = getDefaultFilter("tags");
     return {
-      filter: savedFilter?.findFilter ?? { page: 1, perPage: 40, sort: "latest_scene_date", direction: "desc" },
+      filter: savedFilter?.findFilter ?? { page: 1, perPage: 40, sort: "latest_video_date", direction: "desc" },
       objectFilter: savedFilter?.objectFilter ?? {},
       displayMode: "grid" as DisplayMode,
     };
@@ -368,7 +368,7 @@ function TagListTable({ tags: items, onNavigate, selectedIds, onToggle, selectin
           <th className="py-2 px-3">Group</th>
           <th className="py-2 px-3">Description</th>
           <th className="py-2 px-3">Aliases</th>
-          <th className="py-2 px-3 text-right">Scenes</th>
+          <th className="py-2 px-3 text-right">Videos</th>
         </tr>
       </thead>
       <tbody>
@@ -390,10 +390,11 @@ function TagListTable({ tags: items, onNavigate, selectedIds, onToggle, selectin
             </td>
             <td className="py-2 px-3 text-secondary truncate max-w-xs">{t.description ?? ""}</td>
             <td className="py-2 px-3 text-muted truncate max-w-xs">{t.aliases.join(", ")}</td>
-            <td className="py-2 px-3 text-secondary text-right">{t.sceneCount ?? ""}</td>
+            <td className="py-2 px-3 text-secondary text-right">{t.videoCount ?? ""}</td>
           </tr>
         ))}
       </tbody>
     </table>
   );
 }
+

@@ -23,7 +23,7 @@ import { SettingsButton as Btn, SettingsField as Field, SettingsSection as Secti
 import { buildRoutePath } from "../../router/location";
 import { EntityReferenceSelector } from "../../components/EntityReferenceSelector";
 
-const ENTITY_KINDS = ["scene", "performer", "tag", "studio", "gallery", "image", "group", "segment"] as const;
+const ENTITY_KINDS = ["video", "performer", "tag", "studio", "gallery", "image", "group", "segment"] as const;
 const SCOPE_KINDS = ["all", "tag", "studio", "identifier", "attribute", "expression"] as const;
 const APPLIES_TO = ["read", "write", "delete", "all"] as const;
 const EFFECTS = ["deny", "allow"] as const;
@@ -50,7 +50,7 @@ const ATTRIBUTE_OPERATORS = [
   { value: "lte", label: "Less than or equal" },
 ] as const;
 const ENTITY_LIST_ROUTES: Record<string, string> = {
-  scene: "scenes",
+  video: "videos",
   performer: "performers",
   tag: "tags",
   studio: "studios",
@@ -1196,7 +1196,7 @@ function CreateContentRuleDialog({ roles, onClose }: { roles: RoleRow[]; onClose
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<"rule" | "override">("rule");
   const [roleId, setRoleId] = useState(roles[0]?.id ?? 0);
-  const [entityKind, setEntityKind] = useState<(typeof ENTITY_KINDS)[number]>("scene");
+  const [entityKind, setEntityKind] = useState<(typeof ENTITY_KINDS)[number]>("video");
   const [effect, setEffect] = useState<(typeof EFFECTS)[number]>("deny");
   const [scopeKind, setScopeKind] = useState<(typeof SCOPE_KINDS)[number]>("all");
   const [scopeDraft, setScopeDraft] = useState<ContentRuleScopeDraft>(() => createEmptyScopeDraft());
@@ -1440,7 +1440,7 @@ function ShareLinksTable({ links, onRevoke }: { links: ShareLinkRow[]; onRevoke:
 
 function CreateShareLinkDialog({ onClose, onIssued }: { onClose: () => void; onIssued: (link: ShareLinkIssuedRow) => void }) {
   const queryClient = useQueryClient();
-  const [entityKind, setEntityKind] = useState<(typeof ENTITY_KINDS)[number]>("scene");
+  const [entityKind, setEntityKind] = useState<(typeof ENTITY_KINDS)[number]>("video");
   const [ids, setIds] = useState("");
   const [expires, setExpires] = useState("");
   const [password, setPassword] = useState("");
@@ -1541,3 +1541,4 @@ function Modal({ title, onClose, children, wide }: { title: string; onClose: () 
     </div>
   );
 }
+

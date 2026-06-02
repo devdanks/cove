@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, X } from "lucide-react";
 import { studios as studiosApi } from "../api/client";
 import { rankByLabel } from "../utils/searchRanking";
@@ -13,6 +13,7 @@ interface StudioSelectorProps {
 export function StudioSelector({ value, onChange, placeholder = "Search studios..." }: StudioSelectorProps) {
   const [searchText, setSearchText] = useState("");
   const trimmedSearch = searchText.trim();
+  const queryClient = useQueryClient();
 
   const { data: searchResults, isLoading } = useQuery({
     queryKey: ["studio-selector", trimmedSearch],
@@ -45,6 +46,17 @@ export function StudioSelector({ value, onChange, placeholder = "Search studios.
     [searchResults, trimmedSearch, value],
   );
 
+  const exactMatchExists = trimmedSearch && (searchResults ?? []).some((s) => s.name.toLowerCase() === trimmedSearch.toLowerCase());
+  const createMutation = useMutation({
+    mutationFn: (name: string) => studiosApi.create({ name }),
+    onSuccess: (result) => {
+      onChange(result.id);
+      setSearchText("");
+      queryClient.invalidateQueries({ queryKey: ["studios"] });
+    },
+  });
+  const showCreateOption = trimmedSearch && !isLoading && !exactMatchExists;
+
   return (
     <div className="space-y-2">
       {selectedLabel && (
@@ -70,23 +82,39 @@ export function StudioSelector({ value, onChange, placeholder = "Search studios.
         <div className="max-h-32 overflow-y-auto rounded border border-border bg-surface">
           {isLoading ? (
             <div className="px-3 py-2 text-sm text-muted">Loading...</div>
-          ) : visibleResults.length === 0 ? (
+          ) : visibleResults.length === 0 && !showCreateOption ? (
             <div className="px-3 py-2 text-sm text-muted">No studios found</div>
-          ) : (
-            visibleResults.map((studio) => (
-              <button
-                key={studio.id}
-                onClick={() => {
-                  onChange(studio.id);
-                  setSearchText("");
-                }}
-                className="flex w-full items-center gap-1 px-3 py-2 text-left text-sm text-foreground hover:bg-card"
-              >
-                <Plus className="h-3 w-3" />
-                {studio.name}
-              </button>
-            ))
-          )}
+          ) : null}
+          {visibleResults.map((studio) => (
+            <button
+              key={studio.id}
+              onClick={() => {
+                onChange(studio.id);
+                setSearchText("");
+              }}
+              className="flex w-full items-center gap-1 px-3 py-2 text-left text-sm text-foreground hover:bg-card"
+            >
+              <Plus className="h-3 w-3" />
+              {studio.name}
+            </button>
+          ))}
+          {showCreateOption ? (
+            <button
+              type="button"
+              onClick={() => createMutation.mutate(trimmedSearch)}
+              disabled={createMutation.isPending}
+              className="flex w-full items-center gap-2 border-t border-border px-3 py-2 text-left text-sm text-accent hover:bg-card disabled:opacity-50"
+            >
+              {createMutation.isPending ? (
+                <span className="text-muted">Creating...</span>
+              ) : (
+                <>
+                  <Plus className="h-3 w-3" />
+                  <span>Create &ldquo;{trimmedSearch}&rdquo;</span>
+                </>
+              )}
+            </button>
+          ) : null}
         </div>
       )}
     </div>

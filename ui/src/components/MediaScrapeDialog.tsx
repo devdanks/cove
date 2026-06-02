@@ -11,7 +11,7 @@ import {
   ScrapeRelationChoices,
   type ScrapeRelationActionMap,
 } from "./ScrapeRelationChoices";
-import type { CollectionMode, InputKind, ScrapeApplyPreferences } from "./sceneScrapeUtils";
+import type { CollectionMode, InputKind, ScrapeApplyPreferences } from "./videoScrapeUtils";
 import {
   DEFAULT_COLLECTION_MODES,
   findDefaultKind,
@@ -22,13 +22,13 @@ import {
   listsEqual,
   loadScrapeApplyPreferences,
   matchesUrlPattern,
-  normalizeSceneDate,
+  normalizeVideoDate,
   parseJsonObject,
   parseJsonObjectArray,
   saveScrapeApplyPreferences,
-  sortScrapersForScene,
+  sortScrapersForVideo,
   supportsScrapeKind,
-} from "./sceneScrapeUtils";
+} from "./videoScrapeUtils";
 
 type MediaEntityType = "audio" | "text" | "image";
 
@@ -166,7 +166,7 @@ function normalizeAttemptData(entityType: MediaEntityType, attempt?: ScrapeAttem
     code: getString(raw, "Code"),
     details: getString(raw, "Details", "Description", "Synopsis"),
     creator: getCreatorValue(entityType, raw),
-    date: normalizeSceneDate(getString(raw, "Date", "ReleaseDate")),
+    date: normalizeVideoDate(getString(raw, "Date", "ReleaseDate")),
     studio: getNamedList(raw, "Studio", "StudioName")[0] ?? getString(raw, "Studio", "StudioName"),
     urls: getStringList(raw, "URLs", "Url", "URL"),
     tags: normalizeTagList(getNamedList(raw, "Tags", "Tag", "TagNames")),
@@ -198,7 +198,7 @@ function normalizeSnapshot(entity: MediaScrapeEntity, entityType: MediaEntityTyp
     code: getString(snapshot, "code") ?? entity.code,
     details: getString(snapshot, "details") ?? entity.details,
     creator: entityType === "image" ? getString(snapshot, "photographer") ?? entity.creator : undefined,
-    date: normalizeSceneDate(getString(snapshot, "date") ?? entity.date),
+    date: normalizeVideoDate(getString(snapshot, "date") ?? entity.date),
     studio: getString(snapshot, "studio") ?? entity.studioName,
     urls: snapshotUrls.length > 0 ? snapshotUrls : entity.urls,
     tags: snapshotTags.length > 0 ? snapshotTags : normalizeTagList(entity.tags.map((tag) => tag.name)),
@@ -304,8 +304,8 @@ function chooseInitialSourceUrl(sourceUrls: string[], scrapers: ScraperSummary[]
   }
 
   return [...sourceUrls].sort((left, right) => {
-    const leftScore = getSourceUrlSortScore(sortScrapersForScene(scrapers, left, scraperPreferences), left);
-    const rightScore = getSourceUrlSortScore(sortScrapersForScene(scrapers, right, scraperPreferences), right);
+    const leftScore = getSourceUrlSortScore(sortScrapersForVideo(scrapers, left, scraperPreferences), left);
+    const rightScore = getSourceUrlSortScore(sortScrapersForVideo(scrapers, right, scraperPreferences), right);
     if (leftScore !== rightScore) {
       return rightScore - leftScore;
     }
@@ -370,7 +370,7 @@ export function MediaScrapeDialog({ open, onClose, entityType, entity }: Props) 
   );
   const activeSourceUrl = selectedSourceUrl || initialSourceUrl;
   const entityScrapers = useMemo(
-    () => sortScrapersForScene(availableEntityScrapers, activeSourceUrl, scraperPreferences),
+    () => sortScrapersForVideo(availableEntityScrapers, activeSourceUrl, scraperPreferences),
     [activeSourceUrl, availableEntityScrapers, scraperPreferences],
   );
   const selectedScraper = useMemo(

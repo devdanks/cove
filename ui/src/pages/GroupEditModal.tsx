@@ -30,7 +30,7 @@ export function GroupEditModal({ group, open, onClose }: Props) {
   const [kind, setKind] = useState<"static" | "dynamic">(group.kind ?? "static");
   const [querySourceKey, setQuerySourceKey] = useState(group.querySourceKey ?? FILTER_DYNAMIC_SOURCE_KEY);
   const [queryJson, setQueryJson] = useState(group.queryJson ?? defaultDynamicGroupFilterQueryJson());
-  const [showInSceneLists, setShowInSceneLists] = useState(group.showInSceneLists ?? false);
+  const [showInVideoLists, setShowInVideoLists] = useState(group.showInVideoLists ?? false);
 
   const [customFields, setCustomFields] = useState<Record<string, unknown>>({ ...(group.customFields ?? {}) });
   const tagProvenanceById = buildTagProvenanceById(group.tags, group.fieldProvenance);
@@ -58,7 +58,7 @@ export function GroupEditModal({ group, open, onClose }: Props) {
     setKind(group.kind ?? "static");
     setQuerySourceKey(group.querySourceKey ?? dynamicSources.find((source) => source.key === FILTER_DYNAMIC_SOURCE_KEY)?.key ?? dynamicSources[0]?.key ?? FILTER_DYNAMIC_SOURCE_KEY);
     setQueryJson(group.queryJson ?? defaultDynamicGroupFilterQueryJson());
-    setShowInSceneLists(group.showInSceneLists ?? false);
+    setShowInVideoLists(group.showInVideoLists ?? false);
   }, [dynamicSources, group]);
 
   useEffect(() => {
@@ -113,7 +113,7 @@ export function GroupEditModal({ group, open, onClose }: Props) {
       kind,
       querySourceKey: kind === "dynamic" ? querySourceKey : undefined,
       queryJson: kind === "dynamic" && querySourceKey === FILTER_DYNAMIC_SOURCE_KEY ? queryJson : undefined,
-      showInSceneLists,
+      showInVideoLists,
     });
   };
 
@@ -143,10 +143,10 @@ export function GroupEditModal({ group, open, onClose }: Props) {
             ))}
           </div>
         </Field>
-        <Field label="Scene Browsing" fieldProvenance={group.fieldProvenance} fieldKey="showInSceneLists">
+        <Field label="Video Browsing" fieldProvenance={group.fieldProvenance} fieldKey="showInVideoLists">
           <label className="inline-flex items-center gap-2 text-sm text-foreground">
-            <input type="checkbox" checked={showInSceneLists} onChange={(event) => setShowInSceneLists(event.target.checked)} className="h-4 w-4 accent-accent" />
-            Show in scene browsing
+            <input type="checkbox" checked={showInVideoLists} onChange={(event) => setShowInVideoLists(event.target.checked)} className="h-4 w-4 accent-accent" />
+            Show in video browsing
           </label>
         </Field>
       </div>
@@ -233,3 +233,4 @@ function splitAliases(value?: string) {
 function joinAliases(values: string[]) {
   return values.map((alias) => alias.trim()).filter(Boolean).join(", ");
 }
+

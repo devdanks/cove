@@ -7,7 +7,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { RouteRegistryProvider, useRouteRegistry } from "./router/RouteRegistry";
 import { AppConfigProvider, useAppConfig } from "./state/AppConfigContext";
 import { ExtensionLoaderProvider, useExtensions } from "./extensions/ExtensionLoader";
-import { SceneQueueProvider } from "./state/SceneQueueContext";
+import { VideoQueueProvider } from "./state/VideoQueueContext";
 import { SetupWizardPage } from "./pages/SetupWizardPage";
 import { LoginPage } from "./pages/LoginPage";
 import { AuthBootstrapPage } from "./pages/AuthBootstrapPage";
@@ -32,13 +32,13 @@ function normalizeRoute(route: Route): Route {
 }
 
 const BUILTIN_ROUTE_PERMISSIONS: Partial<Record<Route["page"], string>> = {
-  scenes: "scenes.read",
-  scene: "scenes.read",
+  videos: "videos.read",
+  video: "videos.read",
   audios: "audios.read",
   audio: "audios.read",
   texts: "texts.read",
   text: "texts.read",
-  "scene-span": "segments.read",
+  "video-span": "segments.read",
   segments: "segments.read",
   segment: "segments.read",
   face: "faces.read",
@@ -56,13 +56,13 @@ const BUILTIN_ROUTE_PERMISSIONS: Partial<Record<Route["page"], string>> = {
   images: "images.read",
   image: "images.read",
   faces: "faces.read",
-  sceneparser: "scenes.read",
-  duplicates: "scenes.read",
+  videoparser: "videos.read",
+  duplicates: "videos.read",
   stats: "system.read",
 };
 
 // Lazy-loaded page components for code splitting
-const ScenesPage = lazy(() => import("./pages/ScenesPage").then(m => ({ default: m.ScenesPage })));
+const VideosPage = lazy(() => import("./pages/VideosPage").then(m => ({ default: m.VideosPage })));
 const AudiosPage = lazy(() => import("./pages/AudiosPage").then(m => ({ default: m.AudiosPage })));
 const TextsPage = lazy(() => import("./pages/TextsPage").then(m => ({ default: m.TextsPage })));
 const SegmentsPage = lazy(() => import("./pages/SegmentsPage").then(m => ({ default: m.SegmentsPage })));
@@ -74,7 +74,7 @@ const GroupsPage = lazy(() => import("./pages/GroupsPage").then(m => ({ default:
 const ImagesPage = lazy(() => import("./pages/ImagesPage").then(m => ({ default: m.ImagesPage })));
 const SettingsPage = lazy(() => import("./pages/SettingsPage").then(m => ({ default: m.SettingsPage })));
 const StatsPage = lazy(() => import("./pages/StatsPage").then(m => ({ default: m.StatsPage })));
-const SceneDetailPage = lazy(() => import("./pages/SceneDetailPage").then(m => ({ default: m.SceneDetailPage })));
+const VideoDetailPage = lazy(() => import("./pages/VideoDetailPage").then(m => ({ default: m.VideoDetailPage })));
 const AudioDetailPage = lazy(() => import("./pages/AudioDetailPage").then(m => ({ default: m.AudioDetailPage })));
 const TextDetailPage = lazy(() => import("./pages/TextDetailPage").then(m => ({ default: m.TextDetailPage })));
 const SegmentDetailPage = lazy(() => import("./pages/SegmentDetailPage").then(m => ({ default: m.SegmentDetailPage })));
@@ -90,7 +90,7 @@ const FacesPage = lazy(() => import("./pages/FacesPage").then(m => ({ default: m
 const FaceDetailPage = lazy(() => import("./pages/FaceDetailPage").then(m => ({ default: m.FaceDetailPage })));
 const DuplicateFinderPage = lazy(() => import("./pages/DuplicateFinderPage").then(m => ({ default: m.DuplicateFinderPage })));
 
-const SceneFilenameParserPage = lazy(() => import("./pages/SceneFilenameParserPage").then(m => ({ default: m.SceneFilenameParserPage })));
+const VideoFilenameParserPage = lazy(() => import("./pages/VideoFilenameParserPage").then(m => ({ default: m.VideoFilenameParserPage })));
 const HomePage = lazy(() => import("./pages/HomePage").then(m => ({ default: m.HomePage })));
 
 export default function App() {
@@ -181,10 +181,10 @@ export default function App() {
       <AppConfigProvider>
         <AuthGate>
           <ExtensionLoaderProvider>
-            <SceneQueueProvider>
+            <VideoQueueProvider>
               <AppKeyboardShortcuts navigate={navigate} />
               <AppShell route={route} navigate={navigate} />
-            </SceneQueueProvider>
+            </VideoQueueProvider>
           </ExtensionLoaderProvider>
         </AuthGate>
       </AppConfigProvider>
@@ -197,7 +197,7 @@ function AppKeyboardShortcuts({ navigate }: { navigate: (route: Route) => void }
 
   const globalBindings = useMemo(() => [
     { keys: resolveKeybinding(overrides, "global.home", "g h"), action: () => navigate({ page: "home" }) },
-    { keys: resolveKeybinding(overrides, "global.scenes", "g s"), action: () => navigate({ page: "scenes" }) },
+    { keys: resolveKeybinding(overrides, "global.videos", "g s"), action: () => navigate({ page: "videos" }) },
     { keys: resolveKeybinding(overrides, "global.audios", "g a"), action: () => navigate({ page: "audios" }) },
     { keys: resolveKeybinding(overrides, "global.texts", "g x"), action: () => navigate({ page: "texts" }) },
     { keys: resolveKeybinding(overrides, "global.segments", "g m"), action: () => navigate({ page: "segments" }) },
@@ -520,14 +520,14 @@ function AppRoutes({ route, navigate }: { route: Route; navigate: (r: Route) => 
     <>
       {route.page === "home" && <HomePage onNavigate={navigate} />}
       {route.page === "manual" && <HomePage onNavigate={navigate} />}
-      {route.page === "scenes" && <ScenesPage onNavigate={navigate} />}
-      {route.page === "scene" && route.id !== undefined && <SceneDetailPage id={route.id} initialSeekTo={route.seekTo} onNavigate={navigate} />}
+      {route.page === "videos" && <VideosPage onNavigate={navigate} />}
+      {route.page === "video" && route.id !== undefined && <VideoDetailPage id={route.id} initialSeekTo={route.seekTo} onNavigate={navigate} />}
       {route.page === "audios" && <AudiosPage onNavigate={navigate} />}
       {route.page === "audio" && route.id !== undefined && <AudioDetailPage id={route.id} onNavigate={navigate} />}
       {route.page === "texts" && <TextsPage onNavigate={navigate} />}
       {route.page === "text" && route.id !== undefined && <TextDetailPage id={route.id} onNavigate={navigate} />}
-      {route.page === "scene-span" && route.id !== undefined && route.spanKey !== undefined && (
-        <ResolvedSpanPlayPage sceneId={route.id} spanKey={route.spanKey} profileId={route.profileId} derivedQueryDescriptor={route.derivedQueryDescriptor} onNavigate={navigate} />
+      {route.page === "video-span" && route.id !== undefined && route.spanKey !== undefined && (
+        <ResolvedSpanPlayPage videoId={route.id} spanKey={route.spanKey} profileId={route.profileId} derivedQueryDescriptor={route.derivedQueryDescriptor} onNavigate={navigate} />
       )}
       {route.page === "segments" && <SegmentsPage onNavigate={navigate} />}
       {route.page === "segment" && route.id !== undefined && <SegmentDetailPage id={route.id} onNavigate={navigate} />}
@@ -549,7 +549,7 @@ function AppRoutes({ route, navigate }: { route: Route; navigate: (r: Route) => 
       {route.page === "settings" && <SettingsPage />}
       {route.page === "stats" && <StatsPage onNavigate={navigate} />}
       {route.page === "duplicates" && <DuplicateFinderPage onNavigate={navigate} />}
-      {route.page === "sceneparser" && <SceneFilenameParserPage onNavigate={navigate} />}
+      {route.page === "videoparser" && <VideoFilenameParserPage onNavigate={navigate} />}
     </>
   );
 }
@@ -568,3 +568,4 @@ function AccessDeniedPage({ navigate }: { navigate: (r: Route) => void }) {
     </div>
   );
 }
+

@@ -2,7 +2,7 @@ namespace Cove.Core.Entities;
 
 public enum RatingHostType
 {
-    Scene = 1,
+    Video = 1,
     Image = 2,
     Performer = 3,
     Segment = 4,

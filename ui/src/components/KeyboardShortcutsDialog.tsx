@@ -10,7 +10,7 @@ interface ShortcutSection {
 
 const staticSections: ShortcutSection[] = [
   {
-    title: "Scene Detail",
+    title: "Video Detail",
     shortcuts: [
       { keys: "s", description: "Open segments" },
       { keys: "d", description: "Open detections" },
@@ -104,3 +104,4 @@ export function KeyboardShortcutsDialog({ open, onClose }: { open: boolean; onCl
     document.body
   );
 }
+

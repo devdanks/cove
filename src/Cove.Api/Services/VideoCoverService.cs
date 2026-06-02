@@ -3,16 +3,16 @@ using Cove.Core.Interfaces;
 
 namespace Cove.Api.Services;
 
-public interface ISceneCoverService
+public interface IVideoCoverService
 {
-    Task<bool> TryApplyRemoteCoverAsync(Scene scene, string? imageUrl, CancellationToken ct = default);
+    Task<bool> TryApplyRemoteCoverAsync(Video video, string? imageUrl, CancellationToken ct = default);
 }
 
-public sealed class SceneCoverService(IBlobService blobService, IHttpClientFactory httpClientFactory, ILogger<SceneCoverService> logger) : ISceneCoverService
+public sealed class VideoCoverService(IBlobService blobService, IHttpClientFactory httpClientFactory, ILogger<VideoCoverService> logger) : IVideoCoverService
 {
-    public async Task<bool> TryApplyRemoteCoverAsync(Scene scene, string? imageUrl, CancellationToken ct = default)
+    public async Task<bool> TryApplyRemoteCoverAsync(Video video, string? imageUrl, CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(scene);
+        ArgumentNullException.ThrowIfNull(video);
 
         if (string.IsNullOrWhiteSpace(imageUrl))
             return false;
@@ -40,9 +40,9 @@ public sealed class SceneCoverService(IBlobService blobService, IHttpClientFacto
 
             await using var stream = new MemoryStream(bytes);
             var newBlobId = await blobService.StoreBlobAsync(stream, contentType, ct);
-            var previousBlobId = scene.ImageBlobId;
+            var previousBlobId = video.ImageBlobId;
 
-            scene.ImageBlobId = newBlobId;
+            video.ImageBlobId = newBlobId;
 
             if (!string.IsNullOrWhiteSpace(previousBlobId) && !string.Equals(previousBlobId, newBlobId, StringComparison.Ordinal))
             {
@@ -53,7 +53,7 @@ public sealed class SceneCoverService(IBlobService blobService, IHttpClientFacto
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to apply remote cover for scene {SceneId}", scene.Id);
+            logger.LogWarning(ex, "Failed to apply remote cover for video {VideoId}", video.Id);
             return false;
         }
     }

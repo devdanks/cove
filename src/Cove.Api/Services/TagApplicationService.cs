@@ -125,7 +125,7 @@ public sealed class TagApplicationService(CoveContext db)
         {
             var performerContextExists = hostType switch
             {
-                AffinityHostType.Scene => await db.Set<ScenePerformer>().AsNoTracking().AnyAsync(item => item.SceneId == hostId && item.PerformerId == contextId.Value, ct),
+                AffinityHostType.Video => await db.Set<VideoPerformer>().AsNoTracking().AnyAsync(item => item.VideoId == hostId && item.PerformerId == contextId.Value, ct),
                 AffinityHostType.Image => await db.Set<ImagePerformer>().AsNoTracking().AnyAsync(item => item.ImageId == hostId && item.PerformerId == contextId.Value, ct),
                 AffinityHostType.Audio => await db.Set<AudioPerformer>().AsNoTracking().AnyAsync(item => item.AudioId == hostId && item.PerformerId == contextId.Value, ct),
                 AffinityHostType.Text => await db.Set<TextPerformer>().AsNoTracking().AnyAsync(item => item.TextDocumentId == hostId && item.PerformerId == contextId.Value, ct),
@@ -138,14 +138,14 @@ public sealed class TagApplicationService(CoveContext db)
             return;
         }
 
-        if (hostType != AffinityHostType.Scene)
-            throw new TagApplicationValidationException(StatusCodes.Status400BadRequest, "This context type is only supported for scene hosts.");
+        if (hostType != AffinityHostType.Video)
+            throw new TagApplicationValidationException(StatusCodes.Status400BadRequest, "This context type is only supported for video hosts.");
 
         var exists = contextType switch
         {
-            "detection" => await db.Detections.AsNoTracking().AnyAsync(item => item.Id == contextId.Value && item.HostType == DetectionHostType.Scene && item.HostId == hostId, ct),
-            "face" => await db.FaceAppearances.AsNoTracking().AnyAsync(item => item.FaceId == contextId.Value && item.HostType == FaceAppearanceHostType.Scene && item.HostId == hostId, ct),
-            "segment" => await db.Segments.AsNoTracking().AnyAsync(item => item.Id == contextId.Value && item.HostType == SegmentHostType.Scene && item.HostId == hostId, ct),
+            "detection" => await db.Detections.AsNoTracking().AnyAsync(item => item.Id == contextId.Value && item.HostType == DetectionHostType.Video && item.HostId == hostId, ct),
+            "face" => await db.FaceAppearances.AsNoTracking().AnyAsync(item => item.FaceId == contextId.Value && item.HostType == FaceAppearanceHostType.Video && item.HostId == hostId, ct),
+            "segment" => await db.Segments.AsNoTracking().AnyAsync(item => item.Id == contextId.Value && item.HostType == SegmentHostType.Video && item.HostId == hostId, ct),
             _ => throw new TagApplicationValidationException(StatusCodes.Status400BadRequest, "Context type is invalid."),
         };
 
@@ -156,7 +156,7 @@ public sealed class TagApplicationService(CoveContext db)
     private Task<bool> HostExistsAsync(AffinityHostType hostType, int hostId, CancellationToken ct)
         => hostType switch
         {
-            AffinityHostType.Scene => db.Scenes.AsNoTracking().AnyAsync(item => item.Id == hostId, ct),
+            AffinityHostType.Video => db.Videos.AsNoTracking().AnyAsync(item => item.Id == hostId, ct),
             AffinityHostType.Image => db.Images.AsNoTracking().AnyAsync(item => item.Id == hostId, ct),
             AffinityHostType.Audio => db.Audios.AsNoTracking().AnyAsync(item => item.Id == hostId, ct),
             AffinityHostType.Text => db.TextDocuments.AsNoTracking().AnyAsync(item => item.Id == hostId, ct),
