@@ -1183,7 +1183,7 @@ public record CoveConfigDto
     public string? GeneratedPath { get; init; }
     public string? CachePath { get; init; }
     public string Host { get; init; } = "0.0.0.0";
-    public int Port { get; init; } = 9999;
+    public int Port { get; init; } = 5073;
     public int MaxParallelTasks { get; init; } = 5;
     public int MaxConcurrentDownloads { get; init; } = 3;
     public List<DownloaderPathOverrideDto> DownloaderPathOverrides { get; init; } = [];

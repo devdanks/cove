@@ -75,6 +75,7 @@ app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/", () => Results.Content(ManagerPage.Html, "text/html"));
 app.MapGet("/api/instances", async (InstanceManagerService managerService) => Results.Ok(await managerService.ListAsync()));
 app.MapPost("/api/instances", async (CreateInstanceRequest request, InstanceManagerService managerService) => Results.Ok(await managerService.CreateAsync(request)));
+app.MapPut("/api/instances/{id}", async (string id, UpdateInstanceRequest request, InstanceManagerService managerService) => Results.Ok(await managerService.UpdateAsync(id, request)));
 app.MapPost("/api/instances/{id}/start", async (string id, InstanceManagerService managerService) => Results.Ok(await managerService.StartAsync(id)));
 app.MapPost("/api/instances/{id}/stop", async (string id, InstanceManagerService managerService) => Results.Ok(await managerService.StopAsync(id)));
 app.MapPost("/api/instances/{id}/open", (string id, InstanceManagerService managerService) =>
@@ -358,7 +359,7 @@ internal sealed class InstanceManagerService
                 .Where(port => port > 0)
                 .ToHashSet();
 
-            var port = request.Port ?? FindFreePort(9999, reserved);
+            var port = request.Port ?? FindFreePort(5073, reserved);
             reserved.Add(port);
             var managedPostgres = request.ManagedPostgres ?? true;
             var postgresPort = managedPostgres ? request.PostgresPort ?? FindFreePort(5433, reserved) : 0;
@@ -385,6 +386,54 @@ internal sealed class InstanceManagerService
             };
 
             _registry.Instances.Add(instance);
+            await SaveAsync();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        return await ToDtoAsync(instance);
+    }
+
+    public async Task<InstanceDto> UpdateAsync(string id, UpdateInstanceRequest request)
+    {
+        CoveInstanceRecord instance;
+        await _gate.WaitAsync();
+        try
+        {
+            instance = ResolveInstance(id) ?? throw new BadHttpRequestException("Instance not found.");
+
+            if (request.Name is not null)
+            {
+                var trimmedName = request.Name.Trim();
+                if (string.IsNullOrWhiteSpace(trimmedName))
+                    throw new BadHttpRequestException("Name cannot be empty.");
+                var existing = _registry.Instances.FirstOrDefault(i =>
+                    !string.Equals(i.Id, id, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(i.Name, trimmedName, StringComparison.OrdinalIgnoreCase));
+                if (existing != null)
+                    throw new BadHttpRequestException($"An instance named '{trimmedName}' already exists.");
+                instance.Name = trimmedName;
+            }
+
+            if (request.HomePath is not null)
+                instance.HomePath = NormalizePath(request.HomePath);
+
+            if (request.Port.HasValue)
+            {
+                if (request.Port.Value is < 1 or > 65535)
+                    throw new BadHttpRequestException("Port must be between 1 and 65535.");
+                instance.Port = request.Port.Value;
+            }
+
+            if (request.ManagedPostgres.HasValue)
+                instance.ManagedPostgres = request.ManagedPostgres.Value;
+
+            if (request.PostgresPort.HasValue)
+                instance.PostgresPort = request.PostgresPort.Value;
+
+            instance.UpdatedAt = DateTimeOffset.UtcNow;
             await SaveAsync();
         }
         finally
@@ -560,7 +609,7 @@ internal sealed class InstanceManagerService
             Id = "default",
             Name = "Default",
             HomePath = Path.GetFullPath(ManagerRoot),
-            Port = 9999,
+            Port = 5073,
             ManagedPostgres = true,
             PostgresPort = 5433,
             CreatedAt = DateTimeOffset.UtcNow,
@@ -932,6 +981,7 @@ internal sealed class InstanceManagerService
 }
 
 internal sealed record CreateInstanceRequest(string? Name, string? HomePath, int? Port, bool? ManagedPostgres, int? PostgresPort);
+internal sealed record UpdateInstanceRequest(string? Name, string? HomePath, int? Port, bool? ManagedPostgres, int? PostgresPort);
 
 internal sealed record InstanceDto(
     string Id,
@@ -1010,6 +1060,15 @@ internal static class ManagerPage
     .actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
     .logs { white-space: pre-wrap; overflow: auto; max-height: 320px; margin-top: 14px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #090a0c; color: #d4d8dd; }
     .error { color: #ffb4b4; min-height: 20px; margin-bottom: 10px; }
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 100; }
+    .modal-overlay[hidden] { display: none; }
+    .modal { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 24px; min-width: 380px; max-width: 90vw; display: grid; gap: 14px; }
+    .modal h2 { margin: 0; font-size: 18px; }
+    .modal .buttons { display: flex; gap: 8px; justify-content: flex-end; }
+    .modal form { all: unset; display: grid; gap: 14px; }
+    .modal form label { display: grid; gap: 5px; color: var(--muted); font-size: 12px; text-transform: uppercase; }
+    .modal form input { width: 100%; border: 1px solid var(--line); border-radius: 8px; background: #121417; color: var(--text); padding: 9px 10px; outline: none; }
+    .modal form input:focus { border-color: var(--accent); }
     @media (max-width: 820px) { form, .instance { grid-template-columns: 1fr; } .actions, header { justify-content: flex-start; } }
   </style>
 </head>
@@ -1027,6 +1086,21 @@ internal static class ManagerPage
       <label>PG port<input id="pg-port" type="number" min="1" max="65535" placeholder="Auto" /></label>
       <button class="primary" type="submit">Create</button>
     </form>
+    <div id="edit-modal" class="modal-overlay" hidden>
+      <div class="modal">
+        <h2>Edit Instance</h2>
+        <form id="edit-form">
+          <label>Name<input id="edit-name" required /></label>
+          <label>Home path<input id="edit-home" /></label>
+          <label>App port<input id="edit-port" type="number" min="1" max="65535" /></label>
+          <label>PG port<input id="edit-pg-port" type="number" min="1" max="65535" /></label>
+          <div class="buttons">
+            <button type="button" id="edit-cancel">Cancel</button>
+            <button class="primary" type="submit">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
     <section id="instances" class="list"></section>
     <pre id="logs" class="logs" hidden></pre>
   </main>
@@ -1074,6 +1148,7 @@ internal static class ManagerPage
                     <button data-action="open" data-id="${instance.id}" ${isRunning ? '' : 'disabled'}>Open</button>
           <button data-action="logs" data-id="${instance.id}">Logs</button>
           <button data-action="console" data-id="${instance.id}">Console</button>
+          <button data-action="edit" data-id="${instance.id}">Edit</button>
           ${instance.id === 'default' ? '' : `<button class="danger" data-action="remove" data-id="${instance.id}">Remove</button>`}
         </div>
       </article>`;
@@ -1082,6 +1157,44 @@ internal static class ManagerPage
     function escapeHtml(value) {
       return String(value).replace(/[&<>'"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[ch]));
     }
+
+    let editingId = null;
+    const editModal = $('edit-modal');
+    const editForm = $('edit-form');
+
+    function showEdit(instance) {
+      editingId = instance.id;
+      $('edit-name').value = instance.name;
+      $('edit-home').value = instance.homePath;
+      $('edit-port').value = instance.port;
+      $('edit-pg-port').value = instance.managedPostgres ? instance.postgresPort : '';
+      editModal.hidden = false;
+      $('edit-name').focus();
+    }
+
+    $('edit-cancel').addEventListener('click', () => { editModal.hidden = true; editingId = null; });
+
+    editForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      try {
+        await request(`/api/instances/${editingId}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            name: $('edit-name').value || null,
+            homePath: $('edit-home').value || null,
+            port: $('edit-port').value ? Number($('edit-port').value) : null,
+            postgresPort: $('edit-pg-port').value ? Number($('edit-pg-port').value) : null,
+          }),
+        });
+        editModal.hidden = true;
+        editingId = null;
+        await load();
+      } catch (err) { error.textContent = err.message; }
+    });
+
+    editModal.addEventListener('click', (event) => {
+      if (event.target === editModal) { editModal.hidden = true; editingId = null; }
+    });
 
     $('create-form').addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -1110,6 +1223,12 @@ internal static class ManagerPage
         if (action === 'stop') await request(`/api/instances/${id}/stop`, { method: 'POST' });
         if (action === 'open') await request(`/api/instances/${id}/open`, { method: 'POST' });
         if (action === 'console') await request(`/api/instances/${id}/console`, { method: 'POST' });
+        if (action === 'edit') {
+          const instances = await request('/api/instances');
+          const instance = instances.find(i => i.id === id);
+          if (instance) showEdit(instance);
+          return;
+        }
         if (action === 'remove' && confirm('Remove this instance from the manager?')) await request(`/api/instances/${id}?deleteData=false`, { method: 'DELETE' });
         if (action === 'logs') {
           const result = await request(`/api/instances/${id}/logs?tail=160`);

@@ -62,13 +62,13 @@ USER cove
 WORKDIR /opt/cove
 
 ENV COVE__Host=0.0.0.0 \
-    COVE__Port=9999 \
+    COVE__Port=5073 \
     COVE__GeneratedPath=/generated \
     COVE__CachePath=/cache \
     COVE__Postgres__Managed=false
 
-EXPOSE 9999
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD curl -fsS http://localhost:9999/health || exit 1
+EXPOSE 5073
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD curl -fsS http://localhost:5073/health || exit 1
 VOLUME ["/data", "/config", "/generated", "/cache", "/backups"]
 
 ENTRYPOINT ["dotnet", "Cove.Api.dll"]

@@ -10,7 +10,7 @@ A single container with PostgreSQL, pgvector, FFmpeg, and Cove. Best for UnRAID,
 docker compose -f docker-compose.allinone.yml up -d
 ```
 
-Then open http://localhost:9999.
+Then open http://localhost:5073.
 
 ### Volumes
 
@@ -97,7 +97,7 @@ All Cove configuration can be overridden via environment variables using the `CO
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `COVE__Port` | `9999` | HTTP port |
+| `COVE__Port` | `5073` | HTTP port |
 | `COVE__Postgres__Managed` | `false` | Use embedded PostgreSQL manager (disabled in Docker) |
 | `COVE__Postgres__ConnectionString` | — | PostgreSQL connection string; the target database must have pgvector available |
 | `COVE__GeneratedPath` | `/generated` | Path for thumbnails/previews |

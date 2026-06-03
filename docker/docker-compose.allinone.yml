@@ -22,7 +22,7 @@ services:
     image: ghcr.io/yourcove/cove:latest
     restart: unless-stopped
     ports:
-      - "9999:9999"
+      - "5073:5073"
     volumes:
       - ${COVE_DATA_DIR:-./cove-data}/pgdata:/var/lib/postgresql/cove-data
       - ${COVE_DATA_DIR:-./cove-data}/data:/data

@@ -9,7 +9,7 @@ public class CoveConfiguration
     public string? FfmpegPath { get; set; }
     public string? FfprobePath { get; set; }
     public string Host { get; set; } = "0.0.0.0";
-    public int Port { get; set; } = 9999;
+    public int Port { get; set; } = 5073;
     public int MaxParallelTasks { get; set; } = 5;
     public int MaxConcurrentDownloads { get; set; } = 3;
     public List<DownloaderPathOverride> DownloaderPathOverrides { get; set; } = [];

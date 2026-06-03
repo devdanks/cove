@@ -1,4 +1,5 @@
 using System.IO.Enumeration;
+using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -26,6 +27,7 @@ public class ScanService(
     ILogger<ScanService> logger) : IScanService
 {
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> FolderCreationLocks = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly TimeSpan FileModTimeUnchangedTolerance = TimeSpan.FromMilliseconds(1);
     /// <summary>
     /// Resolves the max degree of parallelism from config.
     /// -1 means use all processors; 0 or 1 means single-threaded; >1 means that many threads.
@@ -171,9 +173,12 @@ public class ScanService(
             var processedTextPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var ignoreRuleCache = new Dictionary<string, List<IgnoreRule>>(StringComparer.OrdinalIgnoreCase);
 
+            var scanStopwatch = Stopwatch.StartNew();
+
             // Phase 1: Discover files
             progress.Report(0, "Discovering files...");
             var files = new List<DiscoveredFile>();
+            var discoveryProgress = new ScanDiscoveryProgress(progress, logger);
             foreach (var scanTarget in scanTargets)
             {
                 if (scanTarget.IsFile)
@@ -208,7 +213,10 @@ public class ScanService(
                     }
 
                     if (TryCreateDiscoveredFile(scanTarget.Path, ext, out var discoveredFile))
+                    {
                         files.Add(discoveredFile);
+                        discoveryProgress.RecordMediaFile(discoveredFile.Path);
+                    }
                     continue;
                 }
 
@@ -218,39 +226,45 @@ public class ScanService(
                     continue;
                 }
 
-                var dirFiles = EnumerateFilesSafely(scanTarget.Path)
-                    .Where(f =>
-                    {
-                        var ext = Path.GetExtension(f);
-                        if (!allExts.Contains(ext)) return false;
-                        if (IsMediaTypeExcludedByScanTarget(
-                            ext,
-                            scanTarget.ExcludeVideo,
-                            scanTarget.ExcludeImage,
-                            scanTarget.ExcludeAudio,
-                            scanTarget.ExcludeText,
-                            videoExts,
-                            imageExts,
-                            galleryExts,
-                            audioExts,
-                            textExts)) return false;
-                        return !IsExcludedByConfiguredPatterns(f, ext, imageExts, galleryExts, cfg)
-                            && !IsExcludedByFolderIgnore(f, scanTarget.Path, ignoreRuleCache);
-                    })
-                    .Select(f => TryCreateDiscoveredFile(f, Path.GetExtension(f), out var discoveredFile) ? discoveredFile : null)
-                    .OfType<DiscoveredFile>();
-
-                files.AddRange(dirFiles);
+                foreach (var discoveredFile in DiscoverFilesSafely(
+                    scanTarget,
+                    allExts,
+                    videoExts,
+                    imageExts,
+                    galleryExts,
+                    audioExts,
+                    textExts,
+                    cfg,
+                    ignoreRuleCache,
+                    discoveryProgress,
+                    ct))
+                {
+                    files.Add(discoveredFile);
+                }
             }
+            discoveryProgress.Complete();
 
-            logger.LogInformation("Discovered {Count} files to scan", files.Count);
+            logger.LogInformation(
+                "Scan phase discovery completed in {ElapsedMs} ms. Discovered {FileCount} media files across {DirectoryCount} directories; skipped {IgnoredPathCount} ignored paths and {UnsupportedFileCount} unsupported files.",
+                scanStopwatch.ElapsedMilliseconds,
+                files.Count,
+                discoveryProgress.DirectoryCount,
+                discoveryProgress.IgnoredPathCount,
+                discoveryProgress.UnsupportedFileCount);
 
             if (files.Count > 0)
             {
                 // Phase 2: Process files
                 using var scope = scopeFactory.CreateScope();
                 var db = scope.ServiceProvider.GetRequiredService<CoveContext>();
-                var existingFiles = await LoadExistingFileScanIndexAsync(db, files, videoExts, imageExts, galleryExts, audioExts, textExts, ct);
+                progress.Report(0.10, $"Loading existing file index for {files.Count:N0} media files...");
+                var indexStopwatch = Stopwatch.StartNew();
+                var existingFiles = await LoadExistingFileScanIndexAsync(db, files, videoExts, imageExts, galleryExts, audioExts, textExts, progress, logger, ct);
+                logger.LogInformation(
+                    "Scan phase existing-file index completed in {ElapsedMs} ms. Matched {ExistingCount} of {DiscoveredCount} discovered media files.",
+                    indexStopwatch.ElapsedMilliseconds,
+                    existingFiles.Count,
+                    files.Count);
                 var folderCache = new Dictionary<string, Folder>(StringComparer.OrdinalIgnoreCase);
 
                 void PublishScanEntityEvent(string entityType, int entityId, bool isUpdate)
@@ -269,22 +283,94 @@ public class ScanService(
                 }
 
                 var processedCount = 0;
+                var skippedUnchangedCount = 0;
+                var changedOrNewCount = 0;
+                var newFileCount = 0;
+                var metadataProbeCount = 0;
+                var sizeChangedCount = 0;
+                var modTimeChangedCount = 0;
+                var rescanForcedCount = 0;
+                var typeMismatchCount = 0;
+                var failedCount = 0;
+                var processStopwatch = Stopwatch.StartNew();
+                var lastProcessProgressAt = DateTime.MinValue;
+
+                void ReportProcessingProgress(bool force, string? path = null)
+                {
+                    var now = DateTime.UtcNow;
+                    if (!force && processedCount % 1000 != 0 && (now - lastProcessProgressAt).TotalSeconds < 1)
+                        return;
+
+                    lastProcessProgressAt = now;
+                    var ratio = files.Count == 0 ? 1d : (double)processedCount / files.Count;
+                    var message = $"Checking media files ({processedCount:N0}/{files.Count:N0}; {skippedUnchangedCount:N0} unchanged, {changedOrNewCount:N0} changed/new)";
+                    if (!string.IsNullOrWhiteSpace(path))
+                        message += $": {Path.GetFileName(path)}";
+                    progress.Report(0.15 + (0.70 * ratio), message);
+                }
+
                 foreach (var file in files)
                 {
                     ct.ThrowIfCancellationRequested();
                     processedCount++;
-                    progress.Report(0.85 * (double)processedCount / files.Count, Path.GetFileName(file.Path));
 
                     try
                     {
                         var isKnownFile = existingFiles.TryGetValue(file.StoredPath, out var existingFile);
                         if (isKnownFile)
                         {
-                            if (!options.Rescan && !existingFile!.NeedsMetadataProbe && existingFile.ModTime >= file.ModTime && existingFile.Size == file.Size)
+                            var changeReason = GetKnownFileChangeReason(existingFile!, file, options.Rescan);
+                            if (changeReason == ScanFileChangeReason.Unchanged)
                             {
+                                skippedUnchangedCount++;
+                                ReportProcessingProgress(false);
                                 continue; // Not modified and metadata present, skip
                             }
+
+                            switch (changeReason)
+                            {
+                                case ScanFileChangeReason.MetadataProbe:
+                                    metadataProbeCount++;
+                                    break;
+                                case ScanFileChangeReason.SizeChanged:
+                                    sizeChangedCount++;
+                                    break;
+                                case ScanFileChangeReason.ModTimeChanged:
+                                    modTimeChangedCount++;
+                                    break;
+                                case ScanFileChangeReason.RescanForced:
+                                    rescanForcedCount++;
+                                    break;
+                            }
+
+                            var expectedKind = GetExpectedFileKind(
+                                file.Extension,
+                                videoExts,
+                                imageExts,
+                                galleryExts,
+                                audioExts,
+                                textExts);
+                            if (existingFile!.Kind != ExistingFileKind.Unknown
+                                && expectedKind != ExistingFileKind.Unknown
+                                && existingFile.Kind != expectedKind)
+                            {
+                                typeMismatchCount++;
+                                logger.LogWarning(
+                                    "Skipping changed scan path because it already exists as {ExistingKind} but extension maps to {ExpectedKind}: {Path}",
+                                    existingFile.Kind,
+                                    expectedKind,
+                                    file.Path);
+                                ReportProcessingProgress(false);
+                                continue;
+                            }
                         }
+                        else
+                        {
+                            newFileCount++;
+                        }
+
+                        changedOrNewCount++;
+                        ReportProcessingProgress(false, file.Path);
 
                         // Process the file
                         if (videoExts.Contains(file.Extension))
@@ -330,11 +416,26 @@ public class ScanService(
                     }
                     catch (Exception ex)
                     {
+                        failedCount++;
                         logger.LogError(ex, "Error processing file: {Path}", file.Path);
                     }
                 }
+                ReportProcessingProgress(true);
 
                 await db.SaveChangesAsync(ct);
+                logger.LogInformation(
+                    "Scan phase processing completed in {ElapsedMs} ms. Checked {CheckedCount} files; skipped {SkippedCount} unchanged; processed {ChangedOrNewCount} changed/new; new={NewFileCount}, metadataProbe={MetadataProbeCount}, sizeChanged={SizeChangedCount}, modTimeChanged={ModTimeChangedCount}, rescanForced={RescanForcedCount}, typeMismatch={TypeMismatchCount}, failed={FailedCount}.",
+                    processStopwatch.ElapsedMilliseconds,
+                    processedCount,
+                    skippedUnchangedCount,
+                    changedOrNewCount,
+                    newFileCount,
+                    metadataProbeCount,
+                    sizeChangedCount,
+                    modTimeChangedCount,
+                    rescanForcedCount,
+                    typeMismatchCount,
+                    failedCount);
 
                 // Phase 3: Create galleries from folders (if enabled)
                 if (cfg.CreateGalleriesFromFolders || HasForceGalleryHints(files))
@@ -376,6 +477,7 @@ public class ScanService(
             }
 
             logger.LogInformation("Scan completed. Processed {Count} core files, {ParticipantCount} extension participant(s)", files.Count, participants.Count);
+            logger.LogInformation("Scan total elapsed time: {ElapsedMs} ms", scanStopwatch.ElapsedMilliseconds);
             eventBus.Publish(new CoveEvent(EventType.ScanCompleted));
         });
     }
@@ -390,7 +492,7 @@ public class ScanService(
                 normalizedPath,
                 NormalizeStoredFilePath(normalizedPath),
                 extension,
-                new FileStat(fileInfo.Length, fileInfo.LastWriteTimeUtc));
+                new FileStat(fileInfo.Length, NormalizeFileModTime(fileInfo.LastWriteTimeUtc)));
             return true;
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or FileNotFoundException or DirectoryNotFoundException)
@@ -409,16 +511,124 @@ public class ScanService(
         IReadOnlySet<string> galleryExts,
         IReadOnlySet<string> audioExts,
         IReadOnlySet<string> textExts,
+        Cove.Core.Interfaces.IJobProgress progress,
+        ILogger<ScanService> logger,
         CancellationToken ct)
     {
         var index = new Dictionary<string, ExistingFileScanInfo>(StringComparer.OrdinalIgnoreCase);
-        await AddExistingFilesForExtensionsAsync(db, index, files, videoExts, AddExistingVideoFilesAsync, ct);
-        await AddExistingFilesForExtensionsAsync(db, index, files, imageExts, AddExistingImageFilesAsync, ct);
-        await AddExistingFilesForExtensionsAsync(db, index, files, galleryExts, AddExistingGalleryFilesAsync, ct);
-        await AddExistingFilesForExtensionsAsync(db, index, files, audioExts, AddExistingAudioFilesAsync, ct);
-        await AddExistingFilesForExtensionsAsync(db, index, files, textExts, AddExistingTextFilesAsync, ct);
+        await AddExistingBaseFilesAsync(db, index, files, progress, logger, ct);
+        await AddExistingFilesForExtensionsAsync(db, index, files, videoExts, "videos", AddExistingVideoFilesAsync, progress, logger, ct);
+        await AddExistingFilesForExtensionsAsync(db, index, files, imageExts, "images", AddExistingImageFilesAsync, progress, logger, ct);
+        await AddExistingFilesForExtensionsAsync(db, index, files, galleryExts, "galleries", AddExistingGalleryFilesAsync, progress, logger, ct);
+        await AddExistingFilesForExtensionsAsync(db, index, files, audioExts, "audio", AddExistingAudioFilesAsync, progress, logger, ct);
+        await AddExistingFilesForExtensionsAsync(db, index, files, textExts, "texts", AddExistingTextFilesAsync, progress, logger, ct);
 
         return index;
+    }
+
+    private static ScanFileChangeReason GetKnownFileChangeReason(ExistingFileScanInfo existingFile, DiscoveredFile file, bool rescan)
+    {
+        if (rescan)
+            return ScanFileChangeReason.RescanForced;
+
+        if (existingFile.NeedsMetadataProbe)
+            return ScanFileChangeReason.MetadataProbe;
+
+        if (existingFile.Size != file.Size)
+            return ScanFileChangeReason.SizeChanged;
+
+        if (existingFile.ModTime >= file.ModTime
+            || file.ModTime - existingFile.ModTime <= FileModTimeUnchangedTolerance)
+        {
+            return ScanFileChangeReason.Unchanged;
+        }
+
+        return ScanFileChangeReason.ModTimeChanged;
+    }
+
+    private static ExistingFileKind GetExpectedFileKind(
+        string extension,
+        IReadOnlySet<string> videoExts,
+        IReadOnlySet<string> imageExts,
+        IReadOnlySet<string> galleryExts,
+        IReadOnlySet<string> audioExts,
+        IReadOnlySet<string> textExts)
+    {
+        if (videoExts.Contains(extension)) return ExistingFileKind.Video;
+        if (imageExts.Contains(extension)) return ExistingFileKind.Image;
+        if (galleryExts.Contains(extension)) return ExistingFileKind.Gallery;
+        if (audioExts.Contains(extension)) return ExistingFileKind.Audio;
+        if (textExts.Contains(extension)) return ExistingFileKind.Text;
+        return ExistingFileKind.Unknown;
+    }
+
+    private static ExistingFileKind ToExistingFileKind(string? fileType) => fileType switch
+    {
+        "Video" => ExistingFileKind.Video,
+        "Image" => ExistingFileKind.Image,
+        "Gallery" => ExistingFileKind.Gallery,
+        "Audio" => ExistingFileKind.Audio,
+        "Text" => ExistingFileKind.Text,
+        _ => ExistingFileKind.Unknown,
+    };
+
+    private static async Task AddExistingBaseFilesAsync(
+        CoveContext db,
+        Dictionary<string, ExistingFileScanInfo> index,
+        IReadOnlyCollection<DiscoveredFile> files,
+        Cove.Core.Interfaces.IJobProgress progress,
+        ILogger<ScanService> logger,
+        CancellationToken ct)
+    {
+        var storedPaths = files
+            .Select(file => file.StoredPath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (storedPaths.Length == 0)
+            return;
+
+        var stopwatch = Stopwatch.StartNew();
+        logger.LogInformation("Scan existing-file index: loading {Count} base file paths", storedPaths.Length);
+
+        var chunkIndex = 0;
+        foreach (var chunk in storedPaths.Chunk(1000))
+        {
+            chunkIndex++;
+            if (chunkIndex == 1 || chunkIndex % 25 == 0)
+            {
+                progress.Report(0.10, $"Loading existing file index ({Math.Min(chunkIndex * 1000, storedPaths.Length):N0}/{storedPaths.Length:N0})");
+            }
+
+            var rows = await db.Set<BaseFileEntity>()
+                .AsNoTracking()
+                .Where(file => chunk.Contains(file.Path))
+                .Select(file => new
+                {
+                    file.Path,
+                    file.Id,
+                    FileType = EF.Property<string>(file, "FileType"),
+                    file.Size,
+                    file.ModTime,
+                })
+                .ToListAsync(ct);
+
+            foreach (var row in rows)
+            {
+                index[row.Path] = new ExistingFileScanInfo(
+                    row.Path,
+                    row.Id,
+                    ToExistingFileKind(row.FileType),
+                    row.Size,
+                    row.ModTime,
+                    false);
+            }
+        }
+
+        logger.LogInformation(
+            "Scan existing-file index: loaded base file paths in {ElapsedMs} ms using {ChunkCount} chunks",
+            stopwatch.ElapsedMilliseconds,
+            chunkIndex);
     }
 
     private static async Task AddExistingFilesForExtensionsAsync(
@@ -426,7 +636,10 @@ public class ScanService(
         Dictionary<string, ExistingFileScanInfo> index,
         IReadOnlyCollection<DiscoveredFile> files,
         IReadOnlySet<string> extensions,
+        string mediaType,
         Func<CoveContext, Dictionary<string, ExistingFileScanInfo>, string[], CancellationToken, Task> addExistingFiles,
+        Cove.Core.Interfaces.IJobProgress progress,
+        ILogger<ScanService> logger,
         CancellationToken ct)
     {
         var storedPaths = files
@@ -435,8 +648,29 @@ public class ScanService(
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
+        if (storedPaths.Length == 0)
+            return;
+
+        var stopwatch = Stopwatch.StartNew();
+        logger.LogInformation("Scan existing-file index: loading {Count} {MediaType} paths", storedPaths.Length, mediaType);
+
+        var chunkIndex = 0;
         foreach (var chunk in storedPaths.Chunk(1000))
+        {
+            chunkIndex++;
+            if (chunkIndex == 1 || chunkIndex % 25 == 0)
+            {
+                progress.Report(0.10, $"Loading existing {mediaType} index ({Math.Min(chunkIndex * 1000, storedPaths.Length):N0}/{storedPaths.Length:N0})");
+            }
+
             await addExistingFiles(db, index, chunk, ct);
+        }
+
+        logger.LogInformation(
+            "Scan existing-file index: loaded {MediaType} paths in {ElapsedMs} ms using {ChunkCount} chunks",
+            mediaType,
+            stopwatch.ElapsedMilliseconds,
+            chunkIndex);
     }
 
     private static async Task AddExistingVideoFilesAsync(CoveContext db, Dictionary<string, ExistingFileScanInfo> index, string[] storedPaths, CancellationToken ct)
@@ -454,7 +688,7 @@ public class ScanService(
             .ToListAsync(ct);
 
         foreach (var row in rows)
-            index.TryAdd(row.StoredPath, row);
+            index[row.StoredPath] = row;
     }
 
     private static async Task AddExistingImageFilesAsync(CoveContext db, Dictionary<string, ExistingFileScanInfo> index, string[] storedPaths, CancellationToken ct)
@@ -466,7 +700,7 @@ public class ScanService(
             .ToListAsync(ct);
 
         foreach (var row in rows)
-            index.TryAdd(row.StoredPath, row);
+            index[row.StoredPath] = row;
     }
 
     private static async Task AddExistingGalleryFilesAsync(CoveContext db, Dictionary<string, ExistingFileScanInfo> index, string[] storedPaths, CancellationToken ct)
@@ -478,7 +712,7 @@ public class ScanService(
             .ToListAsync(ct);
 
         foreach (var row in rows)
-            index.TryAdd(row.StoredPath, row);
+            index[row.StoredPath] = row;
     }
 
     private static async Task AddExistingAudioFilesAsync(CoveContext db, Dictionary<string, ExistingFileScanInfo> index, string[] storedPaths, CancellationToken ct)
@@ -496,7 +730,7 @@ public class ScanService(
             .ToListAsync(ct);
 
         foreach (var row in rows)
-            index.TryAdd(row.StoredPath, row);
+            index[row.StoredPath] = row;
     }
 
     private static async Task AddExistingTextFilesAsync(CoveContext db, Dictionary<string, ExistingFileScanInfo> index, string[] storedPaths, CancellationToken ct)
@@ -514,7 +748,7 @@ public class ScanService(
             .ToListAsync(ct);
 
         foreach (var row in rows)
-            index.TryAdd(row.StoredPath, row);
+            index[row.StoredPath] = row;
     }
 
     private async Task GenerateRequestedAssetsAsync(
@@ -1382,7 +1616,7 @@ public class ScanService(
                     ParentFolderId = virtualFolder.Id,  // Use virtual folder specific to this zip
                     ZipFileId = galleryFile.Id,  // Link to parent zip file
                     Size = entry.Length,
-                    ModTime = entry.LastWriteTime.UtcDateTime,
+                    ModTime = NormalizeFileModTime(entry.LastWriteTime.UtcDateTime),
                     Format = Path.GetExtension(entry.Name).TrimStart('.').ToLowerInvariant(),
                     // TODO: Extract dimensions using image processing library
                     Width = 0,
@@ -1993,59 +2227,172 @@ public class ScanService(
             || (galleryExts.Contains(extension) && IsExcluded(path, cfg.ExcludeGalleryPatterns));
     }
 
-    private IEnumerable<string> EnumerateFilesSafely(string rootPath)
+    private IEnumerable<DiscoveredFile> DiscoverFilesSafely(
+        ScanTarget scanTarget,
+        HashSet<string> allExts,
+        HashSet<string> videoExts,
+        HashSet<string> imageExts,
+        HashSet<string> galleryExts,
+        HashSet<string> audioExts,
+        HashSet<string> textExts,
+        CoveConfiguration cfg,
+        Dictionary<string, List<IgnoreRule>> ruleCache,
+        ScanDiscoveryProgress discoveryProgress,
+        CancellationToken ct)
     {
-        var pending = new Stack<string>();
-        pending.Push(rootPath);
+        var pending = new Stack<DirectoryScanFrame>();
+        pending.Push(CreateDirectoryScanFrame(scanTarget.Path, []));
 
         while (pending.Count > 0)
         {
-            var directory = pending.Pop();
-            IEnumerable<string> files;
+            ct.ThrowIfCancellationRequested();
+            var frame = pending.Pop();
+            var directory = frame.Path;
+            discoveryProgress.RecordDirectory(directory);
+
+            List<FileSystemInfo> entries;
             try
             {
-                files = Directory.EnumerateFiles(directory).ToList();
+                entries = new DirectoryInfo(directory)
+                    .EnumerateFileSystemInfos("*", new EnumerationOptions { AttributesToSkip = 0, IgnoreInaccessible = false })
+                    .ToList();
             }
             catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or DirectoryNotFoundException)
             {
-                logger.LogWarning(ex, "Skipping files in unreadable scan directory: {Path}", directory);
+                discoveryProgress.RecordUnreadablePath(directory);
+                logger.LogWarning(ex, "Skipping unreadable scan directory: {Path}", directory);
                 continue;
             }
 
-            foreach (var file in files)
+            foreach (var entry in entries)
             {
-                yield return file;
-            }
+                ct.ThrowIfCancellationRequested();
 
-            IEnumerable<string> subdirectories;
-            try
-            {
-                subdirectories = Directory.EnumerateDirectories(directory).ToList();
-            }
-            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or DirectoryNotFoundException)
-            {
-                logger.LogWarning(ex, "Skipping nested scan directories under unreadable directory: {Path}", directory);
-                continue;
-            }
-
-            foreach (var subdirectory in subdirectories)
-            {
+                var path = entry.FullName;
+                FileAttributes attributes;
                 try
                 {
-                    if ((File.GetAttributes(subdirectory) & FileAttributes.ReparsePoint) != 0)
-                    {
-                        continue;
-                    }
+                    attributes = entry.Attributes;
                 }
                 catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or DirectoryNotFoundException)
                 {
-                    logger.LogWarning(ex, "Skipping unreadable scan directory: {Path}", subdirectory);
+                    discoveryProgress.RecordUnreadablePath(path);
+                    logger.LogWarning(ex, "Skipping unreadable scan path: {Path}", path);
                     continue;
                 }
 
-                pending.Push(subdirectory);
+                var isDirectory = (attributes & FileAttributes.Directory) != 0;
+                if (isDirectory)
+                {
+                    if ((attributes & FileAttributes.ReparsePoint) != 0)
+                    {
+                        discoveryProgress.RecordIgnoredPath(path);
+                        continue;
+                    }
+
+                    if (IsExcludedByActiveIgnoreRules(path, frame.IgnoreRuleSets, isDirectory: true))
+                    {
+                        discoveryProgress.RecordIgnoredPath(path);
+                        continue;
+                    }
+
+                    pending.Push(CreateDirectoryScanFrame(path, frame.IgnoreRuleSets));
+                    continue;
+                }
+
+                var ext = Path.GetExtension(path);
+                if (!allExts.Contains(ext))
+                {
+                    discoveryProgress.RecordUnsupportedFile();
+                    continue;
+                }
+
+                if (IsMediaTypeExcludedByScanTarget(
+                    ext,
+                    scanTarget.ExcludeVideo,
+                    scanTarget.ExcludeImage,
+                    scanTarget.ExcludeAudio,
+                    scanTarget.ExcludeText,
+                    videoExts,
+                    imageExts,
+                    galleryExts,
+                    audioExts,
+                    textExts))
+                {
+                    discoveryProgress.RecordIgnoredPath(path);
+                    continue;
+                }
+
+                if (IsExcludedByConfiguredPatterns(path, ext, imageExts, galleryExts, cfg)
+                    || IsExcludedByActiveIgnoreRules(path, frame.IgnoreRuleSets))
+                {
+                    discoveryProgress.RecordIgnoredPath(path);
+                    continue;
+                }
+
+                if (entry is not FileInfo fileInfo)
+                {
+                    discoveryProgress.RecordUnsupportedFile();
+                    continue;
+                }
+
+                DiscoveredFile discoveredFile;
+                try
+                {
+                    var normalizedPath = NormalizePath(path);
+                    discoveredFile = new DiscoveredFile(
+                        normalizedPath,
+                        NormalizeStoredFilePath(normalizedPath),
+                        ext,
+                        new FileStat(fileInfo.Length, NormalizeFileModTime(fileInfo.LastWriteTimeUtc)));
+                }
+                catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or FileNotFoundException or DirectoryNotFoundException)
+                {
+                    discoveryProgress.RecordUnreadablePath(path);
+                    logger.LogWarning(ex, "Skipping unreadable scan file: {Path}", path);
+                    continue;
+                }
+
+                discoveryProgress.RecordMediaFile(discoveredFile.Path);
+                yield return discoveredFile;
             }
         }
+
+        DirectoryScanFrame CreateDirectoryScanFrame(string directory, IReadOnlyList<ActiveIgnoreRuleSet> inheritedRuleSets)
+        {
+            var rules = GetIgnoreRules(NormalizePath(directory), ruleCache);
+            if (rules.Count == 0)
+                return new DirectoryScanFrame(directory, inheritedRuleSets);
+
+            var ruleSets = new List<ActiveIgnoreRuleSet>(inheritedRuleSets.Count + 1);
+            ruleSets.AddRange(inheritedRuleSets);
+            ruleSets.Add(new ActiveIgnoreRuleSet(NormalizePath(directory), rules));
+            return new DirectoryScanFrame(directory, ruleSets);
+        }
+    }
+
+    private static bool IsExcludedByActiveIgnoreRules(string path, IReadOnlyList<ActiveIgnoreRuleSet> ruleSets, bool isDirectory = false)
+    {
+        if (ruleSets.Count == 0)
+            return false;
+
+        var fullPath = NormalizePath(path);
+        var fileName = Path.GetFileName(fullPath);
+        var ignored = false;
+
+        foreach (var ruleSet in ruleSets)
+        {
+            var relativePath = Path.GetRelativePath(ruleSet.Directory, fullPath).Replace('\\', '/');
+            if (isDirectory && !relativePath.EndsWith('/'))
+                relativePath += "/";
+            foreach (var rule in ruleSet.Rules)
+            {
+                if (IgnoreRuleMatches(rule.Pattern, relativePath, fileName))
+                    ignored = !rule.Negated;
+            }
+        }
+
+        return ignored;
     }
 
     private static bool IsExcludedByFolderIgnore(string path, string rootPath, Dictionary<string, List<IgnoreRule>> ruleCache)
@@ -2200,7 +2547,13 @@ public class ScanService(
     private static FileStat GetFileStat(string path)
     {
         var fileInfo = new FileInfo(path);
-        return new FileStat(fileInfo.Length, fileInfo.LastWriteTimeUtc);
+        return new FileStat(fileInfo.Length, NormalizeFileModTime(fileInfo.LastWriteTimeUtc));
+    }
+
+    private static DateTime NormalizeFileModTime(DateTime modTime)
+    {
+        var utc = modTime.Kind == DateTimeKind.Utc ? modTime : modTime.ToUniversalTime();
+        return new DateTime(utc.Ticks - (utc.Ticks % TimeSpan.TicksPerSecond), DateTimeKind.Utc);
     }
 
     private static string NormalizeStoredFolderPath(string path)
@@ -2231,9 +2584,93 @@ public class ScanService(
     private static readonly string[] FolderIgnoreFileNames = [".coveignore", ".stashignore"];
 
     private record CaptionSidecar(string Filename, string LanguageCode, string CaptionType);
-    private enum ExistingFileKind { Video, Image, Gallery, Audio, Text }
+    private enum ExistingFileKind { Unknown, Video, Image, Gallery, Audio, Text }
     private sealed record ExistingFileScanInfo(string StoredPath, int Id, ExistingFileKind Kind, long Size, DateTime ModTime, bool NeedsMetadataProbe);
     private sealed record AudioProbeMetadata(string? Title);
+    private enum ScanFileChangeReason { Unchanged, RescanForced, MetadataProbe, SizeChanged, ModTimeChanged }
+    private sealed record ActiveIgnoreRuleSet(string Directory, IReadOnlyList<IgnoreRule> Rules);
+    private sealed record DirectoryScanFrame(string Path, IReadOnlyList<ActiveIgnoreRuleSet> IgnoreRuleSets);
+    private sealed class ScanDiscoveryProgress(Cove.Core.Interfaces.IJobProgress progress, ILogger<ScanService> logger)
+    {
+        private readonly Stopwatch _elapsed = Stopwatch.StartNew();
+        private DateTime _lastUiReport = DateTime.MinValue;
+        private DateTime _lastLogReport = DateTime.MinValue;
+
+        public int DirectoryCount { get; private set; }
+        public int MediaFileCount { get; private set; }
+        public int UnsupportedFileCount { get; private set; }
+        public int IgnoredPathCount { get; private set; }
+        public int UnreadablePathCount { get; private set; }
+
+        public void RecordDirectory(string path)
+        {
+            DirectoryCount++;
+            ReportIfDue(path);
+        }
+
+        public void RecordMediaFile(string path)
+        {
+            MediaFileCount++;
+            ReportIfDue(path);
+        }
+
+        public void RecordUnsupportedFile()
+        {
+            UnsupportedFileCount++;
+        }
+
+        public void RecordIgnoredPath(string path)
+        {
+            IgnoredPathCount++;
+            ReportIfDue(path);
+        }
+
+        public void RecordUnreadablePath(string path)
+        {
+            UnreadablePathCount++;
+            ReportIfDue(path);
+        }
+
+        public void Complete()
+        {
+            progress.Report(0.10, $"Discovered {MediaFileCount:N0} media files in {DirectoryCount:N0} folders.");
+        }
+
+        private void ReportIfDue(string? path)
+        {
+            var now = DateTime.UtcNow;
+            if ((now - _lastUiReport).TotalSeconds >= 1)
+            {
+                _lastUiReport = now;
+                progress.Report(0.05, BuildMessage(path));
+            }
+
+            if ((now - _lastLogReport).TotalSeconds >= 10)
+            {
+                _lastLogReport = now;
+                logger.LogInformation(
+                    "Scan discovery progress after {ElapsedMs} ms: {MediaFileCount} media files, {DirectoryCount} directories, {IgnoredPathCount} ignored, {UnsupportedFileCount} unsupported, {UnreadablePathCount} unreadable. Current path: {Path}",
+                    _elapsed.ElapsedMilliseconds,
+                    MediaFileCount,
+                    DirectoryCount,
+                    IgnoredPathCount,
+                    UnsupportedFileCount,
+                    UnreadablePathCount,
+                    path);
+            }
+        }
+
+        private string BuildMessage(string? path)
+        {
+            var message = $"Discovering files: {MediaFileCount:N0} media files, {DirectoryCount:N0} folders";
+            if (IgnoredPathCount > 0)
+                message += $", {IgnoredPathCount:N0} ignored";
+            if (!string.IsNullOrWhiteSpace(path))
+                message += $": {Path.GetFileName(path)}";
+            return message;
+        }
+    }
+
     private record DiscoveredFile(string Path, string StoredPath, string Extension, FileStat Stat)
     {
         public long Size => Stat.Size;

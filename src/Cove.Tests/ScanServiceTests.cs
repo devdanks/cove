@@ -136,6 +136,65 @@ public class ScanServiceTests
     }
 
     [Fact]
+    public async Task StartScan_TreatsSubSecondStoredModTimeDifferenceAsUnchanged()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"cove-scan-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+
+        try
+        {
+            var videoPath = Path.Combine(tempRoot, "known.mp4");
+            await File.WriteAllBytesAsync(videoPath, [1, 2, 3, 4]);
+            var wholeSecond = new DateTime(DateTime.UtcNow.Ticks / TimeSpan.TicksPerSecond * TimeSpan.TicksPerSecond, DateTimeKind.Utc);
+            File.SetLastWriteTimeUtc(videoPath, wholeSecond.AddMilliseconds(500));
+            await File.WriteAllTextAsync(Path.Combine(tempRoot, "known.en.vtt"), "WEBVTT");
+
+            await using var environment = await CreateEnvironmentAsync(tempRoot, videoPath, storedModTime: wholeSecond);
+
+            environment.Service.StartScan();
+
+            await using var verificationScope = environment.Services.CreateAsyncScope();
+            var db = verificationScope.ServiceProvider.GetRequiredService<CoveContext>();
+            var video = await db.VideoFiles.Include(item => item.Captions).SingleAsync();
+
+            Assert.Empty(video.Captions);
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task StartScan_SkipsChangedPathWhenExistingFileKindDiffersFromExtension()
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"cove-scan-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+
+        try
+        {
+            var path = Path.Combine(tempRoot, "known.mp3");
+            await File.WriteAllBytesAsync(path, [1, 2, 3, 4]);
+            var oldStoredModTime = DateTime.UtcNow.AddDays(-1);
+
+            await using var environment = await CreateEnvironmentAsync(tempRoot, path, storedModTime: oldStoredModTime);
+
+            environment.Service.StartScan();
+
+            await using var verificationScope = environment.Services.CreateAsyncScope();
+            var db = verificationScope.ServiceProvider.GetRequiredService<CoveContext>();
+
+            Assert.Equal(1, await db.Set<BaseFileEntity>().CountAsync());
+            Assert.Equal(0, await db.AudioFiles.CountAsync());
+            Assert.Equal(1, await db.VideoFiles.CountAsync());
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task StartScan_RescanSyncsCaptionsForKnownVideos()
     {
         var tempRoot = Path.Combine(Path.GetTempPath(), $"cove-scan-{Guid.NewGuid():N}");
@@ -166,7 +225,7 @@ public class ScanServiceTests
         }
     }
 
-    private static async Task<TestEnvironment> CreateEnvironmentAsync(string libraryRoot, string videoPath)
+    private static async Task<TestEnvironment> CreateEnvironmentAsync(string libraryRoot, string videoPath, DateTime? storedModTime = null)
     {
         var services = new ServiceCollection();
         var dbOptions = new DbContextOptionsBuilder<CoveContext>()
@@ -194,12 +253,13 @@ public class ScanServiceTests
             };
 
             var fileInfo = new FileInfo(videoPath);
+            var effectiveStoredModTime = storedModTime ?? fileInfo.LastWriteTimeUtc;
             video.Files.Add(new VideoFile
             {
                 Basename = Path.GetFileName(videoPath),
                 ParentFolder = folder,
                 Size = fileInfo.Length,
-                ModTime = fileInfo.LastWriteTimeUtc,
+                ModTime = effectiveStoredModTime,
                 Format = "mp4",
                 Width = 1920,
                 Height = 1080,

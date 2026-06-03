@@ -71,11 +71,11 @@ export default defineConfig(({ command }) => {
       port: 5173,
       proxy: {
         "/api": {
-          target: "http://localhost:9999",
+          target: "http://localhost:5073",
           changeOrigin: true,
         },
         "/hubs": {
-          target: "http://localhost:9999",
+          target: "http://localhost:5073",
           changeOrigin: true,
           ws: true,
         },

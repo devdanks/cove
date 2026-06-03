@@ -134,7 +134,7 @@ RUN mkdir -p /var/lib/postgresql/cove-data \
     && chown -R postgres:postgres /var/lib/postgresql/cove-data
 
 ENV COVE__Host=0.0.0.0 \
-    COVE__Port=9999 \
+    COVE__Port=5073 \
     COVE__GeneratedPath=/generated \
     COVE__CachePath=/cache \
     COVE__Postgres__Managed=false \
@@ -144,7 +144,7 @@ ENV COVE__Host=0.0.0.0 \
     PGDATA=/var/lib/postgresql/cove-data \
     S6_KEEP_ENV=1
 
-EXPOSE 9999
+EXPOSE 5073
 VOLUME ["/data", "/config", "/generated", "/cache", "/backups"]
 
 ENTRYPOINT ["/init"]

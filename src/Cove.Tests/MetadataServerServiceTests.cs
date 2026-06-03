@@ -239,9 +239,13 @@ public sealed class MetadataServerServiceTests
         FixtureMetadataServerHandler? handler = null;
         handler = new FixtureMetadataServerHandler(request =>
         {
-            Assert.Contains("mutation SubmitVideoDraft", request.Query);
+            Assert.Contains("mutation SubmitSceneDraft", request.Query);
+            Assert.Contains("SceneDraftInput", request.Query);
+            Assert.Contains("submitSceneDraft", request.Query);
+            Assert.DoesNotContain("VideoDraftInput", request.Query);
+            Assert.DoesNotContain("submitVideoDraft", request.Query);
             return GraphQlData("""
-                "submitVideoDraft": { "id": "draft-video-1" }
+                "submitSceneDraft": { "id": "draft-video-1" }
                 """);
         });
 
@@ -256,11 +260,49 @@ public sealed class MetadataServerServiceTests
         var input = variables.RootElement.GetProperty("input");
         Assert.Equal("remote-video-1", input.GetProperty("id").GetString());
         Assert.Equal("Draft Video", input.GetProperty("title").GetString());
+        Assert.Equal("https://cove.example/videos/draft", input.GetProperty("url").GetString());
+        Assert.False(input.TryGetProperty("urls", out _));
         Assert.Equal("2024-06-02", input.GetProperty("date").GetString());
         Assert.Equal("remote-studio-1", input.GetProperty("studio").GetProperty("id").GetString());
         Assert.Equal("remote-performer-1", input.GetProperty("performers")[0].GetProperty("id").GetString());
         Assert.Equal("remote-tag-1", input.GetProperty("tags")[0].GetProperty("id").GetString());
         var fingerprint = input.GetProperty("fingerprints")[0];
+        Assert.Equal("OSHASH", fingerprint.GetProperty("algorithm").GetString());
+        Assert.Equal("0000000000001a2b", fingerprint.GetProperty("hash").GetString());
+        Assert.Equal(121, fingerprint.GetProperty("duration").GetInt32());
+    }
+
+    [Fact]
+    public async Task SubmitFingerprintsAsync_UsesSceneIdFieldForMetadataServerSchema()
+    {
+        await using var context = CreateContext();
+        var video = new Video { Title = "Fingerprint Video" };
+        video.RemoteIds.Add(new VideoRemoteId { Endpoint = Endpoint, RemoteId = "remote-video-1" });
+        var file = new VideoFile { Duration = 121 };
+        file.Fingerprints.Add(new FileFingerprint { Type = "oshash", Value = "1a2b" });
+        video.Files.Add(file);
+        context.Videos.Add(video);
+        await context.SaveChangesAsync();
+
+        FixtureMetadataServerHandler? handler = null;
+        handler = new FixtureMetadataServerHandler(request =>
+        {
+            Assert.Contains("mutation SubmitFingerprint", request.Query);
+            return GraphQlData("\"submitFingerprint\": true");
+        });
+
+        using var httpClient = new HttpClient(handler);
+        var service = CreateService(context, httpClient);
+
+        await service.SubmitFingerprintsAsync(video, Endpoint, CancellationToken.None);
+
+        var request = Assert.Single(handler.Requests);
+        using var variables = JsonDocument.Parse(request.VariablesJson);
+        var input = variables.RootElement.GetProperty("input");
+        Assert.Equal("remote-video-1", input.GetProperty("scene_id").GetString());
+        Assert.False(input.TryGetProperty("video_id", out _));
+
+        var fingerprint = input.GetProperty("fingerprint");
         Assert.Equal("OSHASH", fingerprint.GetProperty("algorithm").GetString());
         Assert.Equal("0000000000001a2b", fingerprint.GetProperty("hash").GetString());
         Assert.Equal(121, fingerprint.GetProperty("duration").GetInt32());

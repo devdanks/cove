@@ -565,7 +565,7 @@ try
         }
     }
 
-    var port = coveConfig.GetValue<int?>("Port") ?? 9999;
+    var port = coveConfig.GetValue<int?>("Port") ?? 5073;
     if (!isTestHarness)
         app.Urls.Add($"http://0.0.0.0:{port}");
 

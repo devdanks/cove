@@ -22,7 +22,7 @@ services:
     image: ghcr.io/yourcove/cove-app:latest
     restart: unless-stopped
     ports:
-      - "9999:9999"
+      - "5073:5073"
     depends_on:
       db:
         condition: service_healthy

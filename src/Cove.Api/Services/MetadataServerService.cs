@@ -1286,8 +1286,8 @@ query Me {
         """;
 
     private const string SubmitVideoDraftMutation = """
-        mutation SubmitVideoDraft($input: VideoDraftInput!) {
-          submitVideoDraft(input: $input) { id }
+        mutation SubmitSceneDraft($input: SceneDraftInput!) {
+          submitSceneDraft(input: $input) { id }
         }
         """;
 
@@ -1333,7 +1333,7 @@ query Me {
 
                 var input = new
                 {
-                    video_id = videoRemoteId.RemoteId,
+                    scene_id = videoRemoteId.RemoteId,
                     fingerprint = new
                     {
                         hash = algorithm == "OSHASH" ? NormalizeOshash(fingerprint.Value) : fingerprint.Value,
@@ -1400,7 +1400,7 @@ query Me {
             code = video.Code,
             details = video.Details,
             director = video.Director,
-            urls = video.Urls.Select(u => u.Url).ToList(),
+            url = video.Urls.Select(u => u.Url).FirstOrDefault(),
             date = video.Date?.ToString("yyyy-MM-dd"),
             studio,
             performers,
@@ -1409,7 +1409,7 @@ query Me {
         };
 
         var response = await SendQueryAsync<MetadataServerDraftSubmissionResponse>(box, SubmitVideoDraftMutation, new { input }, ct);
-        return response.SubmitVideoDraft?.Id;
+        return response.SubmitSceneDraft?.Id;
     }
 
     public async Task<string?> SubmitPerformerDraftAsync(Performer performer, string endpoint, CancellationToken ct)
@@ -1494,6 +1494,7 @@ query Me {
     }
 
     private sealed record MetadataServerDraftSubmissionResponse(
+        MetadataServerDraftIdResult? SubmitSceneDraft = null,
         MetadataServerDraftIdResult? SubmitVideoDraft = null,
         MetadataServerDraftIdResult? SubmitPerformerDraft = null,
         MetadataServerDraftIdResult? SubmitStudioDraft = null,
