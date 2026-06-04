@@ -962,6 +962,61 @@ INSERT INTO groups_scenes (scene_id, group_id, scene_index) VALUES (10, 1, 1);
             importedGroup.Urls.Select(url => url.Url).OrderBy(url => url, StringComparer.Ordinal).ToArray());
     }
 
+    [Fact]
+    public async Task ImportGroupsAsync_MergesDuplicateCoverOnlyGroupWhenHiddenMetadataDiffers()
+    {
+        await using var context = CreateContext();
+
+        await using var stash = new SqliteConnection("Data Source=:memory:");
+        await stash.OpenAsync();
+        await ExecuteSqlAsync(stash, @"
+CREATE TABLE groups (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  aliases TEXT,
+  duration INTEGER,
+  date TEXT,
+  rating INTEGER,
+  studio_id INTEGER,
+  director TEXT,
+  description TEXT,
+  front_image_blob TEXT,
+  back_image_blob TEXT
+);
+CREATE TABLE group_urls (group_id INTEGER NOT NULL, url TEXT NOT NULL, position INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE groups_scenes (scene_id INTEGER NOT NULL, group_id INTEGER NOT NULL, scene_index INTEGER);
+INSERT INTO groups (id, name, aliases, duration, date, rating, studio_id, director, description, front_image_blob, back_image_blob) VALUES
+  (1, 'Imported Group', NULL, NULL, '2024-01-02', NULL, NULL, NULL, NULL, NULL, NULL),
+  (2, 'Imported Group', 'Alias', 120, '2024-01-02', 80, NULL, 'Director', 'Details', 'front-blob', NULL);
+INSERT INTO groups_scenes (scene_id, group_id, scene_index) VALUES (10, 1, 1);
+");
+
+        var service = CreateService(context);
+        var groupIdMap = Assert.IsType<Dictionary<int, int>>(await InvokePrivateAsync(
+            service,
+            "ImportGroupsAsync",
+            stash,
+            new Dictionary<string, string>
+            {
+                ["front-blob"] = "cove-front",
+            },
+            new Dictionary<int, int>(),
+            NullJobProgress.Instance,
+            0d,
+            1d,
+            CancellationToken.None));
+
+        Assert.Equal(groupIdMap[1], groupIdMap[2]);
+
+        var importedGroup = await context.Groups.SingleAsync();
+        Assert.Equal("Imported Group", importedGroup.Name);
+        Assert.Equal("Alias", importedGroup.Aliases);
+        Assert.Equal(120, importedGroup.Duration);
+        Assert.Equal("Director", importedGroup.Director);
+        Assert.Equal("Details", importedGroup.Synopsis);
+        Assert.Equal("cove-front", importedGroup.FrontImageBlobId);
+    }
+
         [Fact]
         public async Task ReconcileImportedZipLinksAsync_PreservesZipFileIdsForImportedImages()
         {

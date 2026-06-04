@@ -27,6 +27,7 @@ interface WallMediaCardProps extends HTMLAttributes<HTMLDivElement> {
   aspectRatio?: string;
   fillMedia?: boolean;
   fallback?: ReactNode;
+  imageAlt?: string;
   imageClassName?: string;
   videoClassName?: string;
   chromeless?: boolean;
@@ -53,6 +54,7 @@ export function WallMediaCard({
   aspectRatio = "1 / 1",
   fillMedia = false,
   fallback,
+  imageAlt,
   imageClassName,
   videoClassName,
   chromeless = false,
@@ -391,7 +393,7 @@ export function WallMediaCard({
         ) : imageSrc ? (
           <img
             src={imageSrc}
-            alt={title}
+            alt={imageAlt ?? title}
             className={`absolute inset-0 h-full w-full ${resolvedImageClassName}`}
             loading="lazy"
           />

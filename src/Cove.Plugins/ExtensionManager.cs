@@ -19,6 +19,7 @@ public class ExtensionManager
     private readonly Dictionary<string, IExtension> _extensionMap = new(StringComparer.OrdinalIgnoreCase);
     private readonly ExtensionContext _context;
     private readonly Dictionary<string, AssemblyLoadContext> _loadContexts = [];
+    private readonly Dictionary<string, string> _loadCacheSlots = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _extensionDirectories = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ExtensionManifestFile> _manifestFiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ExtensionInstallation> _installations = new(StringComparer.OrdinalIgnoreCase);
@@ -68,7 +69,10 @@ public class ExtensionManager
     {
         if (!Directory.Exists(extensionsDir)) return;
 
-        var extensionDirectories = Directory.GetDirectories(extensionsDir);
+        var extensionDirectories = Directory.GetDirectories(extensionsDir)
+            .Where(dir => !string.Equals(Path.GetFileName(dir), ".load-cache", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        CleanupStaleLoadCaches(extensionsDir, extensionDirectories);
         ExtensionLoadContext.PreloadSharedAssemblies(extensionsDir, extensionDirectories);
 
         foreach (var dir in extensionDirectories)
@@ -110,17 +114,22 @@ public class ExtensionManager
                 }
 
                 // Determine which DLL to load
-                var dllToLoad = manifestFile?.EntryDll != null
+                var sourceDllsToLoad = manifestFile?.EntryDll != null
                     ? new[] { Path.Combine(dir, manifestFile.EntryDll) }
                     : Directory.GetFiles(dir, "*.dll");
 
-                foreach (var dll in dllToLoad)
+                var binaryCache = PrepareExtensionBinaryCache(extensionsDir, dir, manifestFile?.Id);
+
+                foreach (var sourceDll in sourceDllsToLoad)
                 {
-                    if (!File.Exists(dll)) continue;
+                    if (!File.Exists(sourceDll)) continue;
                     try
                     {
-                        var loadContext = new ExtensionLoadContext(dll);
-                        var assembly = loadContext.LoadFromAssemblyPath(dll);
+                        var cachedDll = binaryCache.GetCachedPath(sourceDll);
+                        if (!File.Exists(cachedDll)) continue;
+
+                        var loadContext = new ExtensionLoadContext(sourceDll, binaryCache.SourceRoot, binaryCache.CacheRoot);
+                        var assembly = loadContext.LoadFromAssemblyPath(cachedDll);
                         var extensionTypes = assembly.GetTypes()
                             .Where(t => typeof(IExtension).IsAssignableFrom(t) && !t.IsAbstract && !t.IsInterface);
 
@@ -141,6 +150,8 @@ public class ExtensionManager
                                 _extensions.Add(ext);
                                 _extensionMap[ext.Id] = ext;
                                 _loadContexts[ext.Id] = loadContext;
+                                _loadCacheSlots[binaryCache.CacheKey] = binaryCache.Slot;
+                                _loadCacheSlots[ext.Id] = binaryCache.Slot;
                                 _extensionDirectories[ext.Id] = dir;
                                 _initOrder = null;
 
@@ -167,8 +178,8 @@ public class ExtensionManager
                     }
                     catch (Exception ex)
                     {
-                        System.Diagnostics.Debug.WriteLine($"Failed to load extension DLL {dll}: {ex}");
-                        Console.Error.WriteLine($"[EXT-LOAD] Failed to load {dll}: {ex.GetType().Name}: {ex.Message}");
+                        System.Diagnostics.Debug.WriteLine($"Failed to load extension DLL {sourceDll}: {ex}");
+                        Console.Error.WriteLine($"[EXT-LOAD] Failed to load {sourceDll}: {ex.GetType().Name}: {ex.Message}");
                         if (ex is System.Reflection.ReflectionTypeLoadException rtle)
                         {
                             foreach (var le in rtle.LoaderExceptions ?? [])
@@ -656,7 +667,8 @@ public class ExtensionManager
         _installations.Remove(id);
         await RemoveInstallationStateAsync(id, ct);
 
-        // Encourage collectible AssemblyLoadContext cleanup on Windows to release file handles.
+        // Encourage collectible AssemblyLoadContext cleanup. File operations do not
+        // depend on this completing because extension binaries are loaded from cache.
         GC.Collect();
         GC.WaitForPendingFinalizers();
         GC.Collect();
@@ -1481,16 +1493,114 @@ public class ExtensionManager
         return Version.TryParse(s, out version!);
     }
 
+    private ExtensionBinaryCache PrepareExtensionBinaryCache(string extensionsRoot, string extensionDir, string? extensionId)
+    {
+        var cacheKey = !string.IsNullOrWhiteSpace(extensionId)
+            ? extensionId
+            : new DirectoryInfo(extensionDir).Name;
+        var activeSlot = _loadCacheSlots.GetValueOrDefault(cacheKey);
+        var nextSlot = string.Equals(activeSlot, "a", StringComparison.OrdinalIgnoreCase) ? "b" : "a";
+        var cacheRoot = Path.Combine(extensionsRoot, ".load-cache", cacheKey, nextSlot);
+
+        RecreateDirectory(cacheRoot);
+
+        foreach (var sourcePath in Directory.GetFiles(extensionDir, "*.dll", SearchOption.AllDirectories))
+        {
+            var relativePath = Path.GetRelativePath(extensionDir, sourcePath);
+            var destinationPath = Path.Combine(cacheRoot, relativePath);
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+            File.Copy(sourcePath, destinationPath, overwrite: true);
+        }
+
+        return new ExtensionBinaryCache(cacheKey, nextSlot, extensionDir, cacheRoot);
+    }
+
+    private static void CleanupStaleLoadCaches(string extensionsRoot, IReadOnlyCollection<string> extensionDirectories)
+    {
+        var loadCacheRoot = Path.Combine(extensionsRoot, ".load-cache");
+        if (!Directory.Exists(loadCacheRoot))
+            return;
+
+        var installedExtensionIds = extensionDirectories
+            .Select(Path.GetFileName)
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var cacheDir in Directory.GetDirectories(loadCacheRoot))
+        {
+            var cacheName = Path.GetFileName(cacheDir);
+            if (!string.Equals(cacheName, "__shared", StringComparison.OrdinalIgnoreCase)
+                && !installedExtensionIds.Contains(cacheName))
+            {
+                TryDeleteDirectory(cacheDir);
+                continue;
+            }
+
+            if (!string.Equals(cacheName, "__shared", StringComparison.OrdinalIgnoreCase))
+            {
+                CleanupLegacyLoadCacheSlots(cacheDir);
+            }
+        }
+    }
+
+    private static void CleanupLegacyLoadCacheSlots(string extensionCacheRoot)
+    {
+        foreach (var slotDir in Directory.GetDirectories(extensionCacheRoot))
+        {
+            var slotName = Path.GetFileName(slotDir);
+            if (!string.Equals(slotName, "a", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(slotName, "b", StringComparison.OrdinalIgnoreCase))
+            {
+                TryDeleteDirectory(slotDir);
+            }
+        }
+    }
+
+    private static void RecreateDirectory(string path)
+    {
+        if (Directory.Exists(path))
+        {
+            RemoveReadOnlyAttributes(path);
+            Directory.Delete(path, recursive: true);
+        }
+
+        Directory.CreateDirectory(path);
+    }
+
+    private static void RemoveReadOnlyAttributes(string rootPath)
+    {
+        var rootInfo = new DirectoryInfo(rootPath);
+        foreach (var directory in rootInfo.EnumerateDirectories("*", SearchOption.AllDirectories))
+            directory.Attributes = FileAttributes.Normal;
+
+        foreach (var file in rootInfo.EnumerateFiles("*", SearchOption.AllDirectories))
+            file.Attributes = FileAttributes.Normal;
+
+        rootInfo.Attributes = FileAttributes.Normal;
+    }
+
     private static void TryDeleteDirectory(string path)
     {
         try
         {
             if (Directory.Exists(path))
+            {
+                RemoveReadOnlyAttributes(path);
                 Directory.Delete(path, recursive: true);
+            }
         }
         catch
         {
             // Best-effort cleanup only; stale shadow copies are safe.
+        }
+    }
+
+    private sealed record ExtensionBinaryCache(string CacheKey, string Slot, string SourceRoot, string CacheRoot)
+    {
+        public string GetCachedPath(string sourcePath)
+        {
+            var relativePath = Path.GetRelativePath(SourceRoot, sourcePath);
+            return Path.Combine(CacheRoot, relativePath);
         }
     }
 }
@@ -1502,11 +1612,15 @@ internal sealed class ExtensionLoadContext : AssemblyLoadContext
     private static readonly Dictionary<string, string> PreferredSharedAssemblyPaths = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly AssemblyDependencyResolver _resolver;
+    private readonly string _sourceRoot;
+    private readonly string _cacheRoot;
 
-    public ExtensionLoadContext(string mainAssemblyPath)
+    public ExtensionLoadContext(string mainAssemblyPath, string? sourceRoot = null, string? cacheRoot = null)
         : base($"extension:{Path.GetFileNameWithoutExtension(mainAssemblyPath)}:{Guid.NewGuid():N}", isCollectible: true)
     {
         _resolver = new AssemblyDependencyResolver(mainAssemblyPath);
+        _sourceRoot = Path.GetFullPath(sourceRoot ?? Path.GetDirectoryName(mainAssemblyPath)!);
+        _cacheRoot = Path.GetFullPath(cacheRoot ?? _sourceRoot);
     }
 
     protected override Assembly? Load(AssemblyName assemblyName)
@@ -1524,13 +1638,34 @@ internal sealed class ExtensionLoadContext : AssemblyLoadContext
         }
 
         var path = _resolver.ResolveAssemblyToPath(assemblyName);
-        return path != null ? LoadFromAssemblyPath(path) : null;
+        var cachedPath = MapToCachePath(path);
+        return cachedPath != null ? LoadFromAssemblyPath(cachedPath) : null;
     }
 
     protected override IntPtr LoadUnmanagedDll(string unmanagedDllName)
     {
         var path = _resolver.ResolveUnmanagedDllToPath(unmanagedDllName);
-        return path != null ? LoadUnmanagedDllFromPath(path) : IntPtr.Zero;
+        var cachedPath = MapToCachePath(path);
+        return cachedPath != null ? LoadUnmanagedDllFromPath(cachedPath) : IntPtr.Zero;
+    }
+
+    private string? MapToCachePath(string? sourcePath)
+    {
+        if (sourcePath is null)
+            return null;
+
+        var fullSourcePath = Path.GetFullPath(sourcePath);
+        var relativePath = Path.GetRelativePath(_sourceRoot, fullSourcePath);
+        if (relativePath == ".."
+            || relativePath.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+            || relativePath.StartsWith(".." + Path.AltDirectorySeparatorChar, StringComparison.Ordinal)
+            || Path.IsPathRooted(relativePath))
+        {
+            return fullSourcePath;
+        }
+
+        var cachedPath = Path.Combine(_cacheRoot, relativePath);
+        return File.Exists(cachedPath) ? cachedPath : fullSourcePath;
     }
 
     internal static void PreloadSharedAssemblies(string extensionsRoot, IEnumerable<string> extensionDirectories)

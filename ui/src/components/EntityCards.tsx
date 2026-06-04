@@ -787,6 +787,7 @@ export function VideoCard({ video, engagement, onClick, selected, onSelect, onNa
   const scrubTimestampPercent = scrubSeconds != null ? Math.min(88, Math.max(12, scrubPercent)) : 0;
   const scrubImageUrl = scrubSeconds != null ? videos.screenshotUrl(video.id, video.updatedAt, scrubSeconds) : null;
   const videoPreviewObjectFit = appConfig?.config?.ui.videoObjectFit === "contain" ? "contain" : "cover";
+  const coverAlt = video.imagePath ? video.title || "" : "";
 
   const updateScrubPreview = useCallback((event: MouseEvent<HTMLDivElement>) => {
     if (duration <= 0) return;
@@ -816,7 +817,7 @@ export function VideoCard({ video, engagement, onClick, selected, onSelect, onNa
       <div className="video-card-preview card-media relative aspect-video bg-black overflow-hidden">
         <img
           src={coverUrl}
-          alt={video.title || ""}
+          alt={coverAlt}
           className="video-card-preview-image h-full w-full"
           style={{ objectFit: videoPreviewObjectFit }}
           loading="lazy"
@@ -937,6 +938,7 @@ export function VideoTile({ video, onClick }: VideoTileProps) {
   const duration = clipDuration ?? file?.duration ?? 0;
   const resLabel = file ? getResolutionLabel(file.width, file.height) : null;
   const coverUrl = entityImages.videoCoverUrl(video.id, video.updatedAt, 960);
+  const coverAlt = video.imagePath ? video.title || "" : "";
   const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "video", id: video.id }, onClick);
 
   return (
@@ -944,7 +946,7 @@ export function VideoTile({ video, onClick }: VideoTileProps) {
       <div className="relative aspect-video overflow-hidden rounded-lg border border-border bg-card shadow-md shadow-black/30">
         <img
           src={coverUrl}
-          alt={video.title || ""}
+          alt={coverAlt}
           className="h-full w-full object-cover"
           loading="lazy"
         />

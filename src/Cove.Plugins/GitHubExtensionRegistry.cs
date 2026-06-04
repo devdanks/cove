@@ -156,7 +156,7 @@ public class GitHubExtensionRegistry : IExtensionRegistry
 
     private static RegistryVersionInfo BuildSourcePackVersionInfo(RegistryExtensionMetadata meta) => new()
     {
-        Version = string.IsNullOrWhiteSpace(meta.Version) ? "0.0.0" : meta.Version!,
+        Version = string.IsNullOrWhiteSpace(meta.Version) ? "1.0.0" : meta.Version!,
         ReleasedAt = null,
         Changelog = meta.Changelog,
         MinCoveVersion = meta.SourceMinCoveVersion,
@@ -327,8 +327,7 @@ public class GitHubExtensionRegistry : IExtensionRegistry
         response.EnsureSuccessStatusCode();
 
         var extensionDir = Path.Combine(targetDir, extensionId);
-        if (Directory.Exists(extensionDir))
-            Directory.Delete(extensionDir, recursive: true);
+        await DeleteDirectoryIfExistsAsync(extensionDir, ct);
         Directory.CreateDirectory(extensionDir);
 
         var zipPath = Path.Combine(targetDir, $".{extensionId}-{version}.zip");
@@ -431,8 +430,7 @@ public class GitHubExtensionRegistry : IExtensionRegistry
                 $"Source scraper pack '{extensionId}' does not list any scraperFiles in its manifest.");
 
         var extensionDir = Path.Combine(targetDir, extensionId);
-        if (Directory.Exists(extensionDir))
-            Directory.Delete(extensionDir, recursive: true);
+        await DeleteDirectoryIfExistsAsync(extensionDir, ct);
         Directory.CreateDirectory(extensionDir);
         var extensionRoot = Path.GetFullPath(extensionDir);
 
@@ -676,6 +674,29 @@ public class GitHubExtensionRegistry : IExtensionRegistry
         await using var fs = System.IO.File.OpenRead(filePath);
         var hash = await SHA256.HashDataAsync(fs, ct);
         return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    private static Task DeleteDirectoryIfExistsAsync(string directoryPath, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (!Directory.Exists(directoryPath))
+            return Task.CompletedTask;
+
+        RemoveReadOnlyAttributes(directoryPath);
+        Directory.Delete(directoryPath, recursive: true);
+        return Task.CompletedTask;
+    }
+
+    private static void RemoveReadOnlyAttributes(string rootPath)
+    {
+        var rootInfo = new DirectoryInfo(rootPath);
+        foreach (var directory in rootInfo.EnumerateDirectories("*", SearchOption.AllDirectories))
+            directory.Attributes = FileAttributes.Normal;
+
+        foreach (var file in rootInfo.EnumerateFiles("*", SearchOption.AllDirectories))
+            file.Attributes = FileAttributes.Normal;
+
+        rootInfo.Attributes = FileAttributes.Normal;
     }
 
     private static async Task TryDeleteFileWithRetriesAsync(string filePath, CancellationToken ct)

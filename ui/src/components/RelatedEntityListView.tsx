@@ -572,6 +572,7 @@ function RelatedVideoWallCard({ video, selected, selecting, onSelect, onClick }:
   const file = video.files[0];
   const title = video.title || file?.basename || `Video ${video.id}`;
   const coverUrl = entityImages.videoCoverUrl(video.id, video.updatedAt, 1280);
+  const coverAlt = video.imagePath ? title : "";
   const appConfig = useOptionalAppConfig();
   const wallPreviewType = appConfig?.config?.ui.wallPreviewType ?? "video";
   const showTitle = appConfig?.config?.ui.wallShowTitle ?? true;
@@ -581,6 +582,7 @@ function RelatedVideoWallCard({ video, selected, selecting, onSelect, onClick }:
     <WallMediaCard
       title={title}
       imageSrc={coverUrl}
+      imageAlt={coverAlt}
       videoSrc={videoApi.previewUrl(video.id)}
       videoStatusSrc={videoApi.previewStatusUrl(video.id)}
       useVideo={wallPreviewType === "video" || wallPreviewType === "webp"}
@@ -686,6 +688,7 @@ function RelatedEntityFeed({ entityType, items, selectedIds, selecting, onToggle
 function RelatedVideoFeedCard({ video, selected, selecting, onSelect, onNavigate, feedVideoSource, feedVideoStartPercent, feedVideoStartMinDuration, soundEnabled, onPlaybackEligibilityChange }: { video: Video; selected?: boolean; selecting?: boolean; onSelect?: () => void; onNavigate: (route: any) => void; feedVideoSource: string; feedVideoStartPercent: number; feedVideoStartMinDuration: number; soundEnabled: boolean; onPlaybackEligibilityChange?: (eligible: boolean) => void }) {
   const file = video.files[0];
   const title = video.title || file?.basename || `Video ${video.id}`;
+  const coverAlt = video.imagePath ? title : "";
   const duration = getVideoDisplayDuration(video);
   const { coverUrl, videoSrc, videoStatusSrc } = getVideoFeedMedia(video, feedVideoSource);
   const mediaStyle = getFeedMediaStyle(file);
@@ -705,9 +708,9 @@ function RelatedVideoFeedCard({ video, selected, selecting, onSelect, onNavigate
       identity={video.studioName ? <FeedIdentityBadge>{video.studioName}</FeedIdentityBadge> : undefined}
       header={<>{video.date ? <span>{video.date}</span> : null}{duration > 0 ? <span>{formatDuration(duration)}</span> : null}</>}
       media={mediaStyle ? (
-        <FeedPortraitMediaFrame title={title} backgroundSrc={coverUrl} className="cursor-pointer" media={<WallMediaCard title={title} imageSrc={coverUrl} videoSrc={videoSrc} videoStatusSrc={videoStatusSrc} useVideo muted={!soundEnabled} videoStartTimeSec={videoStartTimeSec} videoPlayThreshold={0.5} onVideoPlayEligibilityChange={onPlaybackEligibilityChange} fillMedia chromeless imageClassName="object-contain" videoClassName="object-contain" className="h-full w-full bg-transparent" />}>{mediaOverlay}</FeedPortraitMediaFrame>
+        <FeedPortraitMediaFrame title={title} backgroundSrc={coverUrl} className="cursor-pointer" media={<WallMediaCard title={title} imageSrc={coverUrl} imageAlt={coverAlt} videoSrc={videoSrc} videoStatusSrc={videoStatusSrc} useVideo muted={!soundEnabled} videoStartTimeSec={videoStartTimeSec} videoPlayThreshold={0.5} onVideoPlayEligibilityChange={onPlaybackEligibilityChange} fillMedia chromeless imageClassName="object-contain" videoClassName="object-contain" className="h-full w-full bg-transparent" />}>{mediaOverlay}</FeedPortraitMediaFrame>
       ) : (
-        <WallMediaCard title={title} imageSrc={coverUrl} videoSrc={videoSrc} videoStatusSrc={videoStatusSrc} useVideo muted={!soundEnabled} videoStartTimeSec={videoStartTimeSec} videoPlayThreshold={0.5} onVideoPlayEligibilityChange={onPlaybackEligibilityChange} playbackTracking={{ hostType: "video", hostId: video.id, surface: "feed", scopeKey: `related-video-feed:${video.id}` }} aspectRatio={file?.width && file.height ? `${file.width} / ${file.height}` : "16 / 9"} imageClassName="object-cover" style={mediaStyle} className="overflow-hidden rounded-2xl border border-border/70 bg-black/95 shadow-[0_18px_40px_rgba(0,0,0,0.35)] hover:border-border/70">{mediaOverlay}</WallMediaCard>
+        <WallMediaCard title={title} imageSrc={coverUrl} imageAlt={coverAlt} videoSrc={videoSrc} videoStatusSrc={videoStatusSrc} useVideo muted={!soundEnabled} videoStartTimeSec={videoStartTimeSec} videoPlayThreshold={0.5} onVideoPlayEligibilityChange={onPlaybackEligibilityChange} playbackTracking={{ hostType: "video", hostId: video.id, surface: "feed", scopeKey: `related-video-feed:${video.id}` }} aspectRatio={file?.width && file.height ? `${file.width} / ${file.height}` : "16 / 9"} imageClassName="object-cover" style={mediaStyle} className="overflow-hidden rounded-2xl border border-border/70 bg-black/95 shadow-[0_18px_40px_rgba(0,0,0,0.35)] hover:border-border/70">{mediaOverlay}</WallMediaCard>
       )}
       title={<button type="button" onClick={(event) => { event.stopPropagation(); openOrSelect(); }} className="text-left text-base font-semibold text-foreground transition-colors hover:text-accent">{title}</button>}
       details={video.details ? <p className="line-clamp-4">{video.details}</p> : undefined}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as signalR from "@microsoft/signalr";
 import {
@@ -221,8 +221,8 @@ const tabs: BuiltInSettingsTabDefinition[] = [...primaryTabs, ...authTabs];
 const tabByKey = new Map<BuiltInSettingsTab, BuiltInSettingsTabDefinition>(tabs.map((tab) => [tab.key, tab]));
 const settingsTabGroups: SettingsTabGroupDefinition[] = [
   { key: "my-settings", label: "My Settings", icon: UserCog, tabs: ["my-account", "my-appearance-theme", "my-theme", "my-playback-viewers", "my-lists-wall", "keyboard-shortcuts", "my-activity-history"] },
-  { key: "library", label: "Library", icon: FolderOpen, tabs: ["library-paths-storage", "library-scanning", "library-custom-fields", "library-display-profiles"] },
   { key: "operations", label: "Operations", icon: PlayCircle, tabs: ["operations-jobs", "operations-scan-generate", "operations-downloads", "operations-duplicates", "operations-maintenance", "operations-backup-restore", "operations-extension-tasks"] },
+  { key: "library", label: "Library", icon: FolderOpen, tabs: ["library-paths-storage", "library-scanning", "library-custom-fields", "library-display-profiles"] },
   { key: "data-sources", label: "Data Sources & Data", icon: SearchCode, tabs: ["data-sources-scrapers", "data-sources-metadata-servers", "data-sources-identify-batch-defaults", "data-sources-downloader-paths", "data-sources-auto-tagging", "data-sources-ai-data"] },
   { key: "extensions", label: "Extensions", icon: Plug, tabs: ["extensions-installed", "extensions-registry", "extensions-customizations"] },
   { key: "security-access", label: "Security & Access", icon: Shield, tabs: authTabs.map((tab) => tab.key) },
@@ -5616,7 +5616,8 @@ function ThemeSelector() {
                                   value={numValue}
                                   onChange={(e) => setStyleOption(style.id, cfg.key, e.target.value)}
                                   onClick={(e) => e.stopPropagation()}
-                                  className="w-full h-1.5 accent-accent cursor-pointer"
+                                  style={{ "--range-fill": `${((numValue - cfg.min) / Math.max(1, cfg.max - cfg.min)) * 100}%` } as CSSProperties}
+                                  className="themed-range-input settings-range-input w-full cursor-pointer"
                                 />
                                 <div className="flex justify-between mt-0.5">
                                   <span className="text-[9px] text-muted">Off</span>
@@ -5833,7 +5834,7 @@ function ExtensionSettingsForm({ extensionId, schema }: { extensionId: string; s
                 type="number"
                 value={(localValues[s.name] as number) ?? ""}
                 onChange={(e) => updateValue(s.name, e.target.value ? Number(e.target.value) : null)}
-                className="flex-1 bg-card border border-border rounded px-2 py-1 text-sm focus:border-accent outline-none"
+                className="themed-number-input settings-number-input flex-1 bg-card border border-border rounded px-2 py-1 text-sm focus:border-accent outline-none"
               />
             ) : (
               <input

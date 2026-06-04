@@ -419,6 +419,7 @@ function VideoRecommendationCard({ video, engagement, onNavigate }: { video: Vid
   const duration = file?.duration ?? 0;
   const resLabel = file ? getResolutionLabel(file.width, file.height) : null;
   const screenshotUrl = videos.screenshotUrl(video.id);
+  const screenshotAlt = video.imagePath ? video.title || "" : "";
   const linkProps = createRouteLinkProps<HTMLAnchorElement>({ page: "video", id: video.id }, () => onNavigate({ page: "video", id: video.id }));
   const rating = engagement?.rating;
 
@@ -429,7 +430,7 @@ function VideoRecommendationCard({ video, engagement, onNavigate }: { video: Vid
       style={{ scrollSnapAlign: "start" }}
     >
       <div className="relative aspect-video bg-black">
-        <img src={screenshotUrl} alt={video.title || ""} className="w-full h-full object-cover" loading="lazy" />
+        <img src={screenshotUrl} alt={screenshotAlt} className="w-full h-full object-cover" loading="lazy" />
         {/* Resolution + duration overlay */}
         <div className="absolute bottom-0 right-0 flex items-center gap-0.5 p-1 text-xs text-white">
           {resLabel && <span className="bg-black/70 px-1 py-0.5 rounded font-bold">{resLabel}</span>}

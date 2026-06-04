@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Search, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ArrowDown, ArrowUp, LayoutGrid, List, Columns3, Grid3X3, Share2, FolderTree, ZoomIn, ZoomOut, SlidersHorizontal, Plus, X, Rows3, MonitorPlay, Play, Pause, Shuffle } from "lucide-react";
 import type { CriterionModifier, CustomFieldCriterion, CustomFieldDefinition, CustomFieldEntityType, CustomFieldType, ExtensionListFilterContribution, ExtensionListSortContribution, FindFilter } from "../api/types";
@@ -1280,7 +1280,8 @@ export function ListPage({
                 step={0.25}
                 value={zoomLevel}
                 onChange={(e) => setZoomLevel(clampEntityCardSizeLevel(cardSizeEntityType, Number(e.target.value)))}
-                className="w-16 sm:w-20 h-1 accent-accent cursor-pointer"
+                style={{ "--range-fill": `${(zoomLevel / Math.max(0.25, cardSizeMaxLevel)) * 100}%` } as CSSProperties}
+                className="themed-range-input h-1 w-16 cursor-pointer sm:w-20"
                 title={`Card size: ${getEntityCardMinWidthPx(cardSizeEntityType, zoomLevel)}px`}
               />
               <ZoomIn className="w-3 h-3 text-muted" />
@@ -1297,7 +1298,8 @@ export function ListPage({
                 step={1}
                 value={10 - wallColumnCount}
                 onChange={(e) => onWallColumnCountChange(10 - Number(e.target.value))}
-                className="w-16 sm:w-20 h-1 accent-accent cursor-pointer"
+                style={{ "--range-fill": `${(((10 - wallColumnCount) - 2) / 6) * 100}%` } as CSSProperties}
+                className="themed-range-input h-1 w-16 cursor-pointer sm:w-20"
                 title={`Wall card size: ${10 - wallColumnCount}`}
               />
               <ZoomIn className="w-3 h-3 text-muted" />

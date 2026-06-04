@@ -1,6 +1,6 @@
 import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Columns3, FolderTree, Grid3X3, LayoutGrid, List, MonitorPlay, Rows3, Search, Share2, Shuffle, ZoomIn, ZoomOut } from "lucide-react";
 import type { FindFilter } from "../api/types";
-import { isValidElement, useEffect, useMemo, useState } from "react";
+import { isValidElement, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { clampEntityCardSizeLevel, getEntityCardMaxLevel, getEntityCardMinWidthPx, useEntityCardSize } from "../hooks/useEntityCardSize";
 import { reshuffleRandomSort, withSeededRandomSort } from "../utils/seededRandomSort";
 import { LIST_PER_PAGE_OPTIONS, toolbarIconButtonClass, toolbarSegmentClass, toolbarSelectClass } from "./listToolbarStyles";
@@ -202,7 +202,8 @@ export function DetailListToolbar({ filter, onFilterChange, totalCount, sortOpti
                 min={0} max={maxZoomLevel} step={0.25}
                 value={effectiveZoomLevel}
                 onChange={(e) => handleZoomChange(Number(e.target.value))}
-                className="h-1 w-16 cursor-pointer accent-accent sm:w-20"
+                style={{ "--range-fill": `${(effectiveZoomLevel / Math.max(0.25, maxZoomLevel)) * 100}%` } as CSSProperties}
+                className="themed-range-input h-1 w-16 cursor-pointer sm:w-20"
                 title={`Card size: ${getEntityCardMinWidthPx(inferredCardSizeEntityType, effectiveZoomLevel)}px`}
               />
               <ZoomIn className="w-3 h-3 text-muted" />

@@ -215,7 +215,7 @@ function RatingNumberInput({
 
         onChange(convertFromRatingFormat(clampDisplayRating(normalizeDisplayRatingInput(event.target.value, parsed, options), options), options));
       }}
-      className={inputClassName ?? "w-20 max-w-full rounded border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:border-accent"}
+      className={inputClassName ?? "themed-number-input w-20 max-w-full rounded border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:border-accent"}
     />
   );
 }
@@ -404,7 +404,7 @@ export function InteractiveRating({ value, onChange, readOnly = false }: { value
         value={value}
         onChange={onChange ?? (() => {})}
         options={options}
-        inputClassName="min-h-10 w-full rounded border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none sm:min-h-0"
+        inputClassName="themed-number-input min-h-10 w-full rounded border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none sm:min-h-0"
       />
     </div>
   );

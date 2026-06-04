@@ -245,9 +245,10 @@ export function DuplicateFinderPage({ onNavigate }: Props) {
                           {...linkProps}
                           className="aspect-video bg-card cursor-pointer block w-full overflow-hidden"
                         >
+                          {/** Use an empty alt when there is no uploaded cover so Firefox doesn't render the title inside broken images. */}
                           <img
                             src={videos.screenshotUrl(video.id)}
-                            alt={video.title || ""}
+                            alt={video.imagePath ? video.title || "" : ""}
                             className="w-full h-full object-cover"
                             loading="lazy"
                             onError={(e) => {

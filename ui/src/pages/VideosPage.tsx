@@ -1394,6 +1394,7 @@ function VideoWallCard({ video, onClick, selected, selecting, onSelect }: { vide
   const previewStatusUrl = videos.previewStatusUrl(video.id);
   const aspectRatio = file?.width && file.height ? `${file.width} / ${file.height}` : "16 / 9";
   const title = video.title || file?.basename || "Untitled";
+  const coverAlt = video.imagePath ? title : "";
   const duration = getVideoDisplayDuration(video);
   const { config } = useAppConfig();
   const wallPreviewType = config?.ui.wallPreviewType ?? "video";
@@ -1403,6 +1404,7 @@ function VideoWallCard({ video, onClick, selected, selecting, onSelect }: { vide
     <WallMediaCard
       title={title}
       imageSrc={coverUrl}
+      imageAlt={coverAlt}
       videoSrc={previewUrl}
       videoStatusSrc={previewStatusUrl}
       useVideo={wallPreviewType === "video" || wallPreviewType === "webp"}
@@ -1433,6 +1435,7 @@ function VideoFeedCard({ video, engagement, feedVideoSource, useVideo, soundEnab
   const file = video.files[0];
   const { coverUrl, videoSrc, videoStatusSrc } = getVideoFeedMedia(video, feedVideoSource);
   const title = video.title || file?.basename || `Video ${video.id}`;
+  const coverAlt = video.imagePath ? title : "";
   const duration = getVideoDisplayDuration(video);
   const aspectRatio = file?.width && file.height ? `${file.width} / ${file.height}` : "16 / 9";
   const mediaStyle = getFeedMediaStyle(file);
@@ -1511,6 +1514,7 @@ function VideoFeedCard({ video, engagement, feedVideoSource, useVideo, soundEnab
               <WallMediaCard
                 title={title}
                 imageSrc={coverUrl}
+                imageAlt={coverAlt}
                 videoSrc={videoSrc}
                 videoStatusSrc={videoStatusSrc}
                 useVideo={useVideo}
@@ -1534,6 +1538,7 @@ function VideoFeedCard({ video, engagement, feedVideoSource, useVideo, soundEnab
           <WallMediaCard
             title={title}
             imageSrc={coverUrl}
+            imageAlt={coverAlt}
             videoSrc={videoSrc}
             videoStatusSrc={videoStatusSrc}
             useVideo={useVideo}
@@ -1674,6 +1679,7 @@ function VideoVerticalViewerCard({ video, feedVideoSource, useVideo, soundEnable
   const file = video.files[0];
   const { coverUrl, videoSrc, videoStatusSrc } = getVideoFeedMedia(video, feedVideoSource);
   const title = video.title || file?.basename || `Video ${video.id}`;
+  const coverAlt = video.imagePath ? title : "";
   const duration = getVideoDisplayDuration(video);
   const videoStartTimeSec = getVideoFeedVideoStartTime(video, feedVideoSource, feedVideoStartPercent, feedVideoStartMinDuration);
   const availableViewerHeight = viewerHeight != null ? Math.max(120, viewerHeight) : null;
@@ -1683,6 +1689,7 @@ function VideoVerticalViewerCard({ video, feedVideoSource, useVideo, soundEnable
       <WallMediaCard
         title={title}
         imageSrc={coverUrl}
+        imageAlt={coverAlt}
         videoSrc={videoSrc}
         videoStatusSrc={videoStatusSrc}
         useVideo={useVideo}

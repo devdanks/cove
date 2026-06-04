@@ -140,26 +140,35 @@ public partial class StashMigrationService
         IReadOnlyDictionary<int, int> sceneCounts)
     {
         var units = new List<StashGroupImportUnit>(rows.Count);
-        foreach (var duplicateSet in rows.GroupBy(GetGroupDuplicateKey))
+        foreach (var duplicateSet in rows.GroupBy(GetGroupDisplayKey))
         {
             var duplicateRows = duplicateSet.ToList();
-            var shouldMerge = duplicateRows.Count > 1
-                && duplicateRows.Any(row => sceneCounts.GetValueOrDefault(row.Id) > 0)
-                && duplicateRows.Any(row => !string.IsNullOrWhiteSpace(row.FrontImageBlob) || !string.IsNullOrWhiteSpace(row.BackImageBlob));
+            var sceneLinkedRows = duplicateRows
+                .Where(row => sceneCounts.GetValueOrDefault(row.Id) > 0)
+                .OrderByDescending(row => sceneCounts.GetValueOrDefault(row.Id))
+                .ThenBy(row => row.Id)
+                .ToList();
+            var coverOnlyRows = duplicateRows
+                .Where(row => sceneCounts.GetValueOrDefault(row.Id) == 0 && HasGroupImage(row))
+                .OrderBy(row => row.Id)
+                .ToList();
 
-            if (!shouldMerge)
+            if (sceneLinkedRows.Count != 1 || coverOnlyRows.Count == 0)
             {
                 foreach (var row in duplicateRows)
                     units.Add(CreateGroupImportUnit([row], urls));
                 continue;
             }
 
+            var sceneLinkedRow = sceneLinkedRows[0];
+            var mergedRowIds = coverOnlyRows.Select(row => row.Id).ToHashSet();
+            mergedRowIds.Add(sceneLinkedRow.Id);
             units.Add(CreateGroupImportUnit(
-                duplicateRows
-                    .OrderByDescending(row => sceneCounts.GetValueOrDefault(row.Id))
-                    .ThenBy(row => row.Id)
-                    .ToList(),
+                [sceneLinkedRow, .. coverOnlyRows],
                 urls));
+
+            foreach (var row in duplicateRows.Where(row => !mergedRowIds.Contains(row.Id)))
+                units.Add(CreateGroupImportUnit([row], urls));
         }
 
         return units;
@@ -174,13 +183,13 @@ public partial class StashMigrationService
         return new StashGroupImportUnit(
             rows.Select(row => row.Id).ToArray(),
             canonical.Name,
-            canonical.Aliases,
-            canonical.Duration,
-            canonical.Date,
-            canonical.Rating,
-            canonical.StudioId,
-            canonical.Director,
-            canonical.Description,
+            FirstNonWhite(rows.Select(row => row.Aliases)),
+            canonical.Duration ?? FirstNonNull(rows.Select(row => row.Duration)),
+            FirstNonWhite(rows.Select(row => row.Date)),
+            canonical.Rating ?? FirstNonNull(rows.Select(row => row.Rating)),
+            canonical.StudioId ?? FirstNonNull(rows.Select(row => row.StudioId)),
+            FirstNonWhite(rows.Select(row => row.Director)),
+            FirstNonWhite(rows.Select(row => row.Description)),
             rows.Select(row => row.FrontImageBlob).FirstOrDefault(blob => !string.IsNullOrWhiteSpace(blob)),
             rows.Select(row => row.BackImageBlob).FirstOrDefault(blob => !string.IsNullOrWhiteSpace(blob)),
             rows.SelectMany(row => urls.GetValueOrDefault(row.Id, []))
@@ -188,7 +197,30 @@ public partial class StashMigrationService
                 .ToArray());
     }
 
-    private static (string Name, string? Aliases, int? Duration, string? Date, int? Rating, int? StudioId, string? Director, string? Description) GetGroupDuplicateKey(
+    private static bool HasGroupImage(
         (int Id, string Name, string? Aliases, int? Duration, string? Date, int? Rating, int? StudioId, string? Director, string? Description, string? FrontImageBlob, string? BackImageBlob) row)
-        => (row.Name, row.Aliases, row.Duration, row.Date, row.Rating, row.StudioId, row.Director, row.Description);
+        => !string.IsNullOrWhiteSpace(row.FrontImageBlob) || !string.IsNullOrWhiteSpace(row.BackImageBlob);
+
+    private static (string Name, string? Date) GetGroupDisplayKey(
+        (int Id, string Name, string? Aliases, int? Duration, string? Date, int? Rating, int? StudioId, string? Director, string? Description, string? FrontImageBlob, string? BackImageBlob) row)
+        => (NormalizeGroupNameKey(row.Name), NormalizeGroupDateKey(row.Date));
+
+    private static string NormalizeGroupNameKey(string name)
+        => string.IsNullOrWhiteSpace(name) ? string.Empty : name.Trim().ToUpperInvariant();
+
+    private static string? NormalizeGroupDateKey(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        return DateOnly.TryParse(value, out var date)
+            ? date.ToString("yyyy-MM-dd")
+            : value.Trim();
+    }
+
+    private static string? FirstNonWhite(IEnumerable<string?> values)
+        => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+
+    private static int? FirstNonNull(IEnumerable<int?> values)
+        => values.FirstOrDefault(value => value.HasValue);
 }

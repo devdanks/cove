@@ -609,7 +609,7 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
         if (missingDeps.Count > 0)
             return BadRequest(new { message = "One or more required dependencies are not available from the registry.", missingDependencies = missingDeps.Values });
 
-        // Unload any existing extensions that will be replaced so their DLLs are released
+        // Unload any existing extensions that will be replaced before swapping their files.
         var idsToReplace = dependencyPlan.Select(d => d.Id).Append(request.ExtensionId).ToList();
         foreach (var extId in idsToReplace)
         {
@@ -620,22 +620,27 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
             }
         }
 
-        // Install missing dependencies first
+        // Download the full upgrade/install batch before discovery. Rediscovering
+        // between dependency updates can load old extensions against new dependencies.
         var installedExtensions = new List<string>();
         foreach (var dep in dependencyPlan)
         {
             await registry.DownloadAsync(dep.Id, dep.Version, extensionsDir, ct);
-            extensionManager.DiscoverExtensions(extensionsDir);
-            await extensionManager.InitializeExtensionAsync(dep.Id, HttpContext.RequestServices, ct);
-            await extensionManager.SetInstallationMetadataAsync(dep.Id, "registry", dep.Version, ct);
             installedExtensions.Add(dep.Id);
         }
 
         // Install the requested extension
         var installPath = await registry.DownloadAsync(request.ExtensionId, selectedVersion.Version, extensionsDir, ct);
 
-        // Reload discovered extensions and hot-initialize the newly installed one.
+        // Reload discovered extensions once all replaced files are in their final state,
+        // then initialize dependencies before the requested extension.
         extensionManager.DiscoverExtensions(extensionsDir);
+        foreach (var dep in dependencyPlan)
+        {
+            await extensionManager.InitializeExtensionAsync(dep.Id, HttpContext.RequestServices, ct);
+            await extensionManager.SetInstallationMetadataAsync(dep.Id, "registry", dep.Version, ct);
+        }
+
         var initialized = await extensionManager.InitializeExtensionAsync(request.ExtensionId, HttpContext.RequestServices, ct);
         if (!initialized)
         {
