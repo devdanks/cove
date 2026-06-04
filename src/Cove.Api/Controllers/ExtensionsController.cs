@@ -609,6 +609,17 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
         if (missingDeps.Count > 0)
             return BadRequest(new { message = "One or more required dependencies are not available from the registry.", missingDependencies = missingDeps.Values });
 
+        // Unload any existing extensions that will be replaced so their DLLs are released
+        var idsToReplace = dependencyPlan.Select(d => d.Id).Append(request.ExtensionId).ToList();
+        foreach (var extId in idsToReplace)
+        {
+            var existing = extensionManager.Extensions.FirstOrDefault(e => string.Equals(e.Id, extId, StringComparison.OrdinalIgnoreCase));
+            if (existing != null)
+            {
+                await extensionManager.UnloadExtensionAsync(extId, HttpContext.RequestServices, ct);
+            }
+        }
+
         // Install missing dependencies first
         var installedExtensions = new List<string>();
         foreach (var dep in dependencyPlan)

@@ -19,7 +19,6 @@ public class ExtensionManager
     private readonly Dictionary<string, IExtension> _extensionMap = new(StringComparer.OrdinalIgnoreCase);
     private readonly ExtensionContext _context;
     private readonly Dictionary<string, AssemblyLoadContext> _loadContexts = [];
-    private readonly Dictionary<string, string> _shadowDirectories = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _extensionDirectories = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ExtensionManifestFile> _manifestFiles = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ExtensionInstallation> _installations = new(StringComparer.OrdinalIgnoreCase);
@@ -120,10 +119,8 @@ public class ExtensionManager
                     if (!File.Exists(dll)) continue;
                     try
                     {
-                        var shadowDir = CreateShadowCopy(dir);
-                        var shadowDll = Path.Combine(shadowDir, Path.GetFileName(dll));
-                        var loadContext = new ExtensionLoadContext(shadowDll);
-                        var assembly = loadContext.LoadFromAssemblyPath(shadowDll);
+                        var loadContext = new ExtensionLoadContext(dll);
+                        var assembly = loadContext.LoadFromAssemblyPath(dll);
                         var extensionTypes = assembly.GetTypes()
                             .Where(t => typeof(IExtension).IsAssignableFrom(t) && !t.IsAbstract && !t.IsInterface);
 
@@ -144,7 +141,6 @@ public class ExtensionManager
                                 _extensions.Add(ext);
                                 _extensionMap[ext.Id] = ext;
                                 _loadContexts[ext.Id] = loadContext;
-                                _shadowDirectories[ext.Id] = shadowDir;
                                 _extensionDirectories[ext.Id] = dir;
                                 _initOrder = null;
 
@@ -1404,12 +1400,6 @@ public class ExtensionManager
                 // Best-effort unload; file handles may still be released after GC.
             }
         }
-
-        if (_shadowDirectories.TryGetValue(id, out var shadowDir))
-        {
-            _shadowDirectories.Remove(id);
-            TryDeleteDirectory(shadowDir);
-        }
     }
 
     // ========================================================================
@@ -1489,34 +1479,6 @@ public class ExtensionManager
         var dashIdx = s.IndexOf('-');
         if (dashIdx >= 0) s = s[..dashIdx];
         return Version.TryParse(s, out version!);
-    }
-
-    private string CreateShadowCopy(string sourceDir)
-    {
-        var cacheRoot = Path.Combine(_context.DataDirectory, ".load-cache");
-        Directory.CreateDirectory(cacheRoot);
-
-        var safeName = Path.GetFileName(sourceDir);
-        var shadowDir = Path.Combine(cacheRoot, safeName, Guid.NewGuid().ToString("N"));
-        CopyDirectory(sourceDir, shadowDir);
-        return shadowDir;
-    }
-
-    private static void CopyDirectory(string sourceDir, string destinationDir)
-    {
-        var source = new DirectoryInfo(sourceDir);
-        Directory.CreateDirectory(destinationDir);
-
-        foreach (var file in source.GetFiles())
-        {
-            var targetPath = Path.Combine(destinationDir, file.Name);
-            file.CopyTo(targetPath, overwrite: true);
-        }
-
-        foreach (var directory in source.GetDirectories())
-        {
-            CopyDirectory(directory.FullName, Path.Combine(destinationDir, directory.Name));
-        }
     }
 
     private static void TryDeleteDirectory(string path)
@@ -1658,12 +1620,7 @@ internal sealed class ExtensionLoadContext : AssemblyLoadContext
 
     private static string CreateSharedShadowCopy(string extensionsRoot, string assemblyName, string sourcePath)
     {
-        var sharedDir = Path.Combine(
-            extensionsRoot,
-            ".load-cache",
-            "__shared",
-            assemblyName,
-            Guid.NewGuid().ToString("N"));
+        var sharedDir = Path.Combine(extensionsRoot, ".load-cache", "__shared", assemblyName);
         Directory.CreateDirectory(sharedDir);
 
         var destinationPath = Path.Combine(sharedDir, Path.GetFileName(sourcePath));
