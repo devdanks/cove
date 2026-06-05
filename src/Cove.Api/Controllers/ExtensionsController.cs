@@ -106,7 +106,12 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
     private string BuildAssetUrl(string extensionId, string path)
     {
         var url = $"/api/extensions/assets/{Uri.EscapeDataString(extensionId)}/{path}";
-        var basePath = Path.Combine(extensionManager.Context.DataDirectory, extensionId);
+        var basePath = extensionManager.GetExtensionDirectory(extensionId);
+        if (basePath == null)
+        {
+            return url;
+        }
+
         var fullPath = Path.GetFullPath(Path.Combine(basePath, path));
 
         if (!IsPathInsideDirectory(basePath, fullPath) || !System.IO.File.Exists(fullPath))
@@ -648,6 +653,8 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
             {
                 message = $"Extension '{request.ExtensionId}' was downloaded but failed to initialize.",
                 path = installPath,
+                detail = extensionManager.GetLastFailureReason(request.ExtensionId)
+                    ?? $"Extension '{request.ExtensionId}' was not loaded during discovery.",
             });
         }
 

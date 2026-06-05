@@ -17,6 +17,7 @@ public class PostgresManagerService : IHostedService
 {
     private readonly PostgresConfig _config;
     private readonly ILogger<PostgresManagerService> _logger;
+    private string? _binDirOverride;
     private bool _started;
 
     // PostgreSQL 18.3 - latest stable release
@@ -42,7 +43,7 @@ public class PostgresManagerService : IHostedService
         : CoveDefaultPaths.ResolveDataPath(_config.DataPath);
 
     private string PgsqlDir => Path.Combine(CoveDir, "pgsql");
-    private string BinDir => Path.Combine(PgsqlDir, "bin");
+    private string BinDir => _binDirOverride ?? Path.Combine(PgsqlDir, "bin");
     private string PgLibDir => Path.Combine(PgsqlDir, "lib");
     private string PgShareDir => Path.Combine(PgsqlDir, "share");
     private string DataDir => Path.Combine(CoveDir, "pgdata");
@@ -68,7 +69,7 @@ public class PostgresManagerService : IHostedService
         // 1. On Linux/macOS, check if a system postgres is already available in PATH
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
-            var systemPgCtl = FindSystemPgCtl();
+            var systemPgCtl = await FindSystemPgCtlAsync(ct);
             if (systemPgCtl != null && !File.Exists(Exe("pg_ctl")))
             {
                 _logger.LogInformation("Found system PostgreSQL at {Path} — symlinking to managed bin dir", systemPgCtl);
@@ -192,15 +193,126 @@ public class PostgresManagerService : IHostedService
         File.Delete(archivePath);
     }
 
-    /// <summary>Find a system pg_ctl for the exact PostgreSQL major Cove manages.</summary>
-    private string? FindSystemPgCtl()
+    private sealed record LinuxOsRelease(string? Id, string? IdLike, string? VersionCodename, string? VersionId, string? PrettyName);
+
+    private static async Task<LinuxOsRelease> ReadLinuxOsReleaseAsync(CancellationToken ct)
     {
-        // Common system install locations
-        var candidates = new[]
+        if (!File.Exists("/etc/os-release"))
+            return new LinuxOsRelease(null, null, null, null, null);
+
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var osRelease = await File.ReadAllTextAsync("/etc/os-release", ct);
+        foreach (var rawLine in osRelease.Split('\n'))
+        {
+            var line = rawLine.Trim();
+            if (line.Length == 0 || line.StartsWith('#'))
+                continue;
+
+            var equalsIndex = line.IndexOf('=');
+            if (equalsIndex <= 0)
+                continue;
+
+            var key = line[..equalsIndex];
+            var value = line[(equalsIndex + 1)..].Trim().Trim('"');
+            values[key] = value;
+        }
+
+        return new LinuxOsRelease(
+            values.GetValueOrDefault("ID"),
+            values.GetValueOrDefault("ID_LIKE"),
+            values.GetValueOrDefault("VERSION_CODENAME"),
+            values.GetValueOrDefault("VERSION_ID"),
+            values.GetValueOrDefault("PRETTY_NAME"));
+    }
+
+    private static bool IsDebianFamilyLinux(LinuxOsRelease osRelease)
+    {
+        var ids = new[] { osRelease.Id, osRelease.IdLike }
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .SelectMany(value => value!.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+
+        return ids.Any(value =>
+            value.Equals("debian", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("ubuntu", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string BuildUnsupportedLinuxManagedPostgresMessage(LinuxOsRelease osRelease)
+    {
+        var detected = osRelease.PrettyName
+            ?? osRelease.Id
+            ?? "this Linux distribution";
+
+        return $"Managed PostgreSQL automatic download currently supports Debian/Ubuntu-family Linux only; detected {detected}. " +
+            "Cove will not download Debian .deb packages on this distribution. " +
+            $"Install PostgreSQL {PgMajor} and pgvector with your distribution packages so pg_ctl is on PATH, use Docker, " +
+            "or set Cove__Postgres__Managed=false and provide Cove__Postgres__ConnectionString for an external pgvector-enabled PostgreSQL server.";
+    }
+
+    private static IEnumerable<string> FindExecutablesInPath(string executableName)
+    {
+        var pathDirs = Environment.GetEnvironmentVariable("PATH")?.Split(Path.PathSeparator) ?? [];
+        foreach (var dir in pathDirs)
+        {
+            if (string.IsNullOrWhiteSpace(dir))
+                continue;
+
+            string candidate;
+            try
+            {
+                candidate = Path.Combine(dir, executableName);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (File.Exists(candidate))
+                yield return candidate;
+        }
+    }
+
+    private async Task<bool> IsPostgresMajorAsync(string pgCtlPath, CancellationToken ct)
+    {
+        try
+        {
+            var workDir = Path.GetDirectoryName(pgCtlPath) ?? "/";
+            var (exitCode, stdout) = await RunWithOutputAsync(pgCtlPath, "--version", workDir, ct);
+            if (exitCode != 0)
+                return false;
+
+            return stdout.Contains($"PostgreSQL) {PgMajor}.", StringComparison.Ordinal)
+                || stdout.Contains($"PostgreSQL {PgMajor}.", StringComparison.Ordinal);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not inspect PostgreSQL version at {Path}", pgCtlPath);
+            return false;
+        }
+    }
+
+    /// <summary>Find a system pg_ctl for the exact PostgreSQL major Cove manages.</summary>
+    private async Task<string?> FindSystemPgCtlAsync(CancellationToken ct)
+    {
+        var candidates = new List<string>();
+        candidates.AddRange(FindExecutablesInPath("pg_ctl"));
+
+        // Common distro package locations. Debian-family PGDG uses /usr/lib/postgresql;
+        // RPM-family PGDG uses /usr/pgsql-*; Fedora's distro package commonly uses /usr/bin.
+        candidates.AddRange(new[]
         {
             $"/usr/lib/postgresql/{PgMajor}/bin/pg_ctl",
-        };
-        return candidates.FirstOrDefault(File.Exists);
+            $"/usr/pgsql-{PgMajor}/bin/pg_ctl",
+            "/usr/bin/pg_ctl",
+            "/usr/local/bin/pg_ctl",
+        });
+
+        foreach (var candidate in DistinctPaths(candidates).Where(File.Exists))
+        {
+            if (await IsPostgresMajorAsync(candidate, ct))
+                return candidate;
+        }
+
+        return null;
     }
 
     /// <summary>Symlink (or copy) system postgres bin dir so our managed wrapper can find it.</summary>
@@ -215,13 +327,19 @@ public class PostgresManagerService : IHostedService
         }
         catch
         {
-            // Symlink failed (permissions?) — just note the path; we set BinDir to the system dir
-            _logger.LogWarning("Could not symlink {SystemBin} to {BinDir} — will use system path directly", systemBinDir, BinDir);
+            // Symlink failed (permissions/filesystem restrictions?) — use the system bin dir directly.
+            var intendedBinDir = BinDir;
+            _binDirOverride = systemBinDir;
+            _logger.LogWarning("Could not symlink {SystemBin} to {BinDir} — using system path directly", systemBinDir, intendedBinDir);
         }
     }
 
     private async Task InstallLinuxPostgresAsync(CancellationToken ct)
     {
+        var osRelease = await ReadLinuxOsReleaseAsync(ct);
+        if (!IsDebianFamilyLinux(osRelease))
+            throw new InvalidOperationException(BuildUnsupportedLinuxManagedPostgresMessage(osRelease));
+
         // Download .deb packages from the PGDG APT repository and extract locally.
         var tempDir = Path.Combine(CoveDir, "_pg_install_tmp");
         var extractDir = Path.Combine(CoveDir, "_pg_extract_tmp");
@@ -231,19 +349,7 @@ public class PostgresManagerService : IHostedService
         try
         {
             // Detect distro codename for PGDG repo (default to noble/Ubuntu 24.04)
-            var codename = "noble";
-            if (File.Exists("/etc/os-release"))
-            {
-                var osRelease = await File.ReadAllTextAsync("/etc/os-release", ct);
-                foreach (var line in osRelease.Split('\n'))
-                {
-                    if (line.StartsWith("VERSION_CODENAME="))
-                    {
-                        codename = line.Split('=')[1].Trim().Trim('"');
-                        break;
-                    }
-                }
-            }
+            var codename = string.IsNullOrWhiteSpace(osRelease.VersionCodename) ? "noble" : osRelease.VersionCodename;
 
             // Map distro codename to PGDG numeric suffix (e.g. noble=24.04, jammy=22.04)
             var pgdgSuffix = codename switch

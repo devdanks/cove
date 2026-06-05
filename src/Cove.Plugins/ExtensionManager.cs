@@ -25,6 +25,7 @@ public class ExtensionManager
     private readonly Dictionary<string, ExtensionInstallation> _installations = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _initializedExtensions = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _startupDisabledExtensions = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _extensionFailureReasons = new(StringComparer.OrdinalIgnoreCase);
     private IServiceScopeFactory? _scopeFactory;
     private IServiceProvider? _rootServices;
     private ILogger<ExtensionManager>? _logger;
@@ -153,6 +154,7 @@ public class ExtensionManager
                                 _loadCacheSlots[binaryCache.CacheKey] = binaryCache.Slot;
                                 _loadCacheSlots[ext.Id] = binaryCache.Slot;
                                 _extensionDirectories[ext.Id] = dir;
+                                _extensionFailureReasons.Remove(ext.Id);
                                 _initOrder = null;
 
                                 var existingInstall = _installations.GetValueOrDefault(ext.Id);
@@ -559,6 +561,7 @@ public class ExtensionManager
         {
             await ext.InitializeAsync(runtimeServices, ct);
             _initializedExtensions.Add(ext.Id);
+            _extensionFailureReasons.Remove(ext.Id);
             var manifest = GetManifestFile(ext.Id);
             if (_installations.TryGetValue(ext.Id, out var install))
             {
@@ -913,6 +916,11 @@ public class ExtensionManager
 
     /// <summary>Get all installation records.</summary>
     public IReadOnlyDictionary<string, ExtensionInstallation> Installations => _installations;
+
+    public string? GetExtensionDirectory(string id) => ResolveExtensionDirectory(id);
+
+    public string? GetLastFailureReason(string id) =>
+        _extensionFailureReasons.TryGetValue(id, out var reason) ? reason : null;
 
     private static bool IsManifestOnlyKind(string? kind) =>
         string.Equals(kind, "bundle", StringComparison.OrdinalIgnoreCase)
@@ -1300,6 +1308,7 @@ public class ExtensionManager
 
         _startupDisabledExtensions.Add(extensionId);
         _initializedExtensions.Remove(extensionId);
+        _extensionFailureReasons[extensionId] = $"{phase}: {ex.GetType().Name}: {ex.Message}";
         _logger?.LogError(ex, "Extension {Id} failed during {Phase} and was disabled", extensionId, phase);
     }
 

@@ -2311,8 +2311,8 @@ public class ImageRepository : IImageRepository
     private static IQueryable<Image> ApplyPathSort(IQueryable<Image> query, bool desc)
     {
         return desc
-            ? query.OrderBy(image => image.MaxPath == null ? 1 : 0).ThenByDescending(image => image.MaxPath)
-            : query.OrderBy(image => image.MinPath == null ? 1 : 0).ThenBy(image => image.MinPath);
+            ? query.OrderBy(image => image.MaxPath == null ? 1 : 0).ThenByDescending(image => image.MaxPath).ThenByDescending(image => image.Id)
+            : query.OrderBy(image => image.MinPath == null ? 1 : 0).ThenBy(image => image.MinPath).ThenBy(image => image.Id);
     }
 
     private static IQueryable<Image> ApplyFingerprintCriterion(IQueryable<Image> query, StringCriterion? criterion, string fingerprintType)
