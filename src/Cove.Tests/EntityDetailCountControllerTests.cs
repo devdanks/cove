@@ -115,17 +115,20 @@ public class EntityDetailCountControllerTests
     {
         await using var context = CreateContext();
 
-        var gallery = new Gallery { Title = "Gallery" };
+        var studio = new Studio { Name = "Studio" };
+        var performer = new Performer { Name = "Performer" };
+        var gallery = new Gallery { Title = "Gallery", Studio = studio };
         var imageA = new Image { Title = "Image A" };
         var imageB = new Image { Title = "Image B" };
         var video = new Video { Title = "Video" };
-        context.AddRange(gallery, imageA, imageB, video);
+        context.AddRange(studio, performer, gallery, imageA, imageB, video);
         await context.SaveChangesAsync();
 
         context.AddRange(
             new ImageGallery { GalleryId = gallery.Id, ImageId = imageA.Id },
             new ImageGallery { GalleryId = gallery.Id, ImageId = imageB.Id },
-            new VideoGallery { GalleryId = gallery.Id, VideoId = video.Id });
+            new VideoGallery { GalleryId = gallery.Id, VideoId = video.Id },
+            new GalleryPerformer { GalleryId = gallery.Id, PerformerId = performer.Id });
         await context.SaveChangesAsync();
 
         var storedGallery = await context.Galleries.SingleAsync(candidate => candidate.Id == gallery.Id);
@@ -147,6 +150,11 @@ public class EntityDetailCountControllerTests
         var listGallery = Assert.Single(list.Items);
         Assert.Equal(2, listGallery.ImageCount);
         Assert.Equal(1, listGallery.VideoCount);
+        Assert.Equal(studio.Id, listGallery.StudioId);
+        Assert.Equal("Studio", listGallery.StudioName);
+        var listPerformer = Assert.Single(listGallery.Performers);
+        Assert.Equal(performer.Id, listPerformer.Id);
+        Assert.Equal("Performer", listPerformer.Name);
         Assert.NotNull(listGallery.CoverPath);
 
         var detailResult = await controller.GetById(gallery.Id, CancellationToken.None);

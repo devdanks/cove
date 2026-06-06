@@ -29,7 +29,7 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
 
         var segments = await LoadVideoSegmentsAsync(videoId, ct);
         var rules = await LoadRulesAsync(profile.Id, ct);
-        var spans = BuildVideoSpans(videoId, profile.Id, segments, rules);
+        var spans = BuildVideoSpans(videoId, profile, segments, rules);
         var response = new VideoResolvedSpansDto(spans, profile.Id, profile.Version);
 
         memoryCache.Set(cacheKey, response, TimeSpan.FromMinutes(DefaultSpanCacheMinutes));
@@ -65,7 +65,7 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
         if (uncachedIds.Count == 0)
             return results;
 
-        var allSegments = await db.Segments.AsNoTracking()
+        var allSegments = await db.VisibleSegments().AsNoTracking()
             .Include(segment => segment.Tag).ThenInclude(tag => tag!.TagGroup)
             .Where(s => s.HostType == SegmentHostType.Video && uncachedIds.Contains(s.HostId))
             .OrderBy(s => s.StartSec)
@@ -77,7 +77,7 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
         foreach (var videoId in uncachedIds)
         {
             var segs = segmentsByHost.TryGetValue(videoId, out var hostSegments) ? hostSegments : [];
-            var spans = BuildVideoSpans(videoId, profile.Id, segs.AsReadOnly(), rules);
+            var spans = BuildVideoSpans(videoId, profile, segs.AsReadOnly(), rules);
             var response = new VideoResolvedSpansDto(spans, profile.Id, profile.Version);
 
             var cacheKey = $"segment-spans:{videoId}:{profile.Id}:{profile.Version}";
@@ -119,7 +119,7 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
         if (uncachedIds.Count == 0)
             return results;
 
-        var allSegments = await db.Segments.AsNoTracking()
+        var allSegments = await db.VisibleSegments().AsNoTracking()
             .Include(segment => segment.Tag).ThenInclude(tag => tag!.TagGroup)
             .Where(s => s.HostType == SegmentHostType.Video && uncachedIds.Contains(s.HostId))
             .OrderBy(s => s.StartSec)
@@ -194,7 +194,7 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
     public async Task<IReadOnlyList<ResolvedSpan>> PreviewVideoAsync(int videoId, IReadOnlyList<SegmentDisplayRule> rules, CancellationToken ct)
     {
         var segments = await LoadVideoSegmentsAsync(videoId, ct);
-        return BuildVideoSpans(videoId, 0, segments, rules);
+        return BuildVideoSpans(videoId, new SegmentDisplayProfile { Id = 0, Name = "Preview", Version = 1 }, segments, rules);
     }
 
     public async Task<ResolvedSpanDetailDto?> GetSpanDetailAsync(int videoId, string spanKey, int? profileId, CancellationToken ct)
@@ -433,7 +433,7 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
         if (memoryCache.TryGetValue<List<Segment>>(cacheKey, out var cached) && cached is not null)
             return cached;
 
-        var segments = await db.Segments.AsNoTracking()
+        var segments = await db.VisibleSegments().AsNoTracking()
             .Include(segment => segment.Tag).ThenInclude(tag => tag!.TagGroup)
             .Where(segment => segment.HostType == SegmentHostType.Video && segment.HostId == videoId)
             .OrderBy(segment => segment.StartSec)
@@ -466,17 +466,14 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
         return rules;
     }
 
-    private static List<ResolvedSpan> BuildVideoSpans(int videoId, int profileId, IReadOnlyList<Segment> segments, IReadOnlyList<SegmentDisplayRule> rules)
+    private static List<ResolvedSpan> BuildVideoSpans(int videoId, SegmentDisplayProfile profile, IReadOnlyList<Segment> segments, IReadOnlyList<SegmentDisplayRule> rules)
     {
         var buckets = new Dictionary<SpanBucketKey, List<Segment>>();
 
         foreach (var segment in segments)
         {
             var rule = FindMatchingRule(segment, rules);
-            if (segment.Tag?.ShowAsSegment == false)
-                continue;
-
-            if (segment.Tag?.ShowAsSegment != true && rule?.Visible == false)
+            if (rule?.Visible == false)
                 continue;
 
             if (rule?.MinConfidence is float minConfidence && (!segment.Confidence.HasValue || segment.Confidence.Value < minConfidence))
@@ -484,17 +481,19 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
 
             var endSec = segment.EndSec ?? segment.StartSec;
             var durationSec = Math.Max(0, endSec - segment.StartSec);
-            if (rule?.MinDurationSec is double minDurationSec && durationSec < minDurationSec)
-                continue;
 
+            var segmentLabel = segment.Tag?.Name ?? segment.Title;
             var bucketKey = new SpanBucketKey(
                 segment.SourceKey,
                 segment.Kind,
                 segment.TagId,
+                segment.TagId is null ? segmentLabel : null,
                 segment.Tag?.SegmentColorOverride ?? segment.Tag?.Color ?? rule?.ColorOverride ?? segment.ColorHint,
                 segment.Tag?.SegmentLaneOverride ?? rule?.Lane,
                 rule?.CollapseToInstant == true || durationSec <= 0,
-                rule?.MergeGapSec ?? 0d);
+                rule?.MergeGapSec ?? 0d,
+                rule?.MinDurationSec ?? 0d,
+                segment.TagId is null ? segmentLabel : null);
 
             if (!buckets.TryGetValue(bucketKey, out var bucket))
             {
@@ -520,7 +519,7 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
                 foreach (var segment in bucket)
                 {
                     spans.Add(new ResolvedSpan(
-                        ResolvedSpanKeys.Create(videoId, profileId, pair.Key.SourceKey, pair.Key.Kind, pair.Key.TagId, segment.StartSec, segment.StartSec),
+                        ResolvedSpanKeys.Create(videoId, profile.Id, pair.Key.SourceKey, pair.Key.Kind, pair.Key.TagId, segment.StartSec, segment.StartSec),
                         SegmentHostType.Video,
                         videoId,
                         segment.StartSec,
@@ -528,7 +527,7 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
                         pair.Key.SourceKey,
                         pair.Key.Kind,
                         pair.Key.TagId,
-                        segment.Tag?.Name,
+                        segment.Tag?.Name ?? pair.Key.Label,
                         pair.Key.ColorHint,
                         pair.Key.Lane,
                         true,
@@ -556,13 +555,13 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
                     continue;
                 }
 
-                spans.Add(CreateResolvedSpan(videoId, profileId, pair.Key, videoId, currentStart, currentEnd, bucket[0].Tag?.Name, currentIds));
+                AddResolvedSpan(spans, videoId, profile.Id, pair.Key, videoId, currentStart, currentEnd, bucket[0].Tag?.Name, pair.Key.Label, currentIds);
                 currentStart = segment.StartSec;
                 currentEnd = segmentEnd;
                 currentIds = [segment.Id];
             }
 
-            spans.Add(CreateResolvedSpan(videoId, profileId, pair.Key, videoId, currentStart, currentEnd, bucket[0].Tag?.Name, currentIds));
+            AddResolvedSpan(spans, videoId, profile.Id, pair.Key, videoId, currentStart, currentEnd, bucket[0].Tag?.Name, pair.Key.Label, currentIds);
         }
 
         spans.Sort(static (left, right) =>
@@ -578,7 +577,7 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
         return spans;
     }
 
-    private static ResolvedSpan CreateResolvedSpan(int videoId, int profileId, SpanBucketKey key, int hostId, double startSec, double endSec, string? tagName, List<int> segmentIds)
+    private static ResolvedSpan CreateResolvedSpan(int videoId, int profileId, SpanBucketKey key, int hostId, double startSec, double endSec, string? tagName, string? fallbackLabel, List<int> segmentIds)
         => new(
             ResolvedSpanKeys.Create(videoId, profileId, key.SourceKey, key.Kind, key.TagId, startSec, endSec),
             SegmentHostType.Video,
@@ -588,11 +587,19 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
             key.SourceKey,
             key.Kind,
             key.TagId,
-            tagName,
+            tagName ?? fallbackLabel,
             key.ColorHint,
             key.Lane,
             false,
             segmentIds.OrderBy(id => id).ToList());
+
+    private static void AddResolvedSpan(List<ResolvedSpan> spans, int videoId, int profileId, SpanBucketKey key, int hostId, double startSec, double endSec, string? tagName, string? fallbackLabel, List<int> segmentIds)
+    {
+        if (key.MinDurationSec > 0 && endSec - startSec < key.MinDurationSec)
+            return;
+
+        spans.Add(CreateResolvedSpan(videoId, profileId, key, hostId, startSec, endSec, tagName, fallbackLabel, segmentIds));
+    }
 
     private static SegmentDisplayRule? FindMatchingRule(Segment segment, IReadOnlyList<SegmentDisplayRule> rules)
     {
@@ -840,9 +847,24 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
             db.SegmentDisplayRules.Add(CreateBuiltInDefaultRule(defaultProfile));
             changed = true;
         }
+        else if (await EnsureDefaultRuleExistsAsync(defaultProfile, ct))
+        {
+            changed = true;
+        }
 
         if (changed)
             await db.SaveChangesAsync(ct);
+    }
+
+    private async Task<bool> EnsureDefaultRuleExistsAsync(SegmentDisplayProfile profile, CancellationToken ct)
+    {
+        var hasRules = profile.Id > 0 && await db.SegmentDisplayRules.AnyAsync(rule => rule.ProfileId == profile.Id, ct);
+        if (hasRules)
+            return false;
+
+        db.SegmentDisplayRules.Add(CreateBuiltInDefaultRule(profile));
+        profile.Version++;
+        return true;
     }
 
     private static SegmentDisplayRule CreateBuiltInDefaultRule(SegmentDisplayProfile profile)
@@ -861,10 +883,13 @@ public sealed class SegmentSpanResolver(CoveContext db, ICurrentPrincipalAccesso
         string SourceKey,
         string? Kind,
         int? TagId,
+        string? GroupKey,
         string? ColorHint,
         int? Lane,
         bool CollapsedToInstant,
-        double MergeGapSec);
+        double MergeGapSec,
+        double MinDurationSec,
+        string? Label);
 
     private sealed record OperandMatch(List<IntervalAlgebra.Interval> Intervals, HashSet<int> SegmentIds);
 }

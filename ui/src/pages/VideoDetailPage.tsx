@@ -1401,10 +1401,20 @@ function getSegmentTimelineLabel(
     }
 
     const title = segment.title?.trim();
-    if (title && title.toLowerCase() !== "performer") return title;
+    if (title && title.toLowerCase() !== "performer" && !isRawDataLabel(title)) return title;
   }
 
-  return span.kind?.trim() || span.sourceKey?.trim() || "Segment";
+  const kind = span.kind?.trim();
+  if (kind && kind !== "tag") return kind;
+
+  const sourceKey = span.sourceKey?.trim();
+  if (sourceKey) return sourceKey.replace(/^ext:ai\./, "").replace(/^ext:/, "");
+
+  return "Segment";
+}
+
+function isRawDataLabel(value: string) {
+  return value.startsWith("{") || value.startsWith("[") || value.includes('"probabilit');
 }
 
 // Video Scrubber / Timeline Component

@@ -364,6 +364,7 @@ public class GitHubExtensionRegistry : IExtensionRegistry
 
                     Directory.CreateDirectory(destDir);
                     entry.ExtractToFile(destPath, overwrite: true);
+                    File.SetLastWriteTimeUtc(destPath, DateTime.UtcNow);
                 }
             }
         }

@@ -81,6 +81,9 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
         }
         lines.Add("export default { components, actionHandlers, handlers: actionHandlers };\n");
 
+        Response.Headers.Append("Cache-Control", "no-cache, no-store, must-revalidate");
+        Response.Headers.Append("Pragma", "no-cache");
+        Response.Headers.Append("Expires", "0");
         return Content(string.Join("\n", lines), "application/javascript");
     }
 
@@ -100,6 +103,9 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
             lines.Add($"@import url('{url}');");
         }
 
+        Response.Headers.Append("Cache-Control", "no-cache, no-store, must-revalidate");
+        Response.Headers.Append("Pragma", "no-cache");
+        Response.Headers.Append("Expires", "0");
         return Content(string.Join("\n", lines), "text/css");
     }
 
@@ -285,6 +291,7 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
         foreach (var extensionId in enabledExtensions)
         {
             await extensionManager.InitializeExtensionAsync(extensionId, HttpContext.RequestServices, ct);
+            extensionManager.RegisterExtensionEndpoints(extensionId);
         }
         scraperService.ReloadScrapers();
         return Ok(new { enabledExtensions });
@@ -391,6 +398,9 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
             _ => "application/octet-stream"
         };
 
+        Response.Headers.Append("Cache-Control", "no-cache, no-store, must-revalidate");
+        Response.Headers.Append("Pragma", "no-cache");
+        Response.Headers.Append("Expires", "0");
         return PhysicalFile(fullPath, contentType);
     }
 
@@ -475,6 +485,7 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
             if (!initialized)
                 return StatusCode(500, new { message = $"Extension '{manifest.Id}' was downloaded but failed to initialize.", path = extensionDir });
 
+            extensionManager.RegisterExtensionEndpoints(manifest.Id);
             await extensionManager.SetInstallationSourceAsync(manifest.Id, "url", ct);
             scraperService.ReloadScrapers();
 
@@ -576,6 +587,7 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
             return BadRequest(selectedVersionError ?? $"No compatible version is available for '{request.ExtensionId}'.");
 
         var installedVersions = extensionManager.Installations.Values
+            .Where(i => extensionManager.IsEffectivelyInstalled(i.ExtensionId))
             .ToDictionary(i => i.ExtensionId, i => i.Version, StringComparer.OrdinalIgnoreCase);
         var installDependencies = request.InstallDependencies;
         var dependencyPlan = new List<RegistryInstallPlanItem>();
@@ -643,6 +655,7 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
         foreach (var dep in dependencyPlan)
         {
             await extensionManager.InitializeExtensionAsync(dep.Id, HttpContext.RequestServices, ct);
+            extensionManager.RegisterExtensionEndpoints(dep.Id);
             await extensionManager.SetInstallationMetadataAsync(dep.Id, "registry", dep.Version, ct);
         }
 
@@ -658,6 +671,7 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
             });
         }
 
+        extensionManager.RegisterExtensionEndpoints(request.ExtensionId);
         await extensionManager.SetInstallationMetadataAsync(request.ExtensionId, "registry", selectedVersion.Version, ct);
         scraperService.ReloadScrapers();
 
@@ -680,6 +694,7 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
         if (detail == null) return NotFound();
 
         var installedVersions = extensionManager.Installations.Values
+            .Where(i => extensionManager.IsEffectivelyInstalled(i.ExtensionId))
             .ToDictionary(i => i.ExtensionId, i => i.Version, StringComparer.OrdinalIgnoreCase);
         var plan = new List<RegistryInstallPlanItem>();
         var deps = new List<DependencyInfo>();
@@ -997,6 +1012,7 @@ public class ExtensionsController(ExtensionManager extensionManager, ScraperServ
 
             Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
             entry.ExtractToFile(destinationPath, overwrite: true);
+            System.IO.File.SetLastWriteTimeUtc(destinationPath, DateTime.UtcNow);
         }
     }
 

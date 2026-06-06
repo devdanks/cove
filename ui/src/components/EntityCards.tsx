@@ -1313,7 +1313,7 @@ interface GalleryTileProps {
 }
 
 export function GalleryTile({ gallery, engagement, onClick, onNavigate, selected, onSelect, selecting, bookmarkInitiallySaved }: GalleryTileProps & { engagement?: EntityEngagement }) {
-  const hasFooter = gallery.imageCount > 0 || gallery.videoCount > 0 || gallery.tags.length > 0 || gallery.performers.length > 0 || gallery.organized;
+  const hasFooter = gallery.imageCount > 0 || gallery.videoCount > 0 || gallery.tags.length > 0 || gallery.performers.length > 0 || Boolean(gallery.studioName) || gallery.organized;
   const title = gallery.title || "Untitled";
   const galleryCoverSrc = gallery.coverPath ?? galleries.coverUrl(gallery.id, gallery.updatedAt, 960);
 
@@ -1348,9 +1348,19 @@ export function GalleryTile({ gallery, engagement, onClick, onNavigate, selected
               className="absolute left-9 top-1 z-10 border-white/20 bg-black/60 text-white opacity-0 shadow transition-opacity hover:bg-black/80 group-hover:opacity-100 focus:opacity-100"
             />
           ) : null}
-          {(gallery.studioName || gallery.date) ? (
-            <div className="absolute right-1 top-1 z-10 max-w-[80%] truncate rounded bg-black/70 px-1 py-0.5 text-[10px] text-white">
-              {gallery.studioName || gallery.date}
+          {gallery.studioName && gallery.studioId && !selecting ? (
+            <div className="absolute top-0 right-0 p-1 z-[5]">
+              <img
+                src={entityImages.studioImageUrl(gallery.studioId)}
+                alt={gallery.studioName}
+                className="h-8 w-auto max-w-[120px] object-contain drop-shadow-md"
+                onError={(e) => {
+                  const el = e.target as HTMLImageElement;
+                  el.style.display = "none";
+                  if (el.nextElementSibling) (el.nextElementSibling as HTMLElement).style.display = "";
+                }}
+              />
+              <span className="text-xs font-medium text-white bg-black/60 px-1.5 py-0.5 rounded" style={{ display: "none" }}>{gallery.studioName}</span>
             </div>
           ) : null}
         </>
@@ -1370,16 +1380,12 @@ export function GalleryTile({ gallery, engagement, onClick, onNavigate, selected
                 <VideosPopoverContent filter={{ galleryId: gallery.id }} />
               </PopoverButton>
             ) : null}
-            {gallery.tags.length > 0 ? (
-              <PopoverButton icon={<Tag className="w-3.5 h-3.5" />} count={gallery.tags.length} title="Tags" preferBelow>
-                <EntityLinkList items={gallery.tags.map((tag) => ({ id: tag.id, label: tag.name, color: tag.color ?? tag.tagGroupColor }))} page="tag" onNavigate={onNavigate} />
-              </PopoverButton>
-            ) : null}
-            {gallery.performers.length > 0 ? (
-              <PopoverButton icon={<User className="w-3.5 h-3.5" />} count={gallery.performers.length} title="Performers" wide preferBelow>
-                <PerformerPreviewGrid performers={gallery.performers} onNavigate={onNavigate} />
-              </PopoverButton>
-            ) : null}
+            <EntityReferencePopovers
+              studio={gallery.studioName ? { id: gallery.studioId, name: gallery.studioName } : null}
+              performers={gallery.performers}
+              tags={gallery.tags}
+              onNavigate={onNavigate}
+            />
             {gallery.organized ? <span className="p-1 text-muted" title="Organized"><Box className="w-3.5 h-3.5" /></span> : null}
         </>
       ) : null}

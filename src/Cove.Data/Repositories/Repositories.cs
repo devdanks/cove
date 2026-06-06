@@ -1696,7 +1696,9 @@ public class GalleryRepository : IGalleryRepository
         }
 
         var items = await _db.Galleries
+            .Include(g => g.Studio)
             .Include(g => g.GalleryTags).ThenInclude(gt => gt.Tag).ThenInclude(tag => tag!.TagGroup)
+            .Include(g => g.GalleryPerformers).ThenInclude(gp => gp.Performer)
             .AsSplitQuery()
             .Where(g => pagedIds.Contains(g.Id))
             .AsNoTracking()
@@ -2312,7 +2314,7 @@ public class ImageRepository : IImageRepository
     {
         return desc
             ? query.OrderBy(image => image.MaxPath == null ? 1 : 0).ThenByDescending(image => image.MaxPath).ThenByDescending(image => image.Id)
-            : query.OrderBy(image => image.MinPath == null ? 1 : 0).ThenBy(image => image.MinPath).ThenBy(image => image.Id);
+            : query.OrderBy(image => image.MinPath).ThenBy(image => image.Id);
     }
 
     private static IQueryable<Image> ApplyFingerprintCriterion(IQueryable<Image> query, StringCriterion? criterion, string fingerprintType)

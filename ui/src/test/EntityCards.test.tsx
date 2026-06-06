@@ -260,6 +260,24 @@ describe("GalleryTile", () => {
 
     expect((container.querySelector("img") as HTMLImageElement | null)?.getAttribute("src")).toContain("/api/galleries/7/cover");
   });
+
+  it("shows the studio logo overlay and shared studio and performer popovers", () => {
+    render(
+      <GalleryTile
+        gallery={{
+          ...baseGallery,
+          studioId: 9,
+          studioName: "Studio Nine",
+          performers: [{ id: 11, name: "Performer One", imagePath: null }],
+        } as any}
+        onClick={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByAltText("Studio Nine")).toHaveAttribute("src", expect.stringContaining("/api/studios/9/image"));
+    expect(screen.getByTitle("Studio")).toBeInTheDocument();
+    expect(screen.getByTitle("Performers")).toBeInTheDocument();
+  });
 });
 
 describe("GroupTile", () => {

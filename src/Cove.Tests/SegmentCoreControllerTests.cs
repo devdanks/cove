@@ -182,6 +182,174 @@ public class SegmentCoreControllerTests
     }
 
     [Fact]
+    public async Task VideoSegmentsController_RawProfileIncludesSegmentsWithHiddenTagDisplayFlag()
+    {
+        await using var scope = await CreateContextAsync();
+        var context = scope.Context;
+        var video = new Video { Title = "Raw Hidden Tag Segment Video" };
+        var tag = new Tag { Name = "Hidden On Timeline", ShowAsSegment = false };
+        context.Videos.Add(video);
+        context.Tags.Add(tag);
+        await context.SaveChangesAsync();
+
+        var rawProfile = new SegmentDisplayProfile
+        {
+            Name = "Raw",
+            IsSystem = true,
+            Version = 1,
+        };
+        context.SegmentDisplayProfiles.Add(rawProfile);
+        await context.SaveChangesAsync();
+
+        context.Segments.Add(new Segment
+        {
+            HostType = SegmentHostType.Video,
+            HostId = video.Id,
+            StartSec = 0,
+            EndSec = 10,
+            TagId = tag.Id,
+            Kind = "tag",
+            SourceKey = "ext:ai.tagging",
+        });
+        await context.SaveChangesAsync();
+
+        var spanResolver = new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions()));
+        var controller = CreateVideoSegmentsController(context, spanResolver);
+
+        var spansResult = await controller.GetSpans(video.Id, rawProfile.Id, CancellationToken.None);
+        var spansOk = Assert.IsType<OkObjectResult>(spansResult.Result);
+        var spansDto = Assert.IsType<VideoResolvedSpansDto>(spansOk.Value);
+        var span = Assert.Single(spansDto.Spans);
+        Assert.Equal("Hidden On Timeline", span.TagName);
+        Assert.Equal(0, span.StartSec);
+        Assert.Equal(10, span.EndSec);
+    }
+
+    [Fact]
+    public async Task VideoSegmentsController_DefaultProfileVisibleRuleOverridesHiddenTagDisplayFlag()
+    {
+        await using var scope = await CreateContextAsync();
+        var context = scope.Context;
+        var video = new Video { Title = "Default Hidden Tag Segment Video" };
+        var tag = new Tag { Name = "Display By Profile", ShowAsSegment = false };
+        context.Videos.Add(video);
+        context.Tags.Add(tag);
+        await context.SaveChangesAsync();
+
+        var defaultProfile = new SegmentDisplayProfile
+        {
+            Name = "Default",
+            IsDefault = true,
+            Version = 1,
+        };
+        context.SegmentDisplayProfiles.Add(defaultProfile);
+        await context.SaveChangesAsync();
+
+        context.SegmentDisplayRules.Add(new SegmentDisplayRule
+        {
+            ProfileId = defaultProfile.Id,
+            HostType = SegmentHostType.Video,
+            Visible = true,
+            MergeGapSec = 8,
+            MinDurationSec = 10,
+        });
+        context.Segments.Add(new Segment
+        {
+            HostType = SegmentHostType.Video,
+            HostId = video.Id,
+            StartSec = 0,
+            EndSec = 10,
+            TagId = tag.Id,
+            Kind = "tag",
+            SourceKey = "ext:ai.tagging",
+        });
+        await context.SaveChangesAsync();
+
+        var spanResolver = new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions()));
+        var controller = CreateVideoSegmentsController(context, spanResolver);
+
+        var spansResult = await controller.GetSpans(video.Id, defaultProfile.Id, CancellationToken.None);
+        var spansOk = Assert.IsType<OkObjectResult>(spansResult.Result);
+        var spansDto = Assert.IsType<VideoResolvedSpansDto>(spansOk.Value);
+        var span = Assert.Single(spansDto.Spans);
+        Assert.Equal("Display By Profile", span.TagName);
+    }
+
+    [Fact]
+    public async Task VideoSegmentsController_DefaultProfileMergesShortAudioSegmentsBeforeMinDurationFilter()
+    {
+        await using var scope = await CreateContextAsync();
+        var context = scope.Context;
+        var video = new Video { Title = "Audio Segment Video" };
+        context.Videos.Add(video);
+        await context.SaveChangesAsync();
+
+        var profile = new SegmentDisplayProfile
+        {
+            Name = "Default Audio",
+            IsDefault = true,
+            Version = 1,
+        };
+        context.SegmentDisplayProfiles.Add(profile);
+        await context.SaveChangesAsync();
+
+        context.SegmentDisplayRules.Add(new SegmentDisplayRule
+        {
+            ProfileId = profile.Id,
+            HostType = SegmentHostType.Video,
+            SourceKey = "ext:ai.audio",
+            Kind = "audio-classification",
+            Visible = true,
+            MergeGapSec = 8,
+            MinDurationSec = 10,
+        });
+        context.Segments.AddRange(
+            new Segment
+            {
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
+                StartSec = 0,
+                EndSec = 3,
+                Kind = "audio-classification",
+                SourceKey = "ext:ai.audio",
+                Title = "speech",
+            },
+            new Segment
+            {
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
+                StartSec = 3,
+                EndSec = 6,
+                Kind = "audio-classification",
+                SourceKey = "ext:ai.audio",
+                Title = "speech",
+            },
+            new Segment
+            {
+                HostType = SegmentHostType.Video,
+                HostId = video.Id,
+                StartSec = 6,
+                EndSec = 11,
+                Kind = "audio-classification",
+                SourceKey = "ext:ai.audio",
+                Title = "speech",
+            });
+        await context.SaveChangesAsync();
+
+        var spanResolver = new SegmentSpanResolver(context, new CurrentPrincipalAccessor(), new MemoryCache(new MemoryCacheOptions()));
+        var controller = CreateVideoSegmentsController(context, spanResolver);
+
+        var spansResult = await controller.GetSpans(video.Id, profile.Id, CancellationToken.None);
+        var spansOk = Assert.IsType<OkObjectResult>(spansResult.Result);
+        var spansDto = Assert.IsType<VideoResolvedSpansDto>(spansOk.Value);
+        var span = Assert.Single(spansDto.Spans);
+        Assert.Equal("speech", span.TagName);
+        Assert.Equal(0, span.StartSec);
+        Assert.Equal(11, span.EndSec);
+        Assert.Equal(3, span.SegmentIds.Count);
+    }
+
+    [Fact]
     public async Task VideoSegmentsController_CanQueryDerivedSpans()
     {
         await using var scope = await CreateContextAsync();
@@ -251,7 +419,7 @@ public class SegmentCoreControllerTests
     }
 
     [Fact]
-    public async Task VideoSegmentsController_TagLevelOverride_WinsOverHiddenRuleAndSetsAppearance()
+    public async Task VideoSegmentsController_HiddenRuleWinsOverTagLevelSegmentDisplayFlag()
     {
         await using var scope = await CreateContextAsync();
         var context = scope.Context;
@@ -304,9 +472,7 @@ public class SegmentCoreControllerTests
         var spansResult = await controller.GetSpans(video.Id, profile.Id, CancellationToken.None);
         var spansOk = Assert.IsType<OkObjectResult>(spansResult.Result);
         var spansDto = Assert.IsType<VideoResolvedSpansDto>(spansOk.Value);
-        var span = Assert.Single(spansDto.Spans);
-        Assert.Equal("#22cc88", span.ColorHint);
-        Assert.Equal(3, span.Lane);
+        Assert.Empty(spansDto.Spans);
     }
 
     [Fact]

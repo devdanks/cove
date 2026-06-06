@@ -502,7 +502,7 @@ public class VideoRepository : IVideoRepository
     {
         return desc
             ? query.OrderBy(video => video.MaxPath == null ? 1 : 0).ThenByDescending(video => video.MaxPath).ThenByDescending(video => video.Id)
-            : query.OrderBy(video => video.MinPath == null ? 1 : 0).ThenBy(video => video.MinPath).ThenBy(video => video.Id);
+            : query.OrderBy(video => video.MinPath).ThenBy(video => video.Id);
     }
 
     private static IQueryable<Video> ApplyPhashSort(IQueryable<Video> query, bool desc)

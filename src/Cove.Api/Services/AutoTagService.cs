@@ -403,7 +403,8 @@ public class AutoTagService(
             try
             {
                 logger.LogInformation("Running auto-tag participant: {Name}", participant.Name);
-                using var participantScope = scopeFactory.CreateScope();
+                // Overlay-aware scope so a runtime extension participant can resolve its own services.
+                using var participantScope = extensionManager.CreateExtensionScope(participant.Id);
                 var context = new AutoTagContext(atPerformers, atStudios, atTags, extProgress, participantScope.ServiceProvider);
                 await participant.AutoTagAsync(context, ct);
             }

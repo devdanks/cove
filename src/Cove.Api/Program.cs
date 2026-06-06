@@ -322,6 +322,9 @@ try
     extensionManager.Register(new Cove.Api.Extensions.DirectFileDownloaderExtension());
     CoveContext.SetDataExtensions(extensionManager.Extensions.OfType<IDataExtension>());
     builder.Services.AddSingleton(extensionManager);
+    // The cross-extension capability/service exchange: extensions publish shared-contract services
+    // here and consume siblings' contributions, since each extension lives in its own container.
+    builder.Services.AddSingleton<IExtensionServiceExchange, ExtensionServiceExchange>();
     builder.Services.AddSingleton<IExtensionStoreFactory>(sp => new Cove.Data.Repositories.EfExtensionStoreFactory(sp));
     builder.Services.AddSingleton<IExtensionRegistry>(sp =>
     {
@@ -483,6 +486,11 @@ try
         });
     });
 
+    // Snapshot the fully-assembled host services so the extension overlay can share the host's
+    // singletons and re-create its scoped services. Must happen after every core/built-in
+    // registration and before the root container is built (which makes it immutable).
+    extensionManager.CaptureHostServices(builder.Services);
+
     var app = builder.Build();
 
     // Middleware pipeline
@@ -502,8 +510,10 @@ try
     app.UseRateLimiter();
     app.UseMiddleware<Cove.Api.Middleware.OutsideIpFailsafeMiddleware>();
 
-    // Extension middleware (runs before auth, after CORS)
-    extensionManager.ConfigureMiddleware(app);
+    // Extension middleware (runs before auth, after CORS). A single persistent dispatcher invokes the
+    // live chain of enabled IMiddlewareExtension instances, so middleware from a runtime-installed
+    // extension takes effect immediately without a host restart.
+    app.Use((context, next) => extensionManager.InvokeMiddlewareChainAsync(context, _ => next()));
 
     if (authEnabled)
     {
@@ -514,6 +524,34 @@ try
     // Always run our principal-resolver middleware so [RequiresPermission] can read it.
     // (When auth is disabled the filter short-circuits and treats requests as anonymous-allowed.)
     app.UseMiddleware<Cove.Api.Middleware.CurrentPrincipalMiddleware>();
+
+    // Extension request scope: endpoints contributed by runtime-loaded extensions are stamped with
+    // ExtensionEndpointMetadata. For those requests, swap RequestServices to an overlay scope so the
+    // extension's services (registered after the host was built) resolve. Host singletons are shared
+    // and host scoped services (e.g. the pooled DbContext) are overlay-owned and disposed exactly
+    // once with the scope. Non-extension requests are untouched.
+    app.Use(async (context, next) =>
+    {
+        var marker = context.GetEndpoint()?.Metadata.GetMetadata<Cove.Plugins.ExtensionEndpointMetadata>();
+        if (marker == null)
+        {
+            await next(context);
+            return;
+        }
+
+        var scope = extensionManager.CreateExtensionScope(marker.ExtensionId);
+        var originalServices = context.RequestServices;
+        context.RequestServices = scope.ServiceProvider;
+        try
+        {
+            await next(context);
+        }
+        finally
+        {
+            context.RequestServices = originalServices;
+            scope.Dispose();
+        }
+    });
 
     app.MapGet("/health", async (CoveContext db, CancellationToken ct) =>
     {
@@ -533,7 +571,11 @@ try
     app.MapControllers();
     app.MapHub<JobHub>("/hubs/jobs");
     app.MapHub<LogHub>("/hubs/logs");
-    extensionManager.MapEndpoints(app);
+    extensionManager.SetRouteBuilder(app);
+    // Build the extension overlay before mapping dynamic endpoints so extension handler parameters
+    // are correctly recognized as DI services at endpoint-build time.
+    extensionManager.PrepareRuntimeServices(app.Services);
+    extensionManager.SetupDynamicEndpoints();
 
     if (!isTestHarness)
     {

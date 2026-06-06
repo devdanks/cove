@@ -1,20 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { galleries } from "../api/client";
+import { galleries, entityImages } from "../api/client";
 import type { EntityEngagement, FindFilter, Gallery, GalleryCreate, GalleryFilterCriteria } from "../api/types";
 import { ListPage, type DisplayMode } from "../components/ListPage";
 import { RatingBanner } from "../components/Rating";
 import { CreateModalActions, EditModal, Field, TextInput, TextArea } from "../components/EditModal";
 import { useMultiSelect } from "../hooks/useMultiSelect";
 import { useEntityEngagementBatch } from "../hooks/useEntityEngagementBatch";
-import { FolderOpen, Images as ImagesIcon, Users, Tag, Trash2, Loader2, Edit, Box, Film, Check, Search, Download } from "lucide-react";
-import { GalleryTile, PopoverButton, VideosPopoverContent, ImagesPopoverContent } from "../components/EntityCards";
+import { FolderOpen, Images as ImagesIcon, Trash2, Loader2, Edit, Box, Film, Check, Search, Download } from "lucide-react";
+import { GalleryTile, PopoverButton, VideosPopoverContent, ImagesPopoverContent, EntityReferencePopovers } from "../components/EntityCards";
 import { GALLERY_CRITERIA } from "../components/FilterDialog";
 import { BulkEditDialog, GALLERY_BULK_FIELDS } from "../components/BulkEditDialog";
 import { getDefaultFilter } from "../components/SavedFilterMenu";
 import { useListUrlState } from "../hooks/useListUrlState";
 import { useInfiniteListData } from "../hooks/useInfiniteListData";
-import { createNestedRouteLinkProps, createRouteLinkProps } from "../components/cardNavigation";
 import { CardSelectionToggle } from "../components/RouteCardLinkOverlay";
 import { useWallColumns } from "../hooks/useWallColumns";
 import { GALLERY_SORT_OPTIONS } from "../components/gallerySortOptions";
@@ -26,7 +25,6 @@ import { ScraperEntityTagger } from "../components/ScraperEntityTagger";
 import { useAuth } from "../auth/AuthContext";
 import { canDeleteEntity, canWriteEntity } from "../auth/visibility";
 import { CustomFieldsEditor } from "../components/shared";
-import { BookmarkButton } from "../components/BookmarkButton";
 import { RelatedEntityListView } from "../components/RelatedEntityListView";
 import { VirtualizedEntityGrid, VirtualizedWallColumns } from "../components/VirtualizedEntityLayouts";
 import {
@@ -243,6 +241,7 @@ export function GalleriesPage({ onNavigate }: Props) {
                   gallery={gallery}
                   engagement={engagementById.get(gallery.id)}
                   onClick={() => selecting ? toggle(gallery.id) : onNavigate({ page: "gallery", id: gallery.id })}
+                  onNavigate={onNavigate}
                   selected={selectedIds.has(gallery.id)}
                   onSelect={() => toggle(gallery.id)}
                   selecting={selecting}
@@ -270,15 +269,9 @@ export function GalleriesPage({ onNavigate }: Props) {
   );
 }
 
-function GalleryWallCard({ gallery, engagement, onClick, selected, onSelect, selecting }: { gallery: Gallery; engagement?: EntityEngagement; onClick: () => void; selected?: boolean; onSelect?: () => void; selecting?: boolean }) {
+function GalleryWallCard({ gallery, engagement, onClick, onNavigate, selected, onSelect, selecting }: { gallery: Gallery; engagement?: EntityEngagement; onClick: () => void; onNavigate: (route: any) => void; selected?: boolean; onSelect?: () => void; selecting?: boolean }) {
   const rating = engagement?.rating;
   const galleryCoverSrc = gallery.coverPath ?? galleries.coverUrl(gallery.id, gallery.updatedAt, 960);
-  const itemChips = [
-    gallery.imageCount > 0 ? { key: "images", icon: <ImagesIcon className="h-3.5 w-3.5" />, count: gallery.imageCount, label: "Images" } : null,
-    gallery.videoCount > 0 ? { key: "videos", icon: <Film className="h-3.5 w-3.5" />, count: gallery.videoCount, label: "Videos" } : null,
-    gallery.performers.length > 0 ? { key: "performers", icon: <Users className="h-3.5 w-3.5" />, count: gallery.performers.length, label: "Performers" } : null,
-    gallery.tags.length > 0 ? { key: "tags", icon: <Tag className="h-3.5 w-3.5" />, count: gallery.tags.length, label: "Tags" } : null,
-  ].filter((chip) => chip !== null);
 
   return (
     <WallMediaCard
@@ -291,24 +284,47 @@ function GalleryWallCard({ gallery, engagement, onClick, selected, onSelect, sel
     >
       <CardSelectionToggle selected={selected} selecting={selecting} onToggle={onSelect} />
       <RatingBanner rating={rating} />
-      <div className="absolute bottom-1 left-1 flex flex-wrap items-center gap-1">
-        {itemChips.map((chip) => (
-          <span key={chip.key} className="inline-flex items-center gap-1 rounded-full bg-black/70 px-1.5 py-0.5 text-[10px] text-white" title={chip.label}>
-            {chip.icon}
-            <span>{chip.count}</span>
-          </span>
-        ))}
+      <div className="absolute bottom-1 left-1 right-1 z-10 flex items-end justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-1 rounded-md bg-black/55 px-1 py-0.5 backdrop-blur-sm">
+          {gallery.imageCount > 0 ? (
+            <PopoverButton icon={<ImagesIcon className="w-3.5 h-3.5" />} count={gallery.imageCount} title="Images" wide preferBelow>
+              <ImagesPopoverContent filter={{ galleryId: gallery.id }} />
+            </PopoverButton>
+          ) : null}
+          {gallery.videoCount > 0 ? (
+            <PopoverButton icon={<Film className="w-3.5 h-3.5" />} count={gallery.videoCount} title="Videos" wide preferBelow>
+              <VideosPopoverContent filter={{ galleryId: gallery.id }} />
+            </PopoverButton>
+          ) : null}
+          <EntityReferencePopovers
+            performers={gallery.performers}
+            tags={gallery.tags}
+            studio={gallery.studioName ? { id: gallery.studioId, name: gallery.studioName } : null}
+            onNavigate={onNavigate}
+            className="gap-0.5"
+          />
+        </div>
         {gallery.organized ? (
           <span className="inline-flex items-center gap-1 rounded-full bg-green-600/90 px-1.5 py-0.5 text-[10px] text-white" title="Organized">
             <Box className="h-3.5 w-3.5" />
           </span>
         ) : null}
       </div>
-      {gallery.studioName && (
-        <div className="absolute top-1 right-1 text-xs bg-black/70 px-1.5 py-0.5 rounded text-white truncate max-w-[80%]">
-          {gallery.studioName}
+      {gallery.studioName && gallery.studioId && !selecting ? (
+        <div className="absolute top-0 right-0 p-1 z-[5]">
+          <img
+            src={entityImages.studioImageUrl(gallery.studioId)}
+            alt={gallery.studioName}
+            className="h-8 w-auto max-w-[120px] object-contain drop-shadow-md"
+            onError={(e) => {
+              const el = e.target as HTMLImageElement;
+              el.style.display = "none";
+              if (el.nextElementSibling) (el.nextElementSibling as HTMLElement).style.display = "";
+            }}
+          />
+          <span className="text-xs font-medium text-white bg-black/60 px-1.5 py-0.5 rounded" style={{ display: "none" }}>{gallery.studioName}</span>
         </div>
-      )}
+      ) : null}
     </WallMediaCard>
   );
 }

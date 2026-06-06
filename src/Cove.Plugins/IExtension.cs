@@ -205,16 +205,29 @@ public record ExtensionMigration(
 );
 
 /// <summary>
-/// Extension that provides middleware to intercept and modify HTTP requests/responses.
-/// Useful for adding auth, logging, response transformation, etc.
+/// Extension that intercepts HTTP requests/responses (auth, logging, header/response transforms, …).
+/// The host invokes <see cref="InvokeAsync"/> for every request, chaining all enabled middleware
+/// extensions ahead of routing; call <paramref name="next"/> to continue the pipeline, or skip it to
+/// short-circuit. Because the host drives this through a single persistent dispatcher, middleware from
+/// an extension installed at runtime takes effect immediately — no host restart. Resolve the
+/// extension's own services from <see cref="System.IServiceProvider"/> captured during initialization
+/// (or the cross-extension exchange); <c>HttpContext.RequestServices</c> here is the host request scope.
 /// </summary>
 public interface IMiddlewareExtension : IExtension
 {
-    /// <summary>
-    /// Configure middleware in the pipeline. Called during app.UseRouting() phase.
-    /// Extensions should call next() to continue the pipeline.
-    /// </summary>
-    void ConfigureMiddleware(IApplicationBuilder app);
+    Task InvokeAsync(HttpContext context, RequestDelegate next);
+}
+
+/// <summary>
+/// Extension that runs a long-lived background worker managed by the host. The host starts
+/// <see cref="RunAsync"/> after the extension initializes and cancels the token when the extension is
+/// disabled, uninstalled, or the host shuts down. Implementations should loop until the token is
+/// cancelled and create a scope per unit of work for scoped services. Persist durable state via the
+/// extension store — in-memory state is reset if the extension's container is rebuilt.
+/// </summary>
+public interface IBackgroundExtension : IExtension
+{
+    Task RunAsync(IServiceProvider services, CancellationToken ct);
 }
 
 /// <summary>

@@ -465,7 +465,8 @@ public class ScanService(
                     try
                     {
                         logger.LogInformation("Running scan participant: {Name}", participant.Name);
-                        using var participantScope = scopeFactory.CreateScope();
+                        // Overlay-aware scope so a runtime extension participant can resolve its own services.
+                        using var participantScope = extensionManager.CreateExtensionScope(participant.Id);
                         var scanContext = new ScanContext(scanPathInfos, participantProgress, participantScope.ServiceProvider, options.Rescan);
                         await participant.ScanAsync(scanContext, ct);
                     }

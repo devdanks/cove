@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Runtime.Loader;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -30,6 +31,10 @@ public class ExtensionManager
     private IServiceProvider? _rootServices;
     private ILogger<ExtensionManager>? _logger;
     private List<IExtension>? _initOrder;
+    private IEndpointRouteBuilder? _routeBuilder;
+    private ExtensionEndpointRegistry? _endpointRegistry;
+    private IReadOnlyList<ServiceDescriptor>? _hostDescriptors;
+    private ExtensionServiceOverlay? _overlay;
 
     public IReadOnlyList<IExtension> Extensions => _extensions;
     public ExtensionContext Context => _context;
@@ -60,6 +65,27 @@ public class ExtensionManager
                 Categories = extension.Categories.Count > 0 ? string.Join(",", extension.Categories) : null,
             };
         }
+    }
+
+    /// <summary>Store the ASP.NET Core route builder so endpoints can be registered at runtime.</summary>
+    public void SetRouteBuilder(IEndpointRouteBuilder routeBuilder)
+    {
+        _routeBuilder = routeBuilder;
+    }
+
+    /// <summary>
+    /// Capture the built root provider and build the extension overlay. Call this after the host is
+    /// built and before <see cref="SetupDynamicEndpoints"/>, so DLL extension endpoints are built
+    /// against a provider that knows their services.
+    /// </summary>
+    public void PrepareRuntimeServices(IServiceProvider rootServices)
+    {
+        _rootServices = rootServices;
+        CaptureScopeFactory(rootServices);
+        _logger ??= rootServices.GetService<ILogger<ExtensionManager>>();
+        foreach (var ext in GetInitializationOrder())
+            if (IsOverlayExtension(ext.Id) && IsEnabled(ext.Id))
+                BuildExtensionProvider(ext.Id);
     }
 
     /// <summary>
@@ -401,12 +427,27 @@ public class ExtensionManager
     // LIFECYCLE
     // ========================================================================
 
-    /// <summary>Call ConfigureServices on all registered extensions (in dependency order).</summary>
+    /// <summary>
+    /// True for extensions loaded from disk as DLLs (runtime-capable). These contribute their
+    /// services into the rebuildable <see cref="ExtensionServiceOverlay"/> rather than the
+    /// immutable root container, so they work identically whether present at boot or installed
+    /// later. Built-in extensions compiled into the host go straight into the root container.
+    /// </summary>
+    private bool IsOverlayExtension(string id) => _loadContexts.ContainsKey(id);
+
+    /// <summary>
+    /// Call ConfigureServices for built-in (host-compiled) extensions, registering them into the
+    /// root container. Runtime DLL extensions are intentionally skipped here — their services are
+    /// contributed to their own per-extension container instead (see <see cref="BuildExtensionProvider"/>).
+    /// </summary>
     public void ConfigureServices(IServiceCollection services)
     {
         foreach (var ext in GetInitializationOrder())
         {
             if (!IsEnabled(ext.Id))
+                continue;
+
+            if (IsOverlayExtension(ext.Id))
                 continue;
 
             try
@@ -420,24 +461,198 @@ public class ExtensionManager
         }
     }
 
-    /// <summary>Map API endpoints from all enabled IApiExtension instances.</summary>
-    public void MapEndpoints(IEndpointRouteBuilder endpoints)
+    /// <summary>
+    /// Snapshot the host's service descriptors so the extension overlay can share the host's
+    /// singletons and re-create its scoped services. Call this immediately before the host is
+    /// built (after all core and built-in services are registered).
+    /// </summary>
+    public void CaptureHostServices(IServiceCollection services)
     {
+        _hostDescriptors = services.ToList();
+    }
+
+    /// <summary>
+    /// Build (or rebuild) the isolated service container for one runtime DLL extension. Only that
+    /// extension's container is (re)built; every other extension's container — and its state — is
+    /// untouched, so installing or removing one extension never disturbs another. Safe to call
+    /// repeatedly for the same id.
+    /// </summary>
+    public void BuildExtensionProvider(string id)
+    {
+        if (_rootServices == null || _hostDescriptors == null)
+            return;
+        if (!IsOverlayExtension(id) || !IsEnabled(id))
+            return;
+        if (!_extensionMap.TryGetValue(id, out var ext))
+            return;
+
+        // The container is being (re)built: stop any running worker and clear stale contributions so the
+        // extension re-publishes against the new container on init.
+        StopBackgroundWorker(id);
+        WithdrawFromExchange(id);
+
+        _overlay ??= new ExtensionServiceOverlay(_rootServices, _hostDescriptors, _logger);
+        _overlay.BuildProvider(
+            id,
+            ext,
+            _context,
+            (failedId, e) => DisableExtensionForStartupFailure(failedId, e, "ConfigureServices (overlay)"));
+    }
+
+    /// <summary>
+    /// The service provider an extension should use to resolve its services. Runtime DLL extensions
+    /// resolve from their own isolated container; built-in extensions resolve from the root container.
+    /// </summary>
+    private IServiceProvider ServicesFor(string id, IServiceProvider fallback)
+        => IsOverlayExtension(id) ? (_overlay?.ProviderFor(id) ?? fallback) : fallback;
+
+    /// <summary>
+    /// Create a scope for running the given extension's code (HTTP request, job, scan/auto-tag pass).
+    /// Returns the extension's own container scope when built; otherwise a plain root scope. Callers
+    /// own the returned scope and must dispose it.
+    /// </summary>
+    public IServiceScope CreateExtensionScope(string extensionId)
+    {
+        if (_overlay?.Has(extensionId) == true)
+            return _overlay.CreateScope(extensionId);
+
+        var factory = _scopeFactory ?? _rootServices?.GetService<IServiceScopeFactory>();
+        if (factory == null)
+            throw new InvalidOperationException("Extension service scope requested before the host service provider was available.");
+        return factory.CreateScope();
+    }
+
+    /// <summary>Withdraw an extension's published contributions from the cross-extension exchange.</summary>
+    private void WithdrawFromExchange(string id)
+        => _rootServices?.GetService<IExtensionServiceExchange>()?.WithdrawAll(id);
+
+    /// <summary>
+    /// Set up per-extension endpoint data sources at startup so routes can be rebuilt dynamically
+    /// when extensions are installed or uninstalled at runtime.
+    /// </summary>
+    public void SetupDynamicEndpoints()
+    {
+        if (_routeBuilder == null) return;
+
+        // One registry, added to the app's data sources exactly once. The matcher observes its change
+        // token for the whole process lifetime, so endpoints added/removed at runtime go live without
+        // a restart (adding NEW data sources after startup is not reliably observed by the matcher).
+        _endpointRegistry = new ExtensionEndpointRegistry();
+        _routeBuilder.DataSources.Add(_endpointRegistry);
+
         foreach (var ext in GetInitializationOrder().OfType<IApiExtension>())
         {
             if (!IsEnabled(ext.Id)) continue;
-            ext.MapEndpoints(endpoints);
+            RegisterExtensionEndpoints(ext.Id);
         }
     }
 
-    /// <summary>Configure middleware from all enabled IMiddlewareExtension instances.</summary>
-    public void ConfigureMiddleware(IApplicationBuilder app)
+    /// <summary>
+    /// Register endpoints for a single extension at runtime and trigger an ASP.NET Core route table rebuild.
+    /// Call this after <see cref="InitializeExtensionAsync"/> succeeds for a newly installed extension.
+    /// </summary>
+    public void RegisterExtensionEndpoints(string id)
     {
-        foreach (var ext in GetInitializationOrder().OfType<IMiddlewareExtension>())
+        if (_routeBuilder == null || _endpointRegistry == null) return;
+        if (!_extensionMap.TryGetValue(id, out var ext) || ext is not IApiExtension apiExt) return;
+        if (!IsEnabled(id)) return;
+
+        // Build this extension's endpoints into a nested source (bound against its own provider for
+        // correct minimal-API parameter classification), then publish it through the registry, which
+        // fires the change token the matcher observes — making the routes live immediately.
+        var source = new ExtensionEndpointDataSource(_routeBuilder, id, EndpointBuildServices(id));
+        apiExt.MapEndpoints(source);
+        _endpointRegistry.SetExtension(id, source);
+    }
+
+    /// <summary>
+    /// The provider used to build an extension's endpoints. For runtime DLL extensions this is the
+    /// overlay (so minimal-API parameter binding sees the extension's services as DI services);
+    /// built-in extensions build against the root container.
+    /// </summary>
+    private IServiceProvider? EndpointBuildServices(string id)
+        => IsOverlayExtension(id) ? _overlay?.GetProvider(id) : null;
+
+    /// <summary>
+    /// Invoke the chain of enabled middleware extensions for one request, then the host continuation.
+    /// The chain is built per request from the live set, so middleware contributed by a runtime-installed
+    /// extension takes effect immediately. The host registers a single persistent dispatcher that calls this.
+    /// </summary>
+    public Task InvokeMiddlewareChainAsync(HttpContext context, RequestDelegate terminal)
+    {
+        var middleware = GetInitializationOrder()
+            .OfType<IMiddlewareExtension>()
+            .Where(ext => IsEnabled(ext.Id))
+            .ToList();
+
+        if (middleware.Count == 0)
+            return terminal(context);
+
+        RequestDelegate next = terminal;
+        for (var i = middleware.Count - 1; i >= 0; i--)
         {
-            if (!IsEnabled(ext.Id)) continue;
-            ext.ConfigureMiddleware(app);
+            var current = middleware[i];
+            var localNext = next;
+            next = ctx => current.InvokeAsync(ctx, localNext);
         }
+        return next(context);
+    }
+
+    // ========================================================================
+    // BACKGROUND WORKERS (IBackgroundExtension)
+    // ========================================================================
+    private readonly Dictionary<string, CancellationTokenSource> _backgroundWorkers = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Start the extension's long-lived background worker if it implements <see cref="IBackgroundExtension"/>
+    /// and one isn't already running. The worker receives the extension's own provider and a token that is
+    /// cancelled when the extension is disabled, uninstalled, rebuilt, or the host shuts down.
+    /// </summary>
+    public void StartBackgroundWorker(string id)
+    {
+        if (_rootServices == null) return;
+        if (!_extensionMap.TryGetValue(id, out var ext) || ext is not IBackgroundExtension worker) return;
+        if (!IsEnabled(id)) return;
+
+        CancellationTokenSource cts;
+        lock (_backgroundWorkers)
+        {
+            if (_backgroundWorkers.ContainsKey(id)) return;
+            cts = new CancellationTokenSource();
+            _backgroundWorkers[id] = cts;
+        }
+
+        var provider = ServicesFor(id, _rootServices);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await worker.RunAsync(provider, cts.Token);
+            }
+            catch (OperationCanceledException) when (cts.IsCancellationRequested)
+            {
+                // expected on stop
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Background worker for extension {Id} faulted", id);
+            }
+        }, cts.Token);
+        _logger?.LogInformation("Background worker started for extension {Id}", id);
+    }
+
+    /// <summary>Cancel the extension's background worker if running.</summary>
+    public void StopBackgroundWorker(string id)
+    {
+        CancellationTokenSource? cts;
+        lock (_backgroundWorkers)
+        {
+            if (!_backgroundWorkers.Remove(id, out cts))
+                return;
+        }
+        try { cts.Cancel(); } catch { /* best effort */ }
+        cts.Dispose();
+        _logger?.LogInformation("Background worker stopped for extension {Id}", id);
     }
 
     /// <summary>
@@ -453,6 +668,18 @@ public class ExtensionManager
 
         // Load installation state from DB
         await LoadInstallationStateAsync(services, ct);
+
+        // Clean up stale installation records for extensions that no longer exist on disk.
+        var staleIds = _installations.Keys
+            .Where(id => !IsEffectivelyInstalled(id) && !IsManifestOnlyExtension(id))
+            .ToList();
+        foreach (var staleId in staleIds)
+        {
+            _installations.Remove(staleId);
+            await RemoveInstallationStateAsync(staleId, ct);
+            _logger?.LogInformation("Removed stale installation record for {Id}", staleId);
+        }
+
         ApplyStartupDisables();
         foreach (var extensionId in _startupDisabledExtensions)
             await PersistInstallationStateAsync(extensionId, ct);
@@ -468,23 +695,30 @@ public class ExtensionManager
         // Apply extension database migrations
         await ApplyExtensionMigrationsAsync(services, ct);
 
-        // Initialize all enabled extensions in dependency order
+        // Initialize all enabled extensions in dependency order. Each DLL extension gets its own
+        // container, built here if PrepareRuntimeServices hasn't already (boot and runtime-install
+        // share this exact path).
         foreach (var ext in GetInitializationOrder())
         {
             if (!IsEnabled(ext.Id)) continue;
             try
             {
+                if (IsOverlayExtension(ext.Id) && _overlay?.Has(ext.Id) != true)
+                    BuildExtensionProvider(ext.Id);
+                var extServices = ServicesFor(ext.Id, services);
+
                 // Check if this is a new installation
                 var install = GetInstallation(ext.Id);
                 if (install == null)
                 {
-                    await ext.OnInstallAsync(services, ct);
+                    await ext.OnInstallAsync(extServices, ct);
                     await SaveInstallationAsync(services, ext.Id, ct);
                     _logger?.LogInformation("Extension {Id} installed (v{Version})", ext.Id, ext.Version);
                 }
 
-                await ext.InitializeAsync(services, ct);
+                await ext.InitializeAsync(extServices, ct);
                 _initializedExtensions.Add(ext.Id);
+                StartBackgroundWorker(ext.Id);
                 _logger?.LogInformation("Extension {Id} ({Name} v{Version}) initialized", ext.Id, ext.Name, ext.Version);
             }
             catch (Exception ex)
@@ -511,6 +745,12 @@ public class ExtensionManager
                 _logger?.LogError(ex, "Error shutting down extension {Id}", ext.Id);
             }
         }
+
+        foreach (var id in _backgroundWorkers.Keys.ToList())
+            StopBackgroundWorker(id);
+
+        _overlay?.Dispose();
+        _overlay = null;
     }
 
     /// <summary>
@@ -548,9 +788,15 @@ public class ExtensionManager
         if (!IsEnabled(ext.Id))
             return true;
 
+        // Build this extension's own container BEFORE initializing, so its services (and endpoints)
+        // resolve without a host restart. Other extensions' containers are untouched.
+        if (IsOverlayExtension(ext.Id))
+            BuildExtensionProvider(ext.Id);
+        var extServices = ServicesFor(ext.Id, runtimeServices);
+
         try
         {
-            await ext.OnInstallAsync(runtimeServices, ct);
+            await ext.OnInstallAsync(extServices, ct);
         }
         catch (Exception ex)
         {
@@ -559,8 +805,9 @@ public class ExtensionManager
 
         try
         {
-            await ext.InitializeAsync(runtimeServices, ct);
+            await ext.InitializeAsync(extServices, ct);
             _initializedExtensions.Add(ext.Id);
+            StartBackgroundWorker(ext.Id);
             _extensionFailureReasons.Remove(ext.Id);
             var manifest = GetManifestFile(ext.Id);
             if (_installations.TryGetValue(ext.Id, out var install))
@@ -606,10 +853,15 @@ public class ExtensionManager
                 stateful.SetStore(factory.CreateStore(ext.Id));
         }
 
+        if (IsOverlayExtension(ext.Id) && _overlay?.Has(ext.Id) != true)
+            BuildExtensionProvider(ext.Id);
+        var extServices = ServicesFor(ext.Id, services);
+
         try
         {
-            await ext.InitializeAsync(services, ct);
+            await ext.InitializeAsync(extServices, ct);
             _initializedExtensions.Add(ext.Id);
+            StartBackgroundWorker(ext.Id);
             _logger?.LogInformation("Extension {Id} initialized on demand", ext.Id);
             return true;
         }
@@ -648,9 +900,11 @@ public class ExtensionManager
         if (_installations.TryGetValue(id, out var inst))
             inst.Enabled = false;
 
+        var uninstallServices = ServicesFor(id, services);
+
         try
         {
-            await ext.OnUninstallAsync(services, ct);
+            await ext.OnUninstallAsync(uninstallServices, ct);
         }
         catch (Exception ex)
         {
@@ -669,6 +923,15 @@ public class ExtensionManager
         RemoveExtensionFromMemory(id);
         _installations.Remove(id);
         await RemoveInstallationStateAsync(id, ct);
+
+        // Remove runtime endpoints so the routing DFA no longer includes this extension.
+        _endpointRegistry?.RemoveExtension(id);
+
+        // Drop this extension's container and withdraw its published contributions, and stop its worker.
+        // Other extensions are untouched.
+        StopBackgroundWorker(id);
+        _overlay?.Remove(id);
+        WithdrawFromExchange(id);
 
         // Encourage collectible AssemblyLoadContext cleanup. File operations do not
         // depend on this completing because extension binaries are loaded from cache.
@@ -822,6 +1085,10 @@ public class ExtensionManager
             enabledIds.Add(extensionId);
         }
 
+        foreach (var enabledId in enabledIds)
+            if (IsOverlayExtension(enabledId))
+                BuildExtensionProvider(enabledId);
+
         return enabledIds;
     }
 
@@ -843,6 +1110,14 @@ public class ExtensionManager
             inst.UpdatedAt = DateTime.UtcNow;
             await PersistInstallationStateAsync(extensionId, ct);
             disabledIds.Add(extensionId);
+        }
+
+        foreach (var disabledId in disabledIds)
+        {
+            if (!IsOverlayExtension(disabledId)) continue;
+            StopBackgroundWorker(disabledId);
+            _overlay?.Remove(disabledId);
+            WithdrawFromExchange(disabledId);
         }
 
         return disabledIds;
@@ -921,6 +1196,13 @@ public class ExtensionManager
 
     public string? GetLastFailureReason(string id) =>
         _extensionFailureReasons.TryGetValue(id, out var reason) ? reason : null;
+
+    public bool IsEffectivelyInstalled(string id)
+    {
+        if (_extensionMap.ContainsKey(id)) return true;
+        var dir = ResolveExtensionDirectory(id);
+        return dir != null;
+    }
 
     private static bool IsManifestOnlyKind(string? kind) =>
         string.Equals(kind, "bundle", StringComparison.OrdinalIgnoreCase)

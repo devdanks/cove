@@ -290,13 +290,7 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
         onImageClick={canWriteGallery ? () => setCoverOpen(true) : undefined}
         imageFallback={<ImageIcon className="h-14 w-14" />}
         title={<FieldProvenanceHover fieldProvenance={gallery.fieldProvenance} fieldKey="title">{gallery.title || "Untitled Gallery"}</FieldProvenanceHover>}
-        favorite={galleryFavorite}
-        favoritePending={galleryFavoritePending}
-        onFavoriteToggle={canEngageGallery ? () => setGalleryFavorite(!galleryFavorite) : undefined}
-        organized={gallery.organized}
-        organizedPending={galleryUpdateMut.isPending}
-        onOrganizedToggle={canWriteGallery ? (organized) => galleryUpdateMut.mutate({ organized }) : undefined}
-        aliases={
+        subtitle={
           <span className="inline-flex flex-wrap items-center gap-x-3 gap-y-1">
             {gallery.date ? <FieldProvenanceHover fieldProvenance={gallery.fieldProvenance} fieldKey="date"><span>{formatDate(gallery.date)}</span></FieldProvenanceHover> : null}
             {gallery.studioName && gallery.studioId ? (
@@ -312,6 +306,12 @@ export function GalleryDetailPage({ id, onNavigate }: Props) {
             {gallery.code ? <FieldProvenanceHover fieldProvenance={gallery.fieldProvenance} fieldKey="code"><span>Code: {gallery.code}</span></FieldProvenanceHover> : null}
           </span>
         }
+        favorite={galleryFavorite}
+        favoritePending={galleryFavoritePending}
+        onFavoriteToggle={canEngageGallery ? () => setGalleryFavorite(!galleryFavorite) : undefined}
+        organized={gallery.organized}
+        organizedPending={galleryUpdateMut.isPending}
+        onOrganizedToggle={canWriteGallery ? (organized) => galleryUpdateMut.mutate({ organized }) : undefined}
         description={gallery.details ? <FieldProvenanceHover fieldProvenance={gallery.fieldProvenance} fieldKey="details" block>{gallery.details}</FieldProvenanceHover> : undefined}
         counts={[
           { key: "images", label: "Images", value: effectiveImageCount, icon: <ImageIcon className="h-4 w-4" /> },

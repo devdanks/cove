@@ -329,7 +329,7 @@ export function VideoPlayer({
       return;
     }
 
-    const scale = Math.max(containerWidth / intrinsicWidth, containerHeight / intrinsicHeight);
+    const scale = Math.min(containerWidth / intrinsicWidth, containerHeight / intrinsicHeight);
     const width = intrinsicWidth * scale;
     const height = intrinsicHeight * scale;
     const left = (containerWidth - width) / 2;
