@@ -69,6 +69,10 @@ export default defineConfig(({ command }) => {
     server: {
       host: "127.0.0.1",
       port: 5173,
+      // Allow importing files from the repo root (e.g. CHANGELOG.md) during dev.
+      fs: {
+        allow: [path.resolve(__dirname, "..")],
+      },
       proxy: {
         "/api": {
           target: "http://localhost:5073",

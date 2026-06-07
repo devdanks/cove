@@ -1,0 +1,71 @@
+<Project>
+  <!--
+    Cove versioning.
+
+    Single source of truth for the product version is the git tag (e.g. v0.0.36).
+
+      * Tagged release builds: CI passes -p:Version=0.0.36 -p:CoveCiVersion=true,
+        so that exact version is baked into the assemblies.
+      * Local / dev builds (no explicit version): the version is derived from git as
+        "<latest tag>-dev" (e.g. latest tag v0.0.35 => 0.0.35-dev). With no tags or no
+        git available it falls back to 0.0.0-dev.
+
+    The numeric major.minor.patch (AssemblyVersion / FileVersion) never carries the
+    prerelease suffix, so extension minCoveVersion semver checks stay valid. The full
+    string (including -dev) is exposed through AssemblyInformationalVersion and is what
+    the About / Runtime Status pages display.
+
+    This target is skipped when an explicit non-default Version is supplied (CI / Docker
+    pass -p:Version=...), so it only affects local/dev builds.
+  -->
+  <Target Name="SetCoveVersionFromGit"
+          BeforeTargets="GetAssemblyVersion;GenerateAssemblyInfo;BeforeCompile;CoreCompile;Pack;GenerateNuspec"
+          Condition=" '$(CoveCiVersion)' != 'true' and ( '$(Version)' == '' or '$(Version)' == '1.0.0' ) ">
+
+    <!-- Exact tag on the current commit (a release checkout). -->
+    <Exec Command="git describe --tags --exact-match"
+          ConsoleToMSBuild="true" IgnoreExitCode="true" ContinueOnError="true"
+          StandardOutputImportance="low" StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_CoveExactTag" />
+      <Output TaskParameter="ExitCode" PropertyName="_CoveExactExit" />
+    </Exec>
+
+    <!-- Otherwise, the most recent tag reachable from HEAD (a dev checkout). -->
+    <Exec Condition=" '$(_CoveExactExit)' != '0' "
+          Command="git describe --tags --abbrev=0"
+          ConsoleToMSBuild="true" IgnoreExitCode="true" ContinueOnError="true"
+          StandardOutputImportance="low" StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_CoveLatestTag" />
+      <Output TaskParameter="ExitCode" PropertyName="_CoveLatestExit" />
+    </Exec>
+
+    <PropertyGroup>
+      <!-- Normalize: trim whitespace and a leading "v". -->
+      <_CoveExactTag>$(_CoveExactTag.Trim().TrimStart('v'))</_CoveExactTag>
+      <_CoveLatestTag>$(_CoveLatestTag.Trim().TrimStart('v'))</_CoveLatestTag>
+
+      <Version Condition=" '$(_CoveExactExit)' == '0' and '$(_CoveExactTag)' != '' ">$(_CoveExactTag)</Version>
+      <Version Condition=" '$(_CoveExactExit)' != '0' and '$(_CoveLatestExit)' == '0' and '$(_CoveLatestTag)' != '' ">$(_CoveLatestTag)-dev</Version>
+    </PropertyGroup>
+
+    <!-- Fallback when git / tags are unavailable. -->
+    <PropertyGroup Condition=" ( '$(Version)' == '' or '$(Version)' == '1.0.0' ) ">
+      <Version>0.0.0-dev</Version>
+    </PropertyGroup>
+
+    <!--
+      The SDK captures InformationalVersion's default ($(Version)) very early, so we must
+      set the version-derived attributes explicitly here rather than rely on those defaults.
+    -->
+    <PropertyGroup>
+      <_CoveNumericVersion>$(Version.Split('-')[0])</_CoveNumericVersion>
+      <AssemblyVersion>$(_CoveNumericVersion)</AssemblyVersion>
+      <FileVersion>$(_CoveNumericVersion)</FileVersion>
+      <InformationalVersion>$(Version)</InformationalVersion>
+      <PackageVersion>$(Version)</PackageVersion>
+    </PropertyGroup>
+
+    <Message Importance="high" Text="Cove version: $(Version) (assembly $(AssemblyVersion))" />
+  </Target>
+
+</Project>

@@ -307,7 +307,7 @@ try
     // Extension system
     var extensionsDataDir = CoveDefaultPaths.GetDataSubdirectory("extensions");
     Directory.CreateDirectory(extensionsDataDir);
-    var coveVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.1";
+    var coveVersion = Cove.Core.Common.CoveVersion.Numeric;
     var extensionContext = new ExtensionContext
     {
         Configuration = builder.Configuration,

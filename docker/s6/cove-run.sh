@@ -27,4 +27,4 @@ fi
 
 echo "[cove] Starting Cove..."
 cd /opt/cove
-exec dotnet Cove.Api.dll
+exec dotnet Cove.dll

@@ -5,6 +5,8 @@ import {
   ChevronDown,
   ChevronUp,
   BookOpen,
+  Check,
+  Copy,
   Database,
   Download,
   FolderOpen,
@@ -37,6 +39,7 @@ import {
   X,
 } from "lucide-react";
 import { customFields, system, jobs, metadata, database, plugins as pluginsApi, logs as logsApi, tagGroups, auth as authApi, usersApi } from "../api/client";
+import { recentChangelog } from "../data/changelog";
 import type { ScanOptions, GenerateOptions, CleanGeneratedOptions, ExportOptions, LogEntry, UserRow } from "../api/client";
 import type {
   JobInfo,
@@ -49,6 +52,7 @@ import type {
   MetadataServer,
   CoveConfig,
   CovePathConfig,
+  SystemStatus,
   CustomFieldDefinition,
   CustomFieldEntityType,
   CustomFieldType,
@@ -821,6 +825,65 @@ const customFieldTypeOptions: { value: CustomFieldType; label: string }[] = [
 
 function cloneConfig(config: CoveConfig): CoveConfig {
   return JSON.parse(JSON.stringify(config)) as CoveConfig;
+}
+
+function buildDebugReport(status: SystemStatus | null | undefined, draft: CoveConfig | null): string {
+  const lines: string[] = [];
+  lines.push("=== Cove Debug Info ===");
+  lines.push(`Generated: ${new Date().toISOString()}`);
+
+  lines.push("");
+  lines.push("[Runtime Status]");
+  if (status) {
+    lines.push(`Version: ${status.version}`);
+    lines.push(`Database: ${status.databasePath}`);
+    if (status.configFile) lines.push(`Config file: ${status.configFile}`);
+    if (status.appDir) lines.push(`App directory: ${status.appDir}`);
+  } else {
+    lines.push("(unavailable)");
+  }
+
+  lines.push("");
+  lines.push("[System Information]");
+  lines.push(`Browser: ${navigator.userAgent}`);
+  lines.push(`Platform: ${navigator.platform}`);
+  lines.push(`Screen resolution: ${screen.width}×${screen.height}`);
+  lines.push(`Language: ${navigator.language}`);
+
+  if (draft) {
+    lines.push("");
+    lines.push("[Config Summary]");
+    lines.push(`Library paths: ${draft.covePaths.filter((path) => path.path.trim() !== "").length}`);
+    lines.push(`Scraper directories: ${draft.scraping.scraperDirectories.filter(Boolean).length}`);
+    lines.push(`Metadata Servers: ${draft.scraping.metadataServers.filter((box) => box.endpoint.trim() !== "").length}`);
+    lines.push(`Rating system: ${draft.ui.ratingSystemOptions.type}`);
+    lines.push(`Authentication: ${draft.security.enabled ? "enabled" : "disabled"}`);
+  }
+
+  return lines.join("\n");
+}
+
+function CopyDebugInfoButton({ getReport }: { getReport: () => string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(getReport());
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        } catch {
+          // Clipboard access can be denied; silently ignore.
+        }
+      }}
+      className="inline-flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-sm text-secondary transition-colors hover:border-accent hover:text-foreground"
+      title="Copy system info and runtime status for debugging"
+    >
+      {copied ? <Check className="h-4 w-4 text-emerald-400" /> : <Copy className="h-4 w-4" />}
+      {copied ? "Copied" : "Copy debug info"}
+    </button>
+  );
 }
 
 function linesToList(value: string) {
@@ -3512,24 +3575,23 @@ export function SettingsPage() {
               </div>
             </SectionCard>
 
-            <SectionCard title="Release History" description="What's new in this version.">
+            <SectionCard title="Release History" description="Recent releases and what changed.">
               <div className="space-y-6">
-                <div className="border-l-2 border-accent pl-4">
-                  <h3 className="text-lg font-semibold text-foreground">v0.0.1 - Cove</h3>
-                  <p className="text-xs text-muted mt-1">A modern media library organizer</p>
-                  <ul className="mt-3 space-y-2 text-sm text-secondary">
-                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> New React 19 frontend with Tailwind CSS</li>
-                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> .NET 10 backend with PostgreSQL + pgvector</li>
-                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Extension system with theme support</li>
-                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Real-time job tracking via SignalR</li>
-                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Custom fields on all entity types</li>
-                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Full MetadataServer integration for video tagger</li>
-                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Video filters (brightness, contrast, saturation)</li>
-                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Gallery and image management</li>
-                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Performer, studio, tag, and group management</li>
-                    <li className="flex items-start gap-2"><span className="text-emerald-400 mt-0.5">•</span> Video segments and detections with scrubber integration</li>
-                  </ul>
-                </div>
+                {recentChangelog(3).map((entry) => (
+                  <div key={entry.version} className="border-l-2 border-accent pl-4">
+                    <h3 className="text-lg font-semibold text-foreground">v{entry.version}</h3>
+                    <p className="text-xs text-muted mt-1">
+                      {entry.date}{entry.summary ? ` — ${entry.summary}` : ""}
+                    </p>
+                    <ul className="mt-3 space-y-2 text-sm text-secondary">
+                      {entry.highlights.map((highlight, index) => (
+                        <li key={index} className="flex items-start gap-2">
+                          <span className="text-emerald-400 mt-0.5">•</span> {highlight}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
               </div>
             </SectionCard>
           </>
@@ -3561,7 +3623,11 @@ export function SettingsPage() {
               </SectionCard>
             ) : null}
 
-            <SectionCard title="Runtime Status" description="Effective values reported by the running backend instance.">
+            <SectionCard
+              title="Runtime Status"
+              description="Effective values reported by the running backend instance."
+              actions={<CopyDebugInfoButton getReport={() => buildDebugReport(status, draftState)} />}
+            >
               {statusLoading && !status ? (
                 <div className="flex items-center gap-2 text-sm text-secondary">
                   <Loader2 className="h-4 w-4 animate-spin" /> Loading status...

@@ -72,7 +72,7 @@ public class SystemController(
         var migrationRequired = pending is { Length: > 0 };
 
         return Ok(new SystemStatusDto(
-            Version: GetType().Assembly.GetName().Version?.ToString() ?? "0.1.0",
+            Version: Cove.Core.Common.CoveVersion.Display,
             AppDir: canSeeSensitivePaths ? AppContext.BaseDirectory : null,
             ConfigFile: canSeeSensitivePaths ? configService.ConfigPath : null,
             DatabasePath: "PostgreSQL",

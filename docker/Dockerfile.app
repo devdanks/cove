@@ -71,4 +71,4 @@ EXPOSE 5073
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD curl -fsS http://localhost:5073/health || exit 1
 VOLUME ["/data", "/config", "/generated", "/cache", "/backups"]
 
-ENTRYPOINT ["dotnet", "Cove.Api.dll"]
+ENTRYPOINT ["dotnet", "Cove.dll"]

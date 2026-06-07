@@ -66,6 +66,18 @@ public class ConfigService
                 .ToList(),
             CalculateMd5 = cfg.CalculateMd5,
             EnableFfmpegHwAccel = cfg.EnableFfmpegHwAccel,
+            FfmpegPath = cfg.FfmpegPath,
+            FfprobePath = cfg.FfprobePath,
+            MaxTranscodeSize = cfg.MaxTranscodeSize,
+            MaxStreamingTranscodeSize = cfg.MaxStreamingTranscodeSize,
+            TranscodeHardwareAcceleration = cfg.TranscodeHardwareAcceleration,
+            TranscodeInputArgs = cfg.TranscodeInputArgs,
+            TranscodeOutputArgs = cfg.TranscodeOutputArgs,
+            LiveTranscodeInputArgs = cfg.LiveTranscodeInputArgs,
+            LiveTranscodeOutputArgs = cfg.LiveTranscodeOutputArgs,
+            DrawFunscriptHeatmapRange = cfg.DrawFunscriptHeatmapRange,
+            PreviewPreset = cfg.PreviewPreset,
+            PreviewAudio = cfg.PreviewAudio,
             VideoExtensions = cfg.VideoExtensions,
             ImageExtensions = cfg.ImageExtensions,
             GalleryExtensions = cfg.GalleryExtensions,
@@ -284,6 +296,21 @@ public class ConfigService
             .ToList();
         cfg.CalculateMd5 = dto.CalculateMd5;
         cfg.EnableFfmpegHwAccel = dto.EnableFfmpegHwAccel;
+        cfg.FfmpegPath = string.IsNullOrWhiteSpace(dto.FfmpegPath) ? null : dto.FfmpegPath;
+        cfg.FfprobePath = string.IsNullOrWhiteSpace(dto.FfprobePath) ? null : dto.FfprobePath;
+        cfg.MaxTranscodeSize = dto.MaxTranscodeSize;
+        cfg.MaxStreamingTranscodeSize = dto.MaxStreamingTranscodeSize;
+        if (!string.IsNullOrWhiteSpace(dto.TranscodeHardwareAcceleration))
+            cfg.TranscodeHardwareAcceleration = dto.TranscodeHardwareAcceleration;
+        cfg.TranscodeInputArgs = string.IsNullOrWhiteSpace(dto.TranscodeInputArgs) ? null : dto.TranscodeInputArgs;
+        cfg.TranscodeOutputArgs = string.IsNullOrWhiteSpace(dto.TranscodeOutputArgs) ? null : dto.TranscodeOutputArgs;
+        cfg.LiveTranscodeInputArgs = string.IsNullOrWhiteSpace(dto.LiveTranscodeInputArgs) ? null : dto.LiveTranscodeInputArgs;
+        cfg.LiveTranscodeOutputArgs = string.IsNullOrWhiteSpace(dto.LiveTranscodeOutputArgs) ? null : dto.LiveTranscodeOutputArgs;
+        cfg.DrawFunscriptHeatmapRange = dto.DrawFunscriptHeatmapRange;
+        if (!string.IsNullOrWhiteSpace(dto.PreviewPreset))
+            cfg.PreviewPreset = dto.PreviewPreset;
+        if (!string.IsNullOrWhiteSpace(dto.PreviewAudio))
+            cfg.PreviewAudio = dto.PreviewAudio;
 
         if (dto.VideoExtensions.Count > 0)
             cfg.VideoExtensions = dto.VideoExtensions;

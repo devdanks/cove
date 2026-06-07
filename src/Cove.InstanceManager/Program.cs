@@ -711,7 +711,7 @@ internal sealed class InstanceManagerService
         }
 
         throw new InvalidOperationException(
-            "Could not find Cove.Api next to the manager. Start with --cove-exe <path> to point at Cove.Api. Searched: "
+            "Could not find the Cove executable next to the manager. Start with --cove-exe <path> to point at Cove. Searched: "
             + string.Join(", ", candidates));
     }
 
@@ -722,15 +722,25 @@ internal sealed class InstanceManagerService
 
         foreach (var baseDir in GetLaunchSearchDirectories())
         {
+            // Current executable name is "Cove"; "Cove.Api" is kept as a fallback for
+            // older builds/packages produced before the rename.
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            {
+                yield return Path.Combine(baseDir, "Cove.exe");
                 yield return Path.Combine(baseDir, "Cove.Api.exe");
+            }
             else
+            {
+                yield return Path.Combine(baseDir, "Cove");
                 yield return Path.Combine(baseDir, "Cove.Api");
+            }
 
+            yield return Path.Combine(baseDir, "Cove.dll");
             yield return Path.Combine(baseDir, "Cove.Api.dll");
         }
 
         var configuration = Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration ?? "Debug";
+        yield return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Cove.Api", "bin", configuration, "net10.0", "Cove.dll"));
         yield return Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Cove.Api", "bin", configuration, "net10.0", "Cove.Api.dll"));
     }
 

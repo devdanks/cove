@@ -1189,6 +1189,18 @@ public record CoveConfigDto
     public List<DownloaderPathOverrideDto> DownloaderPathOverrides { get; init; } = [];
     public bool CalculateMd5 { get; init; }
     public bool EnableFfmpegHwAccel { get; init; }
+    public string? FfmpegPath { get; init; }
+    public string? FfprobePath { get; init; }
+    public int MaxTranscodeSize { get; init; }
+    public int MaxStreamingTranscodeSize { get; init; }
+    public string TranscodeHardwareAcceleration { get; init; } = "none";
+    public string? TranscodeInputArgs { get; init; }
+    public string? TranscodeOutputArgs { get; init; }
+    public string? LiveTranscodeInputArgs { get; init; }
+    public string? LiveTranscodeOutputArgs { get; init; }
+    public bool DrawFunscriptHeatmapRange { get; init; }
+    public string PreviewPreset { get; init; } = "slow";
+    public string PreviewAudio { get; init; } = "false";
     public List<string> VideoExtensions { get; init; } = [];
     public List<string> ImageExtensions { get; init; } = [];
     public List<string> GalleryExtensions { get; init; } = [];
