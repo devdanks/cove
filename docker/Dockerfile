@@ -5,6 +5,8 @@ COPY ui/package.json ui/package-lock.json ./
 RUN npm ci --ignore-scripts
 COPY ui/ ./
 RUN mkdir -p /build/src/Cove.Api/wwwroot
+# Changelog lives at repo root and is imported by the UI build (src/data/changelog.ts).
+COPY CHANGELOG.md /build/CHANGELOG.md
 RUN npm run build
 
 # ── Stage 2: Build backend ────────────────────────────────────────

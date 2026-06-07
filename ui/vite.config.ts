@@ -2,7 +2,34 @@ import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
+import fs from "fs";
 import { extensionRuntimeModules, extensionRuntimeVersion } from "./scripts/extension-runtime-contract.ts";
+
+// Exposes the repo-root CHANGELOG.md to the app as `virtual:changelog-raw`.
+// Reading it via fs (instead of a cross-package import) keeps CHANGELOG.md as the
+// single source of truth while staying robust to where the UI is built from
+// (local, CI, or the Docker frontend stage). Falls back to an empty string if absent.
+function changelogPlugin() {
+  const virtualId = "virtual:changelog-raw";
+  const resolvedId = "\0" + virtualId;
+  const changelogPath = path.resolve(__dirname, "..", "CHANGELOG.md");
+  return {
+    name: "cove-changelog",
+    resolveId(id: string) {
+      return id === virtualId ? resolvedId : null;
+    },
+    load(id: string) {
+      if (id !== resolvedId) return null;
+      let raw = "";
+      try {
+        raw = fs.readFileSync(changelogPath, "utf-8");
+      } catch {
+        raw = "";
+      }
+      return `export default ${JSON.stringify(raw)};`;
+    },
+  };
+}
 
 const extensionRuntimeEntries = Object.fromEntries(
   extensionRuntimeModules.map((definition) => [
@@ -60,7 +87,7 @@ export default defineConfig(({ command }) => {
   const useDevRuntimeModules = command === "serve";
 
   return {
-    plugins: [react(), tailwindcss(), extensionRuntimeImportMapPlugin(useDevRuntimeModules)],
+    plugins: [react(), tailwindcss(), changelogPlugin(), extensionRuntimeImportMapPlugin(useDevRuntimeModules)],
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),
@@ -69,10 +96,6 @@ export default defineConfig(({ command }) => {
     server: {
       host: "127.0.0.1",
       port: 5173,
-      // Allow importing files from the repo root (e.g. CHANGELOG.md) during dev.
-      fs: {
-        allow: [path.resolve(__dirname, "..")],
-      },
       proxy: {
         "/api": {
           target: "http://localhost:5073",

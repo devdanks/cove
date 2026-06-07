@@ -1,7 +1,8 @@
 // Single source of truth for the changelog is /CHANGELOG.md at the repo root.
-// We import it as a raw string and parse it here, so the About page and the
-// markdown file never drift. To add a release, edit CHANGELOG.md only.
-import changelogRaw from "../../../CHANGELOG.md?raw";
+// The Vite "cove-changelog" plugin reads that file and exposes it here as a raw
+// string, so the About page and the markdown file never drift. To add a release,
+// edit CHANGELOG.md only.
+import changelogRaw from "virtual:changelog-raw";
 
 export interface ChangelogEntry {
   /** Semantic version without a leading "v", e.g. "0.0.35". */
