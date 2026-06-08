@@ -8,6 +8,12 @@ The About page in the app shows the most recent entries by parsing this file dir
 (via `ui/src/data/changelog.ts`), so this is the single source of truth — edit only
 here. Keep the `## [version] - date` heading format below so the parser can read it.
 
+## [0.0.37] - 2026-06-08
+
+- Improvements to Scan resiliency
+- Fix scan issues with certain paths containing specific emojis
+- Significantly improve scan speed (improved further with additional max tasks setting)
+
 ## [0.0.36] - 2026-06-06
 
 - Release notes/versioning fixes

@@ -557,7 +557,23 @@ public sealed class TextExtractionService
 
         var normalized = string.Join(' ', content
             .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
-        return normalized.Length <= 320 ? normalized : normalized[..320];
+        if (normalized.Length <= 320)
+        {
+            return normalized;
+        }
+
+        // Length/indexing count UTF-16 code units, not characters. Emoji and other
+        // astral characters are surrogate pairs (two code units), so cutting at a fixed
+        // index can split a pair and leave a lone surrogate — invalid UTF-16 that the
+        // Postgres UTF-8 encoder rejects with an EncoderFallbackException. Back off by
+        // one so we never slice through a surrogate pair.
+        var cut = 320;
+        if (char.IsHighSurrogate(normalized[cut - 1]))
+        {
+            cut--;
+        }
+
+        return normalized[..cut];
     }
 
     private static string? TryGetStringProperty(object instance, string propertyName)

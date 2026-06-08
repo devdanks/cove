@@ -10,7 +10,10 @@ public class CoveConfiguration
     public string? FfprobePath { get; set; }
     public string Host { get; set; } = "0.0.0.0";
     public int Port { get; set; } = 5073;
-    public int MaxParallelTasks { get; set; } = 5;
+    // Default for a fresh install: leave ~3 logical processors free for the UI and the
+    // rest of the system, and use the rest. On a typical 8-core/16-thread machine that
+    // is 13; floored at 1 so low-core machines still work. Users can override this.
+    public int MaxParallelTasks { get; set; } = System.Math.Max(1, System.Environment.ProcessorCount - 3);
     public int MaxConcurrentDownloads { get; set; } = 3;
     public List<DownloaderPathOverride> DownloaderPathOverrides { get; set; } = [];
     public bool CalculateMd5 { get; set; }

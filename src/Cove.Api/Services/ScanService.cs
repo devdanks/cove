@@ -1,4 +1,5 @@
 using System.IO.Enumeration;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -167,10 +168,15 @@ public class ScanService(
             var audioExts = new HashSet<string>(cfg.AudioExtensions, StringComparer.OrdinalIgnoreCase);
             var textExts = new HashSet<string>(cfg.TextExtensions, StringComparer.OrdinalIgnoreCase);
             var allExts = videoExts.Union(imageExts).Union(galleryExts).Union(audioExts).Union(textExts).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var processedVideoPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var processedImagePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var processedAudioPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var processedTextPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            // Per-directory cache of caption sidecar files (.vtt/.srt), shared across workers,
+            // so each directory is enumerated once per scan instead of once per video.
+            var captionFilesByDir = new ConcurrentDictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+
+            // Written from multiple scan workers, so these must be concurrent collections.
+            var processedVideoPaths = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
+            var processedImagePaths = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
+            var processedAudioPaths = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
+            var processedTextPaths = new ConcurrentDictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
             var ignoreRuleCache = new Dictionary<string, List<IgnoreRule>>(StringComparer.OrdinalIgnoreCase);
 
             var scanStopwatch = Stopwatch.StartNew();
@@ -252,6 +258,20 @@ public class ScanService(
                 discoveryProgress.IgnoredPathCount,
                 discoveryProgress.UnsupportedFileCount);
 
+            // Overlapping scan targets can surface the same physical file more than once.
+            // De-duplicate by stored path so we never process a file twice, and so the
+            // new-file fast path below can safely skip its existence lookup.
+            if (files.Count > 0)
+            {
+                var beforeDedup = files.Count;
+                files = files
+                    .GroupBy(file => file.StoredPath, StringComparer.OrdinalIgnoreCase)
+                    .Select(group => group.First())
+                    .ToList();
+                if (files.Count != beforeDedup)
+                    logger.LogInformation("Scan de-duplicated {DuplicateCount} discovered file path(s).", beforeDedup - files.Count);
+            }
+
             if (files.Count > 0)
             {
                 // Phase 2: Process files
@@ -265,7 +285,6 @@ public class ScanService(
                     indexStopwatch.ElapsedMilliseconds,
                     existingFiles.Count,
                     files.Count);
-                var folderCache = new Dictionary<string, Folder>(StringComparer.OrdinalIgnoreCase);
 
                 void PublishScanEntityEvent(string entityType, int entityId, bool isUpdate)
                 {
@@ -294,135 +313,191 @@ public class ScanService(
                 var failedCount = 0;
                 var processStopwatch = Stopwatch.StartNew();
                 var lastProcessProgressAt = DateTime.MinValue;
+                var progressLock = new object();
 
+                // Called from multiple workers, so it is fully guarded.
                 void ReportProcessingProgress(bool force, string? path = null)
                 {
-                    var now = DateTime.UtcNow;
-                    if (!force && processedCount % 1000 != 0 && (now - lastProcessProgressAt).TotalSeconds < 1)
-                        return;
+                    lock (progressLock)
+                    {
+                        var now = DateTime.UtcNow;
+                        if (!force && processedCount % 1000 != 0 && (now - lastProcessProgressAt).TotalSeconds < 1)
+                            return;
 
-                    lastProcessProgressAt = now;
-                    var ratio = files.Count == 0 ? 1d : (double)processedCount / files.Count;
-                    var message = $"Checking media files ({processedCount:N0}/{files.Count:N0}; {skippedUnchangedCount:N0} unchanged, {changedOrNewCount:N0} changed/new)";
-                    if (!string.IsNullOrWhiteSpace(path))
-                        message += $": {Path.GetFileName(path)}";
-                    progress.Report(0.15 + (0.70 * ratio), message);
+                        lastProcessProgressAt = now;
+                        var ratio = files.Count == 0 ? 1d : (double)processedCount / files.Count;
+                        var message = $"Checking media files ({processedCount:N0}/{files.Count:N0}; {skippedUnchangedCount:N0} unchanged, {changedOrNewCount:N0} changed/new)";
+                        if (!string.IsNullOrWhiteSpace(path))
+                            message += $": {Path.GetFileName(path)}";
+                        progress.Report(0.15 + (0.70 * ratio), message);
+                    }
                 }
 
+                // Phase 2a: classify every discovered file against the in-memory index.
+                // This is cheap (no I/O, no DB) so it stays single-threaded; it skips
+                // unchanged files and collects only the ones that actually need work.
+                var filesToProcess = new List<(DiscoveredFile File, bool IsKnownFile)>(files.Count);
                 foreach (var file in files)
                 {
                     ct.ThrowIfCancellationRequested();
-                    processedCount++;
 
-                    try
+                    var isKnownFile = existingFiles.TryGetValue(file.StoredPath, out var existingFile);
+                    if (isKnownFile)
                     {
-                        var isKnownFile = existingFiles.TryGetValue(file.StoredPath, out var existingFile);
-                        if (isKnownFile)
+                        var changeReason = GetKnownFileChangeReason(existingFile!, file, options.Rescan);
+                        if (changeReason == ScanFileChangeReason.Unchanged)
                         {
-                            var changeReason = GetKnownFileChangeReason(existingFile!, file, options.Rescan);
-                            if (changeReason == ScanFileChangeReason.Unchanged)
-                            {
-                                skippedUnchangedCount++;
-                                ReportProcessingProgress(false);
-                                continue; // Not modified and metadata present, skip
-                            }
-
-                            switch (changeReason)
-                            {
-                                case ScanFileChangeReason.MetadataProbe:
-                                    metadataProbeCount++;
-                                    break;
-                                case ScanFileChangeReason.SizeChanged:
-                                    sizeChangedCount++;
-                                    break;
-                                case ScanFileChangeReason.ModTimeChanged:
-                                    modTimeChangedCount++;
-                                    break;
-                                case ScanFileChangeReason.RescanForced:
-                                    rescanForcedCount++;
-                                    break;
-                            }
-
-                            var expectedKind = GetExpectedFileKind(
-                                file.Extension,
-                                videoExts,
-                                imageExts,
-                                galleryExts,
-                                audioExts,
-                                textExts);
-                            if (existingFile!.Kind != ExistingFileKind.Unknown
-                                && expectedKind != ExistingFileKind.Unknown
-                                && existingFile.Kind != expectedKind)
-                            {
-                                typeMismatchCount++;
-                                logger.LogWarning(
-                                    "Skipping changed scan path because it already exists as {ExistingKind} but extension maps to {ExpectedKind}: {Path}",
-                                    existingFile.Kind,
-                                    expectedKind,
-                                    file.Path);
-                                ReportProcessingProgress(false);
-                                continue;
-                            }
-                        }
-                        else
-                        {
-                            newFileCount++;
+                            skippedUnchangedCount++;
+                            processedCount++;
+                            ReportProcessingProgress(false);
+                            continue; // Not modified and metadata present, skip
                         }
 
-                        changedOrNewCount++;
-                        ReportProcessingProgress(false, file.Path);
+                        switch (changeReason)
+                        {
+                            case ScanFileChangeReason.MetadataProbe:
+                                metadataProbeCount++;
+                                break;
+                            case ScanFileChangeReason.SizeChanged:
+                                sizeChangedCount++;
+                                break;
+                            case ScanFileChangeReason.ModTimeChanged:
+                                modTimeChangedCount++;
+                                break;
+                            case ScanFileChangeReason.RescanForced:
+                                rescanForcedCount++;
+                                break;
+                        }
 
-                        // Process the file
-                        if (videoExts.Contains(file.Extension))
+                        var expectedKind = GetExpectedFileKind(
+                            file.Extension,
+                            videoExts,
+                            imageExts,
+                            galleryExts,
+                            audioExts,
+                            textExts);
+                        if (existingFile!.Kind != ExistingFileKind.Unknown
+                            && expectedKind != ExistingFileKind.Unknown
+                            && existingFile.Kind != expectedKind)
                         {
-                            processedVideoPaths.Add(file.Path);
-                            var videoFile = await ProcessVideoFileAsync(db, file.Path, null, ct, file.Stat, folderCache, syncCaptions: true);
-                            await db.SaveChangesAsync(ct);
-                            if (videoFile.VideoId.HasValue)
-                                PublishScanEntityEvent("Video", videoFile.VideoId.Value, isKnownFile);
-                            db.ChangeTracker.Clear();
-                        }
-                        else if (imageExts.Contains(file.Extension))
-                        {
-                            processedImagePaths.Add(file.Path);
-                            var image = await ProcessImageFileAsync(db, file.Path, null, ct, file.Stat, folderCache);
-                            await db.SaveChangesAsync(ct);
-                            PublishScanEntityEvent("Image", image.Id, isKnownFile);
-                            db.ChangeTracker.Clear();
-                        }
-                        else if (audioExts.Contains(file.Extension))
-                        {
-                            processedAudioPaths.Add(file.Path);
-                            var audio = await ProcessAudioFileAsync(db, file.Path, null, ct, file.Stat, folderCache);
-                            await db.SaveChangesAsync(ct);
-                            PublishScanEntityEvent("Audio", audio.Id, isKnownFile);
-                            db.ChangeTracker.Clear();
-                        }
-                        else if (textExts.Contains(file.Extension))
-                        {
-                            processedTextPaths.Add(file.Path);
-                            var textDocument = await ProcessTextFileAsync(db, file.Path, null, ct, file.Stat, folderCache);
-                            await db.SaveChangesAsync(ct);
-                            PublishScanEntityEvent("Text", textDocument.Id, isKnownFile);
-                            db.ChangeTracker.Clear();
-                        }
-                        else if (galleryExts.Contains(file.Extension))
-                        {
-                            var gallery = await ProcessGalleryFileAsync(db, file.Path, null, ct, file.Stat, folderCache);
-                            await db.SaveChangesAsync(ct);
-                            PublishScanEntityEvent("Gallery", gallery.Id, isKnownFile);
-                            db.ChangeTracker.Clear();
+                            typeMismatchCount++;
+                            logger.LogWarning(
+                                "Skipping changed scan path because it already exists as {ExistingKind} but extension maps to {ExpectedKind}: {Path}",
+                                existingFile.Kind,
+                                expectedKind,
+                                file.Path);
+                            processedCount++;
+                            ReportProcessingProgress(false);
+                            continue;
                         }
                     }
-                    catch (Exception ex)
+                    else
                     {
-                        failedCount++;
-                        logger.LogError(ex, "Error processing file: {Path}", file.Path);
+                        newFileCount++;
                     }
+
+                    changedOrNewCount++;
+                    filesToProcess.Add((file, isKnownFile));
                 }
+
+                // Phase 2b: process the changed/new files across a fixed pool of workers.
+                // Concurrency is capped at the configured maximum so the UI and other jobs
+                // are not starved (a value of 1 reproduces the original sequential path).
+                // Each worker owns its own DbContext and folder cache because EF contexts
+                // are not thread-safe; shared state is updated via thread-safe primitives,
+                // and each file is isolated by its own try/catch so one failure can never
+                // abort the others.
+                var maxParallelism = Math.Max(1, ResolveMaxParallelism());
+                if (filesToProcess.Count > 0)
+                {
+                    // Never spin up more workers (each opens its own DB connection) than there
+                    // is work for, but otherwise honour the configured concurrency ceiling.
+                    var workerCount = Math.Min(maxParallelism, filesToProcess.Count);
+                    progress.Report(0.15, $"Processing {filesToProcess.Count:N0} changed/new file(s) using up to {workerCount} worker(s)...");
+
+                    var workQueue = new ConcurrentQueue<(DiscoveredFile File, bool IsKnownFile)>(filesToProcess);
+
+                    async Task RunScanWorkerAsync()
+                    {
+                        using var workerScope = scopeFactory.CreateScope();
+                        var workerDb = workerScope.ServiceProvider.GetRequiredService<CoveContext>();
+                        var workerFolderCache = new Dictionary<string, Folder>(StringComparer.OrdinalIgnoreCase);
+
+                        while (workQueue.TryDequeue(out var item))
+                        {
+                            if (ct.IsCancellationRequested)
+                                break;
+
+                            var file = item.File;
+                            var isKnownFile = item.IsKnownFile;
+
+                            try
+                            {
+                                if (videoExts.Contains(file.Extension))
+                                {
+                                    processedVideoPaths.TryAdd(file.Path, 0);
+                                    var videoFile = await ProcessVideoFileAsync(workerDb, file.Path, null, ct, file.Stat, workerFolderCache, syncCaptions: true, knownNew: !isKnownFile, captionFilesByDir: captionFilesByDir);
+                                    await workerDb.SaveChangesAsync(ct);
+                                    if (videoFile.VideoId.HasValue)
+                                        PublishScanEntityEvent("Video", videoFile.VideoId.Value, isKnownFile);
+                                    workerDb.ChangeTracker.Clear();
+                                }
+                                else if (imageExts.Contains(file.Extension))
+                                {
+                                    processedImagePaths.TryAdd(file.Path, 0);
+                                    var image = await ProcessImageFileAsync(workerDb, file.Path, null, ct, file.Stat, workerFolderCache, knownNew: !isKnownFile);
+                                    await workerDb.SaveChangesAsync(ct);
+                                    PublishScanEntityEvent("Image", image.Id, isKnownFile);
+                                    workerDb.ChangeTracker.Clear();
+                                }
+                                else if (audioExts.Contains(file.Extension))
+                                {
+                                    processedAudioPaths.TryAdd(file.Path, 0);
+                                    var audio = await ProcessAudioFileAsync(workerDb, file.Path, null, ct, file.Stat, workerFolderCache, knownNew: !isKnownFile);
+                                    await workerDb.SaveChangesAsync(ct);
+                                    PublishScanEntityEvent("Audio", audio.Id, isKnownFile);
+                                    workerDb.ChangeTracker.Clear();
+                                }
+                                else if (textExts.Contains(file.Extension))
+                                {
+                                    processedTextPaths.TryAdd(file.Path, 0);
+                                    var textDocument = await ProcessTextFileAsync(workerDb, file.Path, null, ct, file.Stat, workerFolderCache, knownNew: !isKnownFile);
+                                    await workerDb.SaveChangesAsync(ct);
+                                    PublishScanEntityEvent("Text", textDocument.Id, isKnownFile);
+                                    workerDb.ChangeTracker.Clear();
+                                }
+                                else if (galleryExts.Contains(file.Extension))
+                                {
+                                    var gallery = await ProcessGalleryFileAsync(workerDb, file.Path, null, ct, file.Stat, workerFolderCache);
+                                    await workerDb.SaveChangesAsync(ct);
+                                    PublishScanEntityEvent("Gallery", gallery.Id, isKnownFile);
+                                    workerDb.ChangeTracker.Clear();
+                                }
+                            }
+                            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                            {
+                                Interlocked.Increment(ref failedCount);
+                                logger.LogError(ex, "Error processing file: {Path}", file.Path);
+
+                                // Discard the failed entity so it can't poison this worker's
+                                // next SaveChanges and cascade into failing later files.
+                                workerDb.ChangeTracker.Clear();
+                            }
+
+                            Interlocked.Increment(ref processedCount);
+                            ReportProcessingProgress(false, file.Path);
+                        }
+                    }
+
+                    var workers = new Task[workerCount];
+                    for (var workerIndex = 0; workerIndex < workerCount; workerIndex++)
+                        workers[workerIndex] = RunScanWorkerAsync();
+                    await Task.WhenAll(workers);
+                    ct.ThrowIfCancellationRequested();
+                }
+
                 ReportProcessingProgress(true);
 
-                await db.SaveChangesAsync(ct);
                 logger.LogInformation(
                     "Scan phase processing completed in {ElapsedMs} ms. Checked {CheckedCount} files; skipped {SkippedCount} unchanged; processed {ChangedOrNewCount} changed/new; new={NewFileCount}, metadataProbe={MetadataProbeCount}, sizeChanged={SizeChangedCount}, modTimeChanged={ModTimeChangedCount}, rescanForced={RescanForcedCount}, typeMismatch={TypeMismatchCount}, failed={FailedCount}.",
                     processStopwatch.ElapsedMilliseconds,
@@ -444,7 +519,16 @@ public class ScanService(
                     await CreateGalleriesFromFoldersAsync(db, cfg.CreateGalleriesFromFolders, ct);
                 }
 
-                await GenerateRequestedAssetsAsync(db, progress, processedVideoPaths, processedImagePaths, processedAudioPaths, processedTextPaths, options, thumbnailService, ct);
+                await GenerateRequestedAssetsAsync(
+                    db,
+                    progress,
+                    new HashSet<string>(processedVideoPaths.Keys, StringComparer.OrdinalIgnoreCase),
+                    new HashSet<string>(processedImagePaths.Keys, StringComparer.OrdinalIgnoreCase),
+                    new HashSet<string>(processedAudioPaths.Keys, StringComparer.OrdinalIgnoreCase),
+                    new HashSet<string>(processedTextPaths.Keys, StringComparer.OrdinalIgnoreCase),
+                    options,
+                    thumbnailService,
+                    ct);
             }
 
             // Phase 5: Extension scan participants
@@ -1258,17 +1342,25 @@ public class ScanService(
         CancellationToken ct,
         FileStat? fileStat = null,
         Dictionary<string, Folder>? folderCache = null,
-        bool syncCaptions = true)
+        bool syncCaptions = true,
+        bool knownNew = false,
+        ConcurrentDictionary<string, IReadOnlyList<string>>? captionFilesByDir = null)
     {
         var stat = fileStat ?? GetFileStat(path);
         var dirPath = NormalizeStoredFolderPath(Path.GetDirectoryName(path) ?? path);
         var folder = await EnsureFolderAsync(db, dirPath, ct, folderCache);
 
         var basename = Path.GetFileName(path);
-        var existingQuery = syncCaptions
-            ? db.VideoFiles.Include(file => file.Captions)
-            : db.VideoFiles.AsQueryable();
-        var existing = await existingQuery.FirstOrDefaultAsync(f => f.ParentFolderId == folder.Id && f.Basename == basename, ct);
+        // When the scan index already established this is a brand-new file, the lookup is
+        // guaranteed to miss — skip the round-trip and go straight to insert.
+        VideoFile? existing = null;
+        if (!knownNew)
+        {
+            var existingQuery = syncCaptions
+                ? db.VideoFiles.Include(file => file.Captions)
+                : db.VideoFiles.AsQueryable();
+            existing = await existingQuery.FirstOrDefaultAsync(f => f.ParentFolderId == folder.Id && f.Basename == basename, ct);
+        }
 
         Video? targetVideo = null;
         if (videoId.HasValue)
@@ -1296,7 +1388,7 @@ public class ScanService(
 
             if (syncCaptions)
             {
-                SyncVideoCaptions(existing, path);
+                SyncVideoCaptions(existing, path, captionFilesByDir);
             }
 
             return existing;
@@ -1328,13 +1420,17 @@ public class ScanService(
             db.VideoFiles.Add(videoFile);
         }
 
-        await EnrichVideoFileAsync(videoFile, path, ct);
+        await EnrichVideoFileAsync(videoFile, path, ct, captionFilesByDir);
 
         logger.LogDebug("Added video file for: {Path}", path);
         return videoFile;
     }
 
-    private async Task EnrichVideoFileAsync(VideoFile videoFile, string path, CancellationToken ct)
+    private async Task EnrichVideoFileAsync(
+        VideoFile videoFile,
+        string path,
+        CancellationToken ct,
+        ConcurrentDictionary<string, IReadOnlyList<string>>? captionFilesByDir = null)
     {
         // Probe with FFprobe for metadata
         await ProbeVideoAsync(videoFile, path, ct);
@@ -1363,12 +1459,15 @@ public class ScanService(
             }
         }
 
-        SyncVideoCaptions(videoFile, path);
+        SyncVideoCaptions(videoFile, path, captionFilesByDir);
     }
 
-    private static void SyncVideoCaptions(VideoFile videoFile, string path)
+    private static void SyncVideoCaptions(
+        VideoFile videoFile,
+        string path,
+        ConcurrentDictionary<string, IReadOnlyList<string>>? captionFilesByDir = null)
     {
-        var sidecars = DiscoverCaptionSidecars(path);
+        var sidecars = DiscoverCaptionSidecars(path, captionFilesByDir);
         var expected = sidecars.ToDictionary(item => item.Filename, StringComparer.OrdinalIgnoreCase);
 
         foreach (var existing in videoFile.Captions.ToList())
@@ -1401,16 +1500,28 @@ public class ScanService(
         }
     }
 
-    private static List<CaptionSidecar> DiscoverCaptionSidecars(string path)
+    private static List<CaptionSidecar> DiscoverCaptionSidecars(
+        string path,
+        ConcurrentDictionary<string, IReadOnlyList<string>>? captionFilesByDir = null)
     {
         var videoDir = Path.GetDirectoryName(path);
         if (videoDir == null || !Directory.Exists(videoDir))
             return [];
 
-        var videoBaseName = Path.GetFileNameWithoutExtension(path);
-        return Directory.EnumerateFiles(videoDir)
-            .Where(f => f.StartsWith(Path.Combine(videoDir, videoBaseName), StringComparison.OrdinalIgnoreCase)
-                && (f.EndsWith(".vtt", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".srt", StringComparison.OrdinalIgnoreCase)))
+        // Enumerating the whole directory once per video is O(files-in-folder) per video —
+        // i.e. O(n^2) for a folder full of videos, which is what made later scans crawl.
+        // Enumerate each directory's caption files (.vtt/.srt) a single time per scan and
+        // reuse the small result for every video in that folder.
+        var captionFiles = captionFilesByDir != null
+            ? captionFilesByDir.GetOrAdd(videoDir, EnumerateCaptionFiles)
+            : EnumerateCaptionFiles(videoDir);
+
+        if (captionFiles.Count == 0)
+            return [];
+
+        var prefix = Path.Combine(videoDir, Path.GetFileNameWithoutExtension(path));
+        return captionFiles
+            .Where(captionFile => captionFile.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
             .Select(captionFile =>
             {
                 var captionFilename = Path.GetFileName(captionFile);
@@ -1431,22 +1542,40 @@ public class ScanService(
             .ToList();
     }
 
+    private static IReadOnlyList<string> EnumerateCaptionFiles(string videoDir)
+    {
+        try
+        {
+            return Directory.EnumerateFiles(videoDir)
+                .Where(f => f.EndsWith(".vtt", StringComparison.OrdinalIgnoreCase)
+                    || f.EndsWith(".srt", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or DirectoryNotFoundException)
+        {
+            return [];
+        }
+    }
+
     private async Task<Image> ProcessImageFileAsync(
         CoveContext db,
         string path,
         int? imageId,
         CancellationToken ct,
         FileStat? fileStat = null,
-        Dictionary<string, Folder>? folderCache = null)
+        Dictionary<string, Folder>? folderCache = null,
+        bool knownNew = false)
     {
         var stat = fileStat ?? GetFileStat(path);
         var dirPath = NormalizeStoredFolderPath(Path.GetDirectoryName(path) ?? path);
         var folder = await EnsureFolderAsync(db, dirPath, ct, folderCache);
 
         var basename = Path.GetFileName(path);
-        var existing = await db.ImageFiles
-            .Include(f => f.Image)
-            .FirstOrDefaultAsync(f => f.ParentFolderId == folder.Id && f.Basename == basename, ct);
+        var existing = knownNew
+            ? null
+            : await db.ImageFiles
+                .Include(f => f.Image)
+                .FirstOrDefaultAsync(f => f.ParentFolderId == folder.Id && f.Basename == basename, ct);
 
         if (existing != null)
         {
@@ -1669,18 +1798,21 @@ public class ScanService(
         int? audioId,
         CancellationToken ct,
         FileStat? fileStat = null,
-        Dictionary<string, Folder>? folderCache = null)
+        Dictionary<string, Folder>? folderCache = null,
+        bool knownNew = false)
     {
         var stat = fileStat ?? GetFileStat(path);
         var dirPath = NormalizeStoredFolderPath(Path.GetDirectoryName(path) ?? path);
         var folder = await EnsureFolderAsync(db, dirPath, ct, folderCache);
 
         var basename = Path.GetFileName(path);
-        var existing = await db.AudioFiles
-            .Include(file => file.Fingerprints)
-            .Include(file => file.Audio)
-            .ThenInclude(audio => audio!.Files)
-            .FirstOrDefaultAsync(file => file.ParentFolderId == folder.Id && file.Basename == basename, ct);
+        var existing = knownNew
+            ? null
+            : await db.AudioFiles
+                .Include(file => file.Fingerprints)
+                .Include(file => file.Audio)
+                .ThenInclude(audio => audio!.Files)
+                .FirstOrDefaultAsync(file => file.ParentFolderId == folder.Id && file.Basename == basename, ct);
 
         if (existing != null)
         {
@@ -1738,18 +1870,21 @@ public class ScanService(
         int? textDocumentId,
         CancellationToken ct,
         FileStat? fileStat = null,
-        Dictionary<string, Folder>? folderCache = null)
+        Dictionary<string, Folder>? folderCache = null,
+        bool knownNew = false)
     {
         var stat = fileStat ?? GetFileStat(path);
         var dirPath = NormalizeStoredFolderPath(Path.GetDirectoryName(path) ?? path);
         var folder = await EnsureFolderAsync(db, dirPath, ct, folderCache);
 
         var basename = Path.GetFileName(path);
-        var existing = await db.TextFiles
-            .Include(file => file.Fingerprints)
-            .Include(file => file.TextDocument)
-            .ThenInclude(text => text!.Files)
-            .FirstOrDefaultAsync(file => file.ParentFolderId == folder.Id && file.Basename == basename, ct);
+        var existing = knownNew
+            ? null
+            : await db.TextFiles
+                .Include(file => file.Fingerprints)
+                .Include(file => file.TextDocument)
+                .ThenInclude(text => text!.Files)
+                .FirstOrDefaultAsync(file => file.ParentFolderId == folder.Id && file.Basename == basename, ct);
 
         if (existing != null)
         {
