@@ -303,6 +303,10 @@ try
         AutomaticDecompression = System.Net.DecompressionMethods.All,
     });
     builder.Services.AddHttpClient<MetadataServerService>();
+    // Lets extensions (AI.Faces) enrich a newly-created performer from a configured metadata server
+    // when a reference/SAIE match is accepted. Singleton so it is shared into extension containers; it
+    // opens its own scope per call.
+    builder.Services.AddSingleton<IReferencePerformerImporter, ReferencePerformerImporter>();
 
     // Extension system
     var extensionsDataDir = CoveDefaultPaths.GetDataSubdirectory("extensions");

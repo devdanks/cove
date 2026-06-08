@@ -452,44 +452,28 @@ public class VideoRepository : IVideoRepository
             : sortQuery.OrderBy(item => item.LastFavoriteAt == null ? 1 : 0).ThenBy(item => item.LastFavoriteAt).Select(item => item.Video);
     }
 
-    private IQueryable<Video> ApplyBitrateCriterion(IQueryable<Video> query, IntCriterion criterion)
+    private static IQueryable<Video> ApplyBitrateCriterion(IQueryable<Video> query, IntCriterion criterion)
     {
-        var val = (long)criterion.Value;
-        var val2 = (long)(criterion.Value2 ?? criterion.Value);
-        var bitRateQuery = query.Select(video => new
-        {
-            Video = video,
-            BitRateKbps = ((_db.VideoFiles
-                .Where(file => file.VideoId == (video.ParentVideoId ?? video.Id))
-                .Max(file => (long?)file.BitRate) ?? 0L) / 1000L),
-        });
+        var valStart = (long)criterion.Value * 1000L;
+        var valEndExclusive = ((long)criterion.Value + 1L) * 1000L;
+        var val2EndExclusive = ((long)(criterion.Value2 ?? criterion.Value) + 1L) * 1000L;
 
         return criterion.Modifier switch
         {
-            CriterionModifier.Equals => bitRateQuery.Where(item => item.BitRateKbps == val).Select(item => item.Video),
-            CriterionModifier.NotEquals => bitRateQuery.Where(item => item.BitRateKbps != val).Select(item => item.Video),
-            CriterionModifier.GreaterThan => bitRateQuery.Where(item => item.BitRateKbps > val).Select(item => item.Video),
-            CriterionModifier.LessThan => bitRateQuery.Where(item => item.BitRateKbps < val).Select(item => item.Video),
-            CriterionModifier.Between => bitRateQuery.Where(item => item.BitRateKbps >= val && item.BitRateKbps <= val2).Select(item => item.Video),
-            CriterionModifier.NotBetween => bitRateQuery.Where(item => item.BitRateKbps < val || item.BitRateKbps > val2).Select(item => item.Video),
+            CriterionModifier.Equals => query.Where(video => video.MaxBitRate >= valStart && video.MaxBitRate < valEndExclusive),
+            CriterionModifier.NotEquals => query.Where(video => video.MaxBitRate < valStart || video.MaxBitRate >= valEndExclusive),
+            CriterionModifier.GreaterThan => query.Where(video => video.MaxBitRate >= valEndExclusive),
+            CriterionModifier.LessThan => query.Where(video => video.MaxBitRate < valStart),
+            CriterionModifier.Between => query.Where(video => video.MaxBitRate >= valStart && video.MaxBitRate < val2EndExclusive),
+            CriterionModifier.NotBetween => query.Where(video => video.MaxBitRate < valStart || video.MaxBitRate >= val2EndExclusive),
             _ => query,
         };
     }
 
-    private IQueryable<Video> ApplyBitrateSort(IQueryable<Video> query, bool desc)
-    {
-        var bitRateQuery = query.Select(video => new
-        {
-            Video = video,
-            BitRate = _db.VideoFiles
-                .Where(file => file.VideoId == (video.ParentVideoId ?? video.Id))
-                .Max(file => (long?)file.BitRate) ?? 0L,
-        });
-
-        return desc
-            ? bitRateQuery.OrderByDescending(item => item.BitRate).ThenByDescending(item => item.Video.Id).Select(item => item.Video)
-            : bitRateQuery.OrderBy(item => item.BitRate).ThenBy(item => item.Video.Id).Select(item => item.Video);
-    }
+    private static IQueryable<Video> ApplyBitrateSort(IQueryable<Video> query, bool desc)
+        => desc
+            ? query.OrderByDescending(video => video.MaxBitRate).ThenByDescending(video => video.Id)
+            : query.OrderBy(video => video.MaxBitRate).ThenBy(video => video.Id);
 
     private static IQueryable<Video> ApplyFileModTimeSort(IQueryable<Video> query, bool desc)
     {

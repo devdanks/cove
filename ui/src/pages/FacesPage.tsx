@@ -52,10 +52,6 @@ const FACE_SORT_OPTIONS = [
   { value: "primary_source_key_desc", label: "Source Z-A" },
   { value: "cover_present_desc", label: "Has cover first" },
   { value: "cover_present_asc", label: "Missing cover first" },
-  { value: "ignored_desc", label: "Ignored first" },
-  { value: "ignored_asc", label: "Ignored last" },
-  { value: "merged_desc", label: "Merged first" },
-  { value: "merged_asc", label: "Merged last" },
 ];
 
 const FACE_CRITERIA: CriterionDefinition[] = [
@@ -210,8 +206,6 @@ function readSuggestionConfidenceLowerBound(value: unknown) {
 function sanitizeFaceFilters(filter: Record<string, unknown>) {
   const next: Record<string, unknown> = {};
   const linked = readTriState(filter.linked);
-  const ignored = readTriState(filter.ignored);
-  const merged = readTriState(filter.merged);
   const minSuggestionConfidence = readMinSuggestionConfidence(filter.minSuggestionConfidence);
   const suggestionConfidenceCriterion = readNumberCriterion(filter.suggestionConfidenceCriterion);
   const labelCriterion = readStringCriterion(filter.labelCriterion);
@@ -227,14 +221,6 @@ function sanitizeFaceFilters(filter: Record<string, unknown>) {
 
   if (linked !== "all") {
     next.linked = linked;
-  }
-
-  if (ignored !== "all") {
-    next.ignored = ignored;
-  }
-
-  if (merged !== "all") {
-    next.merged = merged;
   }
 
   if (minSuggestionConfidence != null) {
@@ -302,7 +288,7 @@ export function FacesPage({ onNavigate }: Props) {
   const canDeleteFaces = canDeleteEntity("face", hasPermission);
   const defaultState = useMemo(() => ({
     filter: { page: 1, perPage: 36, sort: defaultFaceSort } as FindFilter,
-    objectFilter: { linked: "no", ignored: "no", merged: "no" },
+    objectFilter: { linked: "no" },
     displayMode: "grid" as DisplayMode,
   }), []);
   const { filter, setFilter, objectFilter, setObjectFilter, displayMode, setDisplayMode } = useListUrlState({
@@ -314,8 +300,6 @@ export function FacesPage({ onNavigate }: Props) {
     allowInfinitePageSize: true,
   });
   const linked = readTriState(objectFilter.linked);
-  const ignored = readTriState(objectFilter.ignored);
-  const merged = readTriState(objectFilter.merged);
   const minSuggestionConfidence = readMinSuggestionConfidence(objectFilter.minSuggestionConfidence);
   const suggestionConfidenceCriterion = readNumberCriterion(objectFilter.suggestionConfidenceCriterion);
   const labelCriterion = readStringCriterion(objectFilter.labelCriterion);
@@ -345,32 +329,6 @@ export function FacesPage({ onNavigate }: Props) {
         { value: "yes", label: "Linked" },
       ], "Linked state"),
     },
-    {
-      id: "ignored",
-      label: "Ignored state",
-      filterKey: "ignored",
-      defaultValue: "all",
-      isActive: (value) => readTriState(value) !== "all",
-      summarize: (value) => formatTriState(value, "Ignored", "Not ignored"),
-      renderEditor: (value, onChange) => renderSelectFilter(value, onChange, [
-        { value: "all", label: "Ignored and not ignored" },
-        { value: "no", label: "Not ignored" },
-        { value: "yes", label: "Ignored" },
-      ], "Ignored state"),
-    },
-    {
-      id: "merged",
-      label: "Merged state",
-      filterKey: "merged",
-      defaultValue: "all",
-      isActive: (value) => readTriState(value) !== "all",
-      summarize: (value) => formatTriState(value, "Merged", "Not merged"),
-      renderEditor: (value, onChange) => renderSelectFilter(value, onChange, [
-        { value: "all", label: "Merged and not merged" },
-        { value: "no", label: "Not merged" },
-        { value: "yes", label: "Merged" },
-      ], "Merged state"),
-    },
   ], []);
   const [comparison, setComparison] = useState<{ face: Face; suggestion: FaceTopSuggestion } | null>(null);
   const [batchResult, setBatchResult] = useState<FaceBatchOperationResult | null>(null);
@@ -381,8 +339,6 @@ export function FacesPage({ onNavigate }: Props) {
   const query = useMemo(() => ({
     q: filter.q?.trim() || undefined,
     linked: linked === "all" ? undefined : linked === "yes",
-    ignored: ignored === "all" ? undefined : ignored === "yes",
-    merged: merged === "all" ? undefined : merged === "yes",
     mergedIntoFaceId: mergedIntoFaceIdCriterion?.value,
     label: labelCriterion?.value,
     labelModifier: labelCriterion?.modifier,
@@ -415,7 +371,7 @@ export function FacesPage({ onNavigate }: Props) {
     customFieldCriteria,
     page: filter.page ?? 1,
     perPage: filter.perPage ?? 36,
-  }), [appearanceCountCriterion?.modifier, appearanceCountCriterion?.value, appearanceCountCriterion?.value2, customFieldCriteria, detectionCountCriterion?.modifier, detectionCountCriterion?.value, detectionCountCriterion?.value2, filter.direction, filter.page, filter.perPage, filter.q, frameSampleCountCriterion?.modifier, frameSampleCountCriterion?.value, frameSampleCountCriterion?.value2, hasCoverCriterion?.value, ignored, imageCountCriterion?.modifier, imageCountCriterion?.value, imageCountCriterion?.value2, labelCriterion?.modifier, labelCriterion?.value, linked, linkedPerformerIds, merged, mergedIntoFaceIdCriterion?.value, minSuggestionConfidence, primarySourceKeyCriterion?.modifier, primarySourceKeyCriterion?.value, videoCountCriterion?.modifier, videoCountCriterion?.value, videoCountCriterion?.value2, sort, suggestionConfidenceCriterion?.modifier, suggestionConfidenceCriterion?.value, suggestionConfidenceCriterion?.value2, topSuggestionPerformerIds]);
+  }), [appearanceCountCriterion?.modifier, appearanceCountCriterion?.value, appearanceCountCriterion?.value2, customFieldCriteria, detectionCountCriterion?.modifier, detectionCountCriterion?.value, detectionCountCriterion?.value2, filter.direction, filter.page, filter.perPage, filter.q, frameSampleCountCriterion?.modifier, frameSampleCountCriterion?.value, frameSampleCountCriterion?.value2, hasCoverCriterion?.value, imageCountCriterion?.modifier, imageCountCriterion?.value, imageCountCriterion?.value2, labelCriterion?.modifier, labelCriterion?.value, linked, linkedPerformerIds, mergedIntoFaceIdCriterion?.value, minSuggestionConfidence, primarySourceKeyCriterion?.modifier, primarySourceKeyCriterion?.value, videoCountCriterion?.modifier, videoCountCriterion?.value, videoCountCriterion?.value2, sort, suggestionConfidenceCriterion?.modifier, suggestionConfidenceCriterion?.value, suggestionConfidenceCriterion?.value2, topSuggestionPerformerIds]);
   const batchMinConfidence = readSuggestionConfidenceLowerBound(objectFilter.suggestionConfidenceCriterion) ?? minSuggestionConfidence ?? 60;
 
   const listData = useInfiniteListData<Face>({

@@ -94,7 +94,7 @@ public class VideoFilterBehaviorTests
     }
 
     [Fact]
-    public async Task BitrateInterval_GreaterThan_UsesVideoFileBitrate()
+    public async Task BitrateInterval_GreaterThan_UsesMaxBitRateSummary()
     {
         await using var context = CreateContext();
         context.Videos.AddRange(
@@ -102,10 +102,6 @@ public class VideoFilterBehaviorTests
             CreateVideoWithFile("low-bitrate", bitRate: 500_000),
             new Video { Title = "no-file" });
         await context.SaveChangesAsync();
-
-        var videosByTitle = context.Videos.ToDictionary(video => video.Title ?? string.Empty);
-        videosByTitle["high-bitrate"].MaxBitRate = 0;
-        videosByTitle["low-bitrate"].MaxBitRate = 9_000_000;
 
         var repository = new VideoRepository(context);
         var filter = new VideoFilter
@@ -124,7 +120,7 @@ public class VideoFilterBehaviorTests
     }
 
     [Fact]
-    public async Task BitrateSort_UsesVideoFileBitrateWhenSummaryIsStale()
+    public async Task BitrateSort_UsesMaxBitRateSummary()
     {
         await using var context = CreateContext();
         context.Videos.AddRange(
@@ -132,11 +128,6 @@ public class VideoFilterBehaviorTests
             CreateVideoWithFile("low-bitrate", bitRate: 500_000),
             CreateVideoWithFile("mid-bitrate", bitRate: 1_500_000));
         await context.SaveChangesAsync();
-
-        var videosByTitle = context.Videos.ToDictionary(video => video.Title ?? string.Empty);
-        videosByTitle["high-bitrate"].MaxBitRate = 0;
-        videosByTitle["low-bitrate"].MaxBitRate = 9_000_000;
-        videosByTitle["mid-bitrate"].MaxBitRate = 1;
 
         var repository = new VideoRepository(context);
         var (items, totalCount) = await repository.FindAsync(null, new FindFilter

@@ -1722,7 +1722,21 @@ public class ScanService(
                 return gallery;
             }
 
-            logger.LogDebug("Found {Count} images in gallery: {Path}", imageEntries.Count, path);
+            // Wonky zips can contain multiple entries with identical internal paths. Every
+            // image in a gallery shares one virtual folder, so duplicate names collide on the
+            // (ParentFolderId, Basename) unique constraint and fail the entire gallery insert.
+            // Keep the first occurrence of each name (case-sensitive, matching Postgres text).
+            var distinctEntries = imageEntries
+                .GroupBy(entry => entry.FullName, StringComparer.Ordinal)
+                .Select(group => group.First())
+                .ToList();
+            if (distinctEntries.Count != imageEntries.Count)
+                logger.LogWarning(
+                    "Gallery zip contained {DuplicateCount} duplicate entry name(s); keeping one of each: {Path}",
+                    imageEntries.Count - distinctEntries.Count,
+                    path);
+
+            logger.LogDebug("Found {Count} images in gallery: {Path}", distinctEntries.Count, path);
 
             // Create a virtual folder for this zip's contents
             // This ensures images from different zips don't conflict on the unique constraint (ParentFolderId + Basename)
@@ -1736,7 +1750,7 @@ public class ScanService(
             }
 
             // Create Image entities for each image in the zip
-            foreach (var entry in imageEntries)
+            foreach (var entry in distinctEntries)
             {
                 // Create ImageFile record representing the image within the zip
                 // Use FullName to preserve the internal zip path structure and avoid duplicate basenames
@@ -1774,7 +1788,7 @@ public class ScanService(
             // Save all images and their gallery associations
             await db.SaveChangesAsync(ct);
 
-            logger.LogDebug("Added gallery with {Count} images: {Path}", imageEntries.Count, path);
+            logger.LogDebug("Added gallery with {Count} images: {Path}", distinctEntries.Count, path);
         }
         catch (FileNotFoundException)
         {
@@ -1787,6 +1801,11 @@ public class ScanService(
         catch (Exception ex)
         {
             logger.LogError(ex, "Error processing gallery zip file: {Path}", path);
+
+            // Discard any image rows that failed to persist so the caller's next SaveChanges
+            // doesn't retry them and surface the same error a second time. The gallery row
+            // itself was already committed above, so it survives (as an empty gallery).
+            db.ChangeTracker.Clear();
         }
 
         return gallery;

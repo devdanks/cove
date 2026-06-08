@@ -7,6 +7,7 @@ using Cove.Core.Interfaces;
 using Cove.Data;
 using Cove.Data.Repositories;
 using Cove.Data.Services;
+using Cove.Plugins;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -26,9 +27,34 @@ public class FacesController(
     IEnumerable<IFaceSuggester>? faceSuggesters = null,
     ICurrentPrincipalAccessor? principalAccessor = null,
     IFieldProvenanceService? fieldProvenanceService = null,
-    IEnumerable<IFaceSuggestionDecisionHandler>? faceSuggestionDecisionHandlers = null) : ControllerBase
+    IEnumerable<IFaceSuggestionDecisionHandler>? faceSuggestionDecisionHandlers = null,
+    IExtensionServiceExchange? serviceExchange = null) : ControllerBase
 {
     private const int TopSuggestionCandidateCount = 3;
+
+    // Extensions live in isolated DI containers since the extensions-runtime redesign and surface
+    // their face contributions through the cross-extension service exchange. The host-injected
+    // enumerables only carry host registrations (e.g. the EmptyFaceSuggester stub), so merge in the
+    // exchange-published implementations before using them. Without this the face list/detail show
+    // no suggestions because the real AI.Faces suggester never runs.
+    private IReadOnlyList<IFaceSuggester> ActiveSuggesters()
+        => (faceSuggesters ?? Enumerable.Empty<IFaceSuggester>())
+            .Concat(serviceExchange?.GetAll<IFaceSuggester>() ?? [])
+            .Where(suggester => suggester is not EmptyFaceSuggester)
+            .Distinct()
+            .ToArray();
+
+    private IReadOnlyList<IFaceSuggestionDecisionHandler> ActiveSuggestionDecisionHandlers()
+        => (faceSuggestionDecisionHandlers ?? Enumerable.Empty<IFaceSuggestionDecisionHandler>())
+            .Concat(serviceExchange?.GetAll<IFaceSuggestionDecisionHandler>() ?? [])
+            .Distinct()
+            .ToArray();
+
+    private IReadOnlyList<IFaceLifecycleParticipant> ActiveLifecycleParticipants()
+        => faceLifecycleParticipants
+            .Concat(serviceExchange?.GetAll<IFaceLifecycleParticipant>() ?? [])
+            .Distinct()
+            .ToArray();
 
     [HttpGet]
     public async Task<ActionResult<PaginatedResponse<FaceDto>>> List(
@@ -853,8 +879,8 @@ public class FacesController(
 
     private async Task<FaceSuggestionDecisionOutcome?> TryHandleProviderSuggestionDecisionAsync(int faceId, FaceSuggestionDecisionDto dto, string normalizedDecision, CancellationToken cancellationToken)
     {
-        var handlers = (faceSuggestionDecisionHandlers ?? []).ToArray();
-        if (handlers.Length == 0)
+        var handlers = ActiveSuggestionDecisionHandlers();
+        if (handlers.Count == 0)
             return null;
 
         var request = new FaceSuggestionDecisionRequest(faceId, dto.PerformerId, normalizedDecision, dto.SetPerformerImage == true);
@@ -1279,7 +1305,7 @@ public class FacesController(
 
         await facePerformerPropagationService.ApplyLinkChangeAsync(id, face.PerformerId, null, cancellationToken);
 
-        foreach (var participant in faceLifecycleParticipants)
+        foreach (var participant in ActiveLifecycleParticipants())
         {
             await participant.OnDeletingAsync(face, cancellationToken);
         }
@@ -1340,8 +1366,8 @@ public class FacesController(
     {
         // Short-circuit when no real suggesters are registered (only the empty stub).
         // This avoids per-face DB hits for blocked-decision lookups on the list endpoint.
-        var activeSuggesters = (faceSuggesters ?? []).Where(s => s is not EmptyFaceSuggester).ToArray();
-        if (activeSuggesters.Length == 0)
+        var activeSuggesters = ActiveSuggesters();
+        if (activeSuggesters.Count == 0)
         {
             return [];
         }
@@ -1389,8 +1415,8 @@ public class FacesController(
             return [];
         }
 
-        var activeSuggesters = (faceSuggesters ?? []).Where(suggester => suggester is not EmptyFaceSuggester).ToArray();
-        if (activeSuggesters.Length == 0)
+        var activeSuggesters = ActiveSuggesters();
+        if (activeSuggesters.Count == 0)
         {
             return [];
         }
@@ -1448,8 +1474,8 @@ public class FacesController(
     {
         maxResults = Math.Clamp(maxResults, 1, 20);
 
-        var activeSuggesters = (faceSuggesters ?? []).ToArray();
-        if (activeSuggesters.Length == 0)
+        var activeSuggesters = ActiveSuggesters();
+        if (activeSuggesters.Count == 0)
         {
             return [];
         }

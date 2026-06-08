@@ -6,6 +6,7 @@ using Cove.Core.Entities;
 using Cove.Core.Interfaces;
 using Cove.Data;
 using Cove.Data.Services;
+using Cove.Plugins;
 
 using Microsoft.EntityFrameworkCore;
 
@@ -16,12 +17,20 @@ public sealed class AiDataPurgeService(
     IEnumerable<IFaceLifecycleParticipant> faceLifecycleParticipants,
     IBlobService blobService,
     ILogger<AiDataPurgeService> logger,
-    SegmentSpanResolver? segmentSpanResolver = null)
+    SegmentSpanResolver? segmentSpanResolver = null,
+    IExtensionServiceExchange? serviceExchange = null)
 {
     private const int PurgeBatchSize = 5_000;
 
     private readonly CoveContext _db = db;
-    private readonly IReadOnlyList<IFaceLifecycleParticipant> _faceLifecycleParticipants = faceLifecycleParticipants.ToList();
+    // Host registrations plus extension-published participants. Since the extensions-runtime redesign
+    // extensions surface IFaceLifecycleParticipant through the cross-extension exchange rather than the
+    // host container, so merge both sources (deduplicated) before notifying on delete.
+    private readonly IReadOnlyList<IFaceLifecycleParticipant> _faceLifecycleParticipants =
+        faceLifecycleParticipants
+            .Concat(serviceExchange?.GetAll<IFaceLifecycleParticipant>() ?? [])
+            .Distinct()
+            .ToList();
     private readonly IBlobService _blobService = blobService;
     private readonly ILogger<AiDataPurgeService> _logger = logger;
     private readonly SegmentSpanResolver? _segmentSpanResolver = segmentSpanResolver;
